@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow Map - Frontend Test</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .control-group label {
+            font-weight: 500;
+            color: #555;
+        }
+        
+        .control-group input, .control-group select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .control-group button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        
+        .control-group button:hover {
+            background: #0056b3;
+        }
+        
+        #map {
+            height: 500px;
+            width: 100%;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #dc3545;
+        }
+        
+        .status-indicator.online {
+            background: #28a745;
+        }
+        
+        .info-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .info-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #007bff;
+        }
+        
+        .info-card h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+            font-size: 16px;
+        }
+        
+        .info-card p {
+            margin: 5px 0;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗺️ Shadow Map - 前端测试</h1>
+        
+        <div class="status">
+            <div class="status-item">
+                <div class="status-indicator" id="backend-status"></div>
+                <span>后端服务状态</span>
+            </div>
+            <div class="status-item">
+                <div class="status-indicator" id="dem-status"></div>
+                <span>DEM瓦片服务</span>
+            </div>
+            <div class="status-item">
+                <div class="status-indicator" id="leaflet-status"></div>
+                <span>Leaflet地图</span>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="datetime">时间:</label>
+                <input type="datetime-local" id="datetime" />
+                <button onclick="updateShadow()">更新阴影</button>
+            </div>
+            <div class="control-group">
+                <label for="opacity">透明度:</label>
+                <input type="range" id="opacity" min="0" max="1" step="0.1" value="0.7" />
+                <span id="opacity-value">0.7</span>
+            </div>
+            <div class="control-group">
+                <button onclick="testAPI()">测试API</button>
+                <button onclick="resetView()">重置视图</button>
+            </div>
+        </div>
+        
+        <div id="map"></div>
+        
+        <div class="info-panel">
+            <div class="info-card">
+                <h3>🔗 API端点</h3>
+                <p><strong>后端地址:</strong> http://localhost:3001</p>
+                <p><strong>健康检查:</strong> /api/health</p>
+                <p><strong>DEM瓦片:</strong> /api/dem/{z}/{x}/{y}.png</p>
+                <p><strong>DEM信息:</strong> /api/dem/info</p>
+            </div>
+            <div class="info-card">
+                <h3>🎯 测试功能</h3>
+                <p><strong>✅ 基础地图显示</strong></p>
+                <p><strong>✅ DEM瓦片加载</strong></p>
+                <p><strong>🔄 阴影模拟</strong> (准备中)</p>
+                <p><strong>🔄 时间控制</strong> (准备中)</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 配置
+        const API_BASE = 'http://localhost:3001';
+        
+        // 全局变量
+        let map;
+        let demLayer;
+        let shadowLayer;
+        
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 初始化Shadow Map前端测试页面');
+            
+            // 设置默认时间
+            const now = new Date();
+            document.getElementById('datetime').value = formatDateTimeLocal(now);
+            
+            // 透明度控制
+            const opacitySlider = document.getElementById('opacity');
+            const opacityValue = document.getElementById('opacity-value');
+            opacitySlider.addEventListener('input', function() {
+                opacityValue.textContent = this.value;
+                updateOpacity(parseFloat(this.value));
+            });
+            
+            // 初始化地图
+            initMap();
+            
+            // 检查后端状态
+            checkBackendStatus();
+        });
+        
+        // 初始化Leaflet地图
+        function initMap() {
+            console.log('🗺️ 初始化Leaflet地图');
+            
+            // 创建地图 (北京天安门附近)
+            map = L.map('map').setView([39.9042, 116.4074], 15);
+            
+            // 添加基础瓦片层 (OpenStreetMap)
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+            
+            // 添加自定义DEM瓦片层
+            demLayer = L.tileLayer(`${API_BASE}/api/dem/{z}/{x}/{y}.png`, {
+                attribution: 'DEM Data: Shadow Map Backend',
+                opacity: 0.3,
+                maxZoom: 15
+            });
+            
+            // 添加DEM层到地图
+            demLayer.addTo(map);
+            
+            // 地图事件
+            map.on('click', function(e) {
+                console.log('地图点击:', e.latlng);
+                showLocationInfo(e.latlng);
+            });
+            
+            // 更新状态
+            updateStatus('leaflet-status', true);
+            console.log('✅ Leaflet地图初始化完成');
+        }
+        
+        // 检查后端服务状态
+        async function checkBackendStatus() {
+            console.log('🔍 检查后端服务状态');
+            console.log('当前页面地址:', window.location.href);
+            console.log('API地址:', API_BASE);
+            
+            try {
+                // 检查健康状态
+                console.log('正在请求:', `${API_BASE}/api/health`);
+                const healthResponse = await fetch(`${API_BASE}/api/health`);
+                const healthData = await healthResponse.json();
+                
+                if (healthResponse.ok) {
+                    updateStatus('backend-status', true);
+                    console.log('✅ 后端服务正常:', healthData);
+                } else {
+                    throw new Error(`后端服务响应异常: ${healthResponse.status}`);
+                }
+                
+                // 检查DEM服务
+                const demResponse = await fetch(`${API_BASE}/api/dem/info`);
+                const demData = await demResponse.json();
+                
+                if (demResponse.ok) {
+                    updateStatus('dem-status', true);
+                    console.log('✅ DEM服务正常:', demData);
+                } else {
+                    throw new Error(`DEM服务响应异常: ${demResponse.status}`);
+                }
+                
+            } catch (error) {
+                console.error('❌ 后端服务检查失败:', error);
+                updateStatus('backend-status', false);
+                updateStatus('dem-status', false);
+                
+                // 显示详细的错误信息
+                const errorMsg = `后端服务连接失败！
+                
+错误详情: ${error.message}
+当前页面: ${window.location.href}
+后端地址: ${API_BASE}
+
+请检查:
+1. 后端服务是否运行？(npm run dev)
+2. 端口3001是否被占用？
+3. 防火墙是否阻止连接？
+
+提示: 如果使用Live Server，确保后端CORS配置包含127.0.0.1:5500`;
+                
+                alert(errorMsg);
+            }
+        }
+        
+        // 更新状态指示器
+        function updateStatus(elementId, isOnline) {
+            const indicator = document.getElementById(elementId);
+            if (isOnline) {
+                indicator.classList.add('online');
+            } else {
+                indicator.classList.remove('online');
+            }
+        }
+        
+        // 测试API
+        async function testAPI() {
+            console.log('🧪 测试API功能');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/health/detailed`);
+                const data = await response.json();
+                console.log('API测试结果:', data);
+                alert('API测试成功！查看控制台了解详细信息。');
+            } catch (error) {
+                console.error('API测试失败:', error);
+                alert('API测试失败: ' + error.message);
+            }
+        }
+        
+        // 更新阴影
+        function updateShadow() {
+            const datetime = document.getElementById('datetime').value;
+            console.log('🌞 更新阴影时间:', datetime);
+            
+            // TODO: 集成leaflet-shadow-simulator
+            alert('阴影更新功能开发中... 目标时间: ' + datetime);
+        }
+        
+        // 更新透明度
+        function updateOpacity(opacity) {
+            if (demLayer) {
+                demLayer.setOpacity(opacity);
+            }
+        }
+        
+        // 重置视图
+        function resetView() {
+            map.setView([39.9042, 116.4074], 15);
+        }
+        
+        // 显示位置信息
+        function showLocationInfo(latlng) {
+            const popup = L.popup()
+                .setLatLng(latlng)
+                .setContent(`
+                    <div>
+                        <h4>位置信息</h4>
+                        <p><strong>纬度:</strong> ${latlng.lat.toFixed(6)}</p>
+                        <p><strong>经度:</strong> ${latlng.lng.toFixed(6)}</p>
+                        <p><strong>说明:</strong> 点击测试DEM数据</p>
+                    </div>
+                `)
+                .openOn(map);
+        }
+        
+        // 格式化时间为HTML datetime-local格式
+        function formatDateTimeLocal(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            
+            return `${year}-${month}-${day}T${hours}:${minutes}`;
+        }
+    </script>
+</body>
+</html>

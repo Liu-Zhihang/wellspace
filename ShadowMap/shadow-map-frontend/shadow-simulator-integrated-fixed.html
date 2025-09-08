@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>完整阴影模拟器 - 集成版</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- 自定义样式 -->
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 350px;
+            background: white;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            overflow-y: auto;
+            z-index: 1000;
+        }
+
+        .map-container {
+            flex: 1;
+            position: relative;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .control-panel {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .control-panel h3 {
+            margin: 0 0 15px 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 5px;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #34495e;
+        }
+
+        .control-group input, .control-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .control-group input[type="range"] {
+            margin: 10px 0;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            flex: 1;
+            min-width: 80px;
+        }
+
+        button:hover {
+            background: #2980b9;
+        }
+
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .toggle-button {
+            background: #e74c3c;
+        }
+
+        .toggle-button.active {
+            background: #27ae60;
+        }
+
+        .info-panel {
+            padding: 15px;
+            background: #ecf0f1;
+            font-size: 12px;
+            color: #34495e;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .status.info {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .status.warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .layer-controls {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+            margin: 5px 0;
+        }
+
+        .layer-controls input[type="checkbox"] {
+            width: auto;
+            margin-right: 5px;
+        }
+
+        .time-display {
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            background: #34495e;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+
+        .sun-info {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+
+        .coordinates {
+            background: #d1ecf1;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+        
+        .analysis-center {
+            font-size: 16px;
+            text-align: center;
+            line-height: 20px;
+        }
+        
+        .radius-display {
+            display: inline-block;
+            min-width: 40px;
+            text-align: center;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .popup-content h4 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        
+        .popup-content h5 {
+            margin: 10px 0 5px 0;
+            color: #34495e;
+            font-size: 14px;
+        }
+        
+        .shadow-level {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+            border-bottom: 1px dotted #ddd;
+        }
+        
+        .shadow-level:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 侧边栏控制面板 -->
+        <div class="sidebar">
+            <!-- 基本控制 -->
+            <div class="control-panel">
+                <h3>🌞 阴影模拟器</h3>
+                
+                <div class="time-display" id="currentTime">
+                    2025年1月7日 12:00
+                </div>
+
+                <div class="control-group">
+                    <label>📅 日期</label>
+                    <input type="date" id="dateInput" />
+                </div>
+
+                <div class="control-group">
+                    <label>🕐 时间</label>
+                    <input type="time" id="timeInput" />
+                </div>
+
+                <div class="button-group">
+                    <button onclick="setCurrentTime()">当前时间</button>
+                    <button onclick="animateTime()">时间动画</button>
+                </div>
+
+                <div class="sun-info" id="sunInfo">
+                    <strong>太阳信息</strong><br>
+                    高度角: --°<br>
+                    方位角: --°
+                </div>
+            </div>
+
+            <!-- 图层控制 -->
+            <div class="control-panel">
+                <h3>🗺️ 图层控制</h3>
+                
+                <div class="layer-controls">
+                    <input type="checkbox" id="shadowLayer" checked>
+                    <label for="shadowLayer">阴影图层</label>
+                </div>
+
+                <div class="layer-controls">
+                    <input type="checkbox" id="buildingLayer" checked>
+                    <label for="buildingLayer">建筑物图层</label>
+                </div>
+
+                <div class="layer-controls">
+                    <input type="checkbox" id="demLayer">
+                    <label for="demLayer">地形图层</label>
+                </div>
+
+                <div class="control-group">
+                    <label>🎨 阴影颜色</label>
+                    <input type="color" id="shadowColor" value="#01112f">
+                </div>
+
+                <div class="control-group">
+                    <label>👻 阴影透明度: <span id="opacityValue">0.7</span></label>
+                    <input type="range" id="shadowOpacity" min="0" max="1" step="0.1" value="0.7">
+                </div>
+            </div>
+
+            <!-- 位置信息 -->
+            <div class="control-panel">
+                <h3>📍 位置信息</h3>
+                
+                <div class="button-group">
+                    <button onclick="goToBeijing()">北京</button>
+                    <button onclick="goToShanghai()">上海</button>
+                    <button onclick="goToGuangzhou()">广州</button>
+                </div>
+
+                <div class="coordinates" id="coordinates">
+                    纬度: 39.9042°<br>
+                    经度: 116.4074°<br>
+                    缩放: 15
+                </div>
+            </div>
+
+            <!-- 阴影分析工具 -->
+            <div class="control-panel">
+                <h3>🔍 阴影分析工具</h3>
+                
+                <div class="button-group">
+                    <button onclick="enableAreaAnalysis()">区域分析</button>
+                    <button onclick="clearAllAnalysis()">清除分析</button>
+                </div>
+                
+                <div class="button-group">
+                    <button onclick="generateShadowReport()">生成报告</button>
+                    <button onclick="exportShadowData()">导出数据</button>
+                </div>
+                
+                <div class="control-group">
+                    <label>🎯 分析半径 (米)</label>
+                    <input type="range" id="analysisRadius" min="100" max="2000" step="100" value="500">
+                    <span id="radiusValue" class="radius-display">500m</span>
+                </div>
+                
+                <div class="status info" style="font-size: 11px; margin-top: 10px;">
+                    💡 <strong>使用说明:</strong><br>
+                    • 点击地图任意位置进行阴影分析<br>
+                    • 使用"区域分析"进行大范围分析<br>
+                    • API功能已启用，支持高精度计算
+                </div>
+            </div>
+
+            <!-- 状态信息 -->
+            <div class="control-panel">
+                <h3>📊 状态信息</h3>
+                <div id="statusMessages">
+                    <div class="status info">🔑 API密钥已配置</div>
+                    <div class="status info">系统准备就绪</div>
+                </div>
+            </div>
+
+            <!-- 信息面板 -->
+            <div class="info-panel">
+                <strong>💡 使用说明</strong><br>
+                • 调整日期和时间查看不同的阴影效果<br>
+                • 点击地图获取精确的阴影分析数据<br>
+                • 使用区域分析工具进行大范围评估<br>
+                • 支持北京、上海、广州等主要城市<br><br>
+                
+                <strong>🔧 技术栈</strong><br>
+                • DEM数据: 自建地形服务<br>
+                • 建筑物: OpenStreetMap + Overpass API<br>
+                • 阴影计算: leaflet-shadow-simulator + API<br>
+                • 坐标系: WGS84 (EPSG:4326)<br><br>
+                
+                <strong>✨ 新功能</strong><br>
+                • ☀️ 精确日照时长计算<br>
+                • 🔍 点击位置阴影分析<br>
+                • 📊 区域阴影统计报告<br>
+                • 📈 阴影覆盖百分比<br>
+                • 📱 导出分析数据
+            </div>
+        </div>
+
+        <!-- 地图容器 -->
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- JavaScript库 -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
+    <script src="https://unpkg.com/leaflet-shadow-simulator/dist/leaflet-shadow-simulator.umd.min.js"></script>
+
+    <script>
+        // 全局变量
+        let map;
+        let shadeMap;
+        let buildingLayers = L.layerGroup();
+        let demTileLayer;
+        let animationInterval;
+        let currentDate = new Date();
+
+        // 初始化地图
+        function initMap() {
+            map = L.map('map').setView([39.9042, 116.4074], 15);
+            
+            // 添加基础地图
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+
+            // 添加建筑物图层组
+            buildingLayers.addTo(map);
+
+            // 初始化阴影模拟器
+            initShadowSimulator();
+
+            // 绑定地图事件
+            map.on('move', updateCoordinates);
+            map.on('zoom', updateCoordinates);
+            map.on('click', onMapClick);
+
+            // 初始化控件
+            initControls();
+            updateCoordinates();
+            loadCurrentViewBuildings();
+        }
+
+        // 初始化阴影模拟器
+        function initShadowSimulator() {
+            try {
+                shadeMap = L.shadeMap({
+                    date: currentDate,
+                    color: '#01112f',
+                    opacity: 0.7,
+                    apiKey: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Imp3dTkyM0Bjb25uZWN0LmhrdXN0LWd6LmVkdS5jbiIsImNyZWF0ZWQiOjE3NTcyNDMxNzAxMzIsImlhdCI6MTc1NzI0MzE3MH0.Z7ejYmxcuKL3Le1Ydil1uRbP_EOS_wtLA6rsSewDUoA',
+                    terrainSource: {
+                        tileSize: 256,
+                        maxZoom: 15,
+                        getSourceUrl: ({ x, y, z }) => {
+                            // 使用我们自建的DEM服务
+                            return `http://localhost:3002/api/dem/${z}/${x}/${y}.png`;
+                        },
+                        getElevation: ({ r, g, b, a }) => {
+                            // AWS Terrarium格式的高程解析
+                            return (r * 256 + g + b / 256) - 32768;
+                        }
+                    },
+                    getFeatures: async () => {
+                        // 获取当前视图的建筑物数据
+                        return await getCurrentViewBuildings();
+                    }
+                }).addTo(map);
+
+                addStatus('阴影模拟器初始化成功', 'info');
+            } catch (error) {
+                console.error('阴影模拟器初始化失败:', error);
+                addStatus('阴影模拟器初始化失败: ' + error.message, 'error');
+            }
+        }
+
+        // 获取当前视图的建筑物数据
+        async function getCurrentViewBuildings() {
+            if (map.getZoom() < 14) {
+                return []; // 低缩放级别不显示建筑物
+            }
+
+            try {
+                const bounds = map.getBounds();
+                const tiles = getTilesInBounds(bounds, Math.min(map.getZoom(), 17));
+                const buildings = [];
+
+                for (const tile of tiles) {
+                    try {
+                        const response = await fetch(`http://localhost:3002/api/buildings/${tile.z}/${tile.x}/${tile.y}.json`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.features) {
+                                // 转换为shadow-simulator需要的格式
+                                data.features.forEach(feature => {
+                                    if (feature.properties) {
+                                        // 确保有高度属性
+                                        if (!feature.properties.height) {
+                                            feature.properties.height = feature.properties.levels ? 
+                                                feature.properties.levels * 3 : 10; // 默认10米
+                                        }
+                                        // 添加render_height属性（shadow-simulator需要）
+                                        feature.properties.render_height = feature.properties.height;
+                                    }
+                                });
+                                buildings.push(...data.features);
+                            }
+                        }
+                    } catch (error) {
+                        console.warn(`获取建筑物瓦片 ${tile.z}/${tile.x}/${tile.y} 失败:`, error);
+                    }
+                }
+
+                console.log(`获取了 ${buildings.length} 个建筑物用于阴影计算`);
+                return buildings;
+            } catch (error) {
+                console.error('获取建筑物数据失败:', error);
+                return [];
+            }
+        }
+
+        // 计算边界框内的瓦片
+        function getTilesInBounds(bounds, zoom) {
+            const tiles = [];
+            const nw = bounds.getNorthWest();
+            const se = bounds.getSouthEast();
+            
+            const minTile = latLngToTile(nw.lat, nw.lng, zoom);
+            const maxTile = latLngToTile(se.lat, se.lng, zoom);
+            
+            for (let x = minTile.x; x <= maxTile.x; x++) {
+                for (let y = minTile.y; y <= maxTile.y; y++) {
+                    tiles.push({ z: zoom, x: x, y: y });
+                }
+            }
+            
+            return tiles.slice(0, 20); // 限制最大瓦片数量
+        }
+
+        // 经纬度转瓦片坐标
+        function latLngToTile(lat, lng, zoom) {
+            const n = Math.pow(2, zoom);
+            const x = Math.floor((lng + 180) / 360 * n);
+            const y = Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * n);
+            return { x, y };
+        }
+
+        // 加载当前视图的建筑物
+        async function loadCurrentViewBuildings() {
+            if (!document.getElementById('buildingLayer').checked) {
+                return;
+            }
+
+            try {
+                buildingLayers.clearLayers();
+                const buildings = await getCurrentViewBuildings();
+                
+                if (buildings.length > 0) {
+                    const geoJsonLayer = L.geoJSON(buildings, {
+                        style: function(feature) {
+                            const height = feature.properties.height || 10;
+                            const isHighRise = height > 20;
+                            
+                            return {
+                                color: isHighRise ? '#0064ff' : '#ff6b6b',
+                                weight: 1,
+                                fillOpacity: 0.3,
+                                fillColor: isHighRise ? '#0064ff' : '#ff6b6b'
+                            };
+                        },
+                        onEachFeature: function(feature, layer) {
+                            if (feature.properties) {
+                                const props = feature.properties;
+                                layer.bindPopup(`
+                                    <div style="min-width: 200px;">
+                                        <h4>🏢 建筑物信息</h4>
+                                        <p><strong>类型:</strong> ${props.buildingType || '未知'}</p>
+                                        <p><strong>高度:</strong> ${props.height || '未知'}m</p>
+                                        <p><strong>楼层:</strong> ${props.levels || '未知'}</p>
+                                    </div>
+                                `);
+                            }
+                        }
+                    });
+                    
+                    buildingLayers.addLayer(geoJsonLayer);
+                    addStatus(`加载了 ${buildings.length} 个建筑物`, 'info');
+                }
+            } catch (error) {
+                console.error('加载建筑物失败:', error);
+                addStatus('加载建筑物失败: ' + error.message, 'error');
+            }
+        }
+
+        // 初始化控件
+        function initControls() {
+            // 设置当前日期和时间
+            const now = new Date();
+            document.getElementById('dateInput').value = now.toISOString().split('T')[0];
+            document.getElementById('timeInput').value = now.toTimeString().slice(0, 5);
+            
+            // 绑定事件
+            document.getElementById('dateInput').addEventListener('change', updateDateTime);
+            document.getElementById('timeInput').addEventListener('change', updateDateTime);
+            document.getElementById('shadowColor').addEventListener('change', updateShadowColor);
+            document.getElementById('shadowOpacity').addEventListener('input', updateShadowOpacity);
+            document.getElementById('shadowLayer').addEventListener('change', toggleShadowLayer);
+            document.getElementById('buildingLayer').addEventListener('change', toggleBuildingLayer);
+            document.getElementById('demLayer').addEventListener('change', toggleDEMLayer);
+            document.getElementById('analysisRadius').addEventListener('input', updateAnalysisRadius);
+            
+            updateTimeDisplay();
+            updateSunInfo();
+        }
+        
+        // 更新分析半径显示
+        function updateAnalysisRadius() {
+            const radius = document.getElementById('analysisRadius').value;
+            document.getElementById('radiusValue').textContent = radius + 'm';
+        }
+
+        // 更新日期时间
+        function updateDateTime() {
+            const dateStr = document.getElementById('dateInput').value;
+            const timeStr = document.getElementById('timeInput').value;
+            
+            if (dateStr && timeStr) {
+                currentDate = new Date(`${dateStr}T${timeStr}`);
+                if (shadeMap) {
+                    shadeMap.setDate(currentDate);
+                }
+                updateTimeDisplay();
+                updateSunInfo();
+            }
+        }
+
+        // 设置当前时间
+        function setCurrentTime() {
+            const now = new Date();
+            document.getElementById('dateInput').value = now.toISOString().split('T')[0];
+            document.getElementById('timeInput').value = now.toTimeString().slice(0, 5);
+            updateDateTime();
+        }
+
+        // 时间动画
+        function animateTime() {
+            if (animationInterval) {
+                clearInterval(animationInterval);
+                animationInterval = null;
+                addStatus('时间动画已停止', 'info');
+                return;
+            }
+            
+            animationInterval = setInterval(() => {
+                currentDate.setMinutes(currentDate.getMinutes() + 30);
+                
+                if (shadeMap) {
+                    shadeMap.setDate(currentDate);
+                }
+                
+                updateTimeDisplay();
+                updateSunInfo();
+            }, 500);
+            
+            addStatus('时间动画已启动', 'info');
+        }
+
+        // 更新时间显示
+        function updateTimeDisplay() {
+            document.getElementById('currentTime').textContent = 
+                currentDate.toLocaleDateString('zh-CN', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                }) + ' ' + 
+                currentDate.toLocaleTimeString('zh-CN', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+        }
+
+        // 更新太阳信息
+        function updateSunInfo() {
+            if (!map) return;
+            
+            const center = map.getCenter();
+            const sunPosition = SunCalc.getPosition(currentDate, center.lat, center.lng);
+            
+            const altitude = (sunPosition.altitude * 180 / Math.PI).toFixed(1);
+            const azimuth = ((sunPosition.azimuth * 180 / Math.PI) + 180).toFixed(1);
+            
+            document.getElementById('sunInfo').innerHTML = `
+                <strong>太阳信息</strong><br>
+                高度角: ${altitude}°<br>
+                方位角: ${azimuth}°
+            `;
+        }
+
+        // 更新阴影颜色
+        function updateShadowColor() {
+            const color = document.getElementById('shadowColor').value;
+            if (shadeMap) {
+                shadeMap.setColor(color);
+            }
+        }
+
+        // 更新阴影透明度
+        function updateShadowOpacity() {
+            const opacity = document.getElementById('shadowOpacity').value;
+            document.getElementById('opacityValue').textContent = opacity;
+            if (shadeMap) {
+                shadeMap.setOpacity(parseFloat(opacity));
+            }
+        }
+
+        // 切换阴影图层
+        function toggleShadowLayer() {
+            const enabled = document.getElementById('shadowLayer').checked;
+            if (shadeMap) {
+                if (enabled) {
+                    map.addLayer(shadeMap);
+                } else {
+                    map.removeLayer(shadeMap);
+                }
+            }
+        }
+
+        // 切换建筑物图层
+        function toggleBuildingLayer() {
+            const enabled = document.getElementById('buildingLayer').checked;
+            if (enabled) {
+                map.addLayer(buildingLayers);
+                loadCurrentViewBuildings();
+            } else {
+                map.removeLayer(buildingLayers);
+            }
+        }
+
+        // 切换DEM图层
+        function toggleDEMLayer() {
+            const enabled = document.getElementById('demLayer').checked;
+            
+            if (enabled && !demTileLayer) {
+                demTileLayer = L.tileLayer('http://localhost:3002/api/dem/{z}/{x}/{y}.png', {
+                    attribution: '© 自建DEM服务',
+                    maxZoom: 15,
+                    opacity: 0.5
+                });
+            }
+            
+            if (enabled) {
+                demTileLayer.addTo(map);
+                addStatus('地形图层已开启', 'info');
+            } else if (demTileLayer) {
+                map.removeLayer(demTileLayer);
+                addStatus('地形图层已关闭', 'info');
+            }
+        }
+
+        // 跳转到北京
+        function goToBeijing() {
+            map.setView([39.9042, 116.4074], 15);
+            setTimeout(loadCurrentViewBuildings, 1000);
+        }
+
+        // 跳转到上海
+        function goToShanghai() {
+            map.setView([31.2304, 121.4737], 15);
+            setTimeout(loadCurrentViewBuildings, 1000);
+        }
+
+        // 跳转到广州
+        function goToGuangzhou() {
+            map.setView([23.1291, 113.2644], 15);
+            setTimeout(loadCurrentViewBuildings, 1000);
+        }
+
+        // 更新坐标显示
+        function updateCoordinates() {
+            const center = map.getCenter();
+            const zoom = map.getZoom();
+            
+            document.getElementById('coordinates').innerHTML = `
+                纬度: ${center.lat.toFixed(4)}°<br>
+                经度: ${center.lng.toFixed(4)}°<br>
+                缩放: ${zoom}
+            `;
+            
+            updateSunInfo();
+        }
+
+        // 地图点击事件
+        function onMapClick(e) {
+            const { lat, lng } = e.latlng;
+            console.log(`点击位置: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+            
+            // 获取点击位置的阴影分析
+            if (shadeMap) {
+                try {
+                    // 获取日照时长
+                    const hoursOfSun = shadeMap.getHoursOfSun(e.containerPoint.x, e.containerPoint.y);
+                    if (hoursOfSun !== undefined) {
+                        addStatus(`该位置日照时长: ${hoursOfSun.toFixed(1)}小时`, 'info');
+                        
+                        // 显示详细信息弹窗
+                        const popup = L.popup()
+                            .setLatLng(e.latlng)
+                            .setContent(`
+                                <div style="min-width: 200px;">
+                                    <h4>📊 阴影分析</h4>
+                                    <p><strong>📍 位置:</strong> ${lat.toFixed(4)}°, ${lng.toFixed(4)}°</p>
+                                    <p><strong>☀️ 日照时长:</strong> ${hoursOfSun.toFixed(1)} 小时</p>
+                                    <p><strong>🌑 阴影覆盖:</strong> ${((24 - hoursOfSun) / 24 * 100).toFixed(1)}%</p>
+                                    <p><strong>📅 日期:</strong> ${currentDate.toLocaleDateString()}</p>
+                                    <button onclick="analyzeShadowArea(${lat}, ${lng})" style="margin-top: 10px; padding: 5px 10px; background: #3498db; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                                        🔍 详细分析
+                                    </button>
+                                </div>
+                            `)
+                            .openOn(map);
+                    }
+                    
+                    // 获取阴影状态
+                    if (shadeMap.getShadeAtPoint) {
+                        const shadeLevel = shadeMap.getShadeAtPoint(e.containerPoint.x, e.containerPoint.y);
+                        if (shadeLevel !== undefined) {
+                            addStatus(`阴影强度: ${(shadeLevel * 100).toFixed(1)}%`, 'info');
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.warn('阴影分析失败:', error);
+                    addStatus('点击阴影分析失败: ' + error.message, 'warning');
+                }
+            }
+        }
+
+        // 区域阴影分析
+        function analyzeShadowArea(lat, lng) {
+            if (!shadeMap) {
+                addStatus('阴影模拟器未初始化', 'error');
+                return;
+            }
+            
+            try {
+                // 创建分析区域 (500米半径)
+                const radius = 500; // 米
+                const circle = L.circle([lat, lng], {
+                    radius: radius,
+                    color: '#e74c3c',
+                    fillColor: '#e74c3c',
+                    fillOpacity: 0.2,
+                    weight: 2
+                }).addTo(map);
+                
+                // 分析区域内的阴影情况
+                const bounds = circle.getBounds();
+                const center = bounds.getCenter();
+                
+                // 获取多个采样点的阴影数据
+                const samplePoints = [];
+                const gridSize = 5; // 5x5网格
+                
+                for (let i = 0; i < gridSize; i++) {
+                    for (let j = 0; j < gridSize; j++) {
+                        const latOffset = (bounds.getNorth() - bounds.getSouth()) * (i / (gridSize - 1));
+                        const lngOffset = (bounds.getEast() - bounds.getWest()) * (j / (gridSize - 1));
+                        
+                        const sampleLat = bounds.getSouth() + latOffset;
+                        const sampleLng = bounds.getWest() + lngOffset;
+                        
+                        const point = map.latLngToContainerPoint([sampleLat, sampleLng]);
+                        
+                        if (shadeMap.getHoursOfSun) {
+                            const hoursOfSun = shadeMap.getHoursOfSun(point.x, point.y);
+                            if (hoursOfSun !== undefined) {
+                                samplePoints.push({
+                                    lat: sampleLat,
+                                    lng: sampleLng,
+                                    hoursOfSun: hoursOfSun,
+                                    shadowPercent: ((24 - hoursOfSun) / 24 * 100)
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                if (samplePoints.length > 0) {
+                    // 计算统计数据
+                    const avgHoursOfSun = samplePoints.reduce((sum, p) => sum + p.hoursOfSun, 0) / samplePoints.length;
+                    const avgShadowPercent = samplePoints.reduce((sum, p) => sum + p.shadowPercent, 0) / samplePoints.length;
+                    const maxShadowPercent = Math.max(...samplePoints.map(p => p.shadowPercent));
+                    const minShadowPercent = Math.min(...samplePoints.map(p => p.shadowPercent));
+                    
+                    // 显示分析结果
+                    const popup = L.popup()
+                        .setLatLng([lat, lng])
+                        .setContent(`
+                            <div style="min-width: 280px;">
+                                <h4>🔍 区域阴影分析报告</h4>
+                                <p><strong>📍 分析中心:</strong> ${lat.toFixed(4)}°, ${lng.toFixed(4)}°</p>
+                                <p><strong>📏 分析半径:</strong> ${radius}米</p>
+                                <p><strong>📊 采样点数:</strong> ${samplePoints.length}个</p>
+                                <hr style="margin: 10px 0;">
+                                <p><strong>☀️ 平均日照:</strong> ${avgHoursOfSun.toFixed(1)} 小时</p>
+                                <p><strong>🌑 平均阴影:</strong> ${avgShadowPercent.toFixed(1)}%</p>
+                                <p><strong>📈 阴影范围:</strong> ${minShadowPercent.toFixed(1)}% - ${maxShadowPercent.toFixed(1)}%</p>
+                                <hr style="margin: 10px 0;">
+                                <p><strong>📅 分析日期:</strong> ${currentDate.toLocaleDateString()}</p>
+                                <p><strong>🕐 分析时间:</strong> ${currentDate.toLocaleTimeString().slice(0, 5)}</p>
+                                <button onclick="clearAnalysisArea()" style="margin-top: 10px; padding: 5px 10px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                                    ❌ 清除分析
+                                </button>
+                            </div>
+                        `)
+                        .openOn(map);
+                        
+                    // 保存分析圆圈引用
+                    window.currentAnalysisCircle = circle;
+                    
+                    addStatus(`区域阴影分析完成: 平均阴影覆盖 ${avgShadowPercent.toFixed(1)}%`, 'info');
+                } else {
+                    addStatus('无法获取该区域的阴影数据', 'warning');
+                    map.removeLayer(circle);
+                }
+                
+            } catch (error) {
+                console.error('区域阴影分析失败:', error);
+                addStatus('区域阴影分析失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 启用区域分析模式
+        function enableAreaAnalysis() {
+            addStatus('请在地图上点击要分析的区域中心点', 'info');
+            
+            // 改变鼠标样式
+            map.getContainer().style.cursor = 'crosshair';
+            
+            // 临时改变点击事件
+            map.off('click', onMapClick);
+            map.once('click', function(e) {
+                map.getContainer().style.cursor = '';
+                const radius = document.getElementById('analysisRadius').value;
+                analyzeShadowAreaWithRadius(e.latlng.lat, e.latlng.lng, parseInt(radius));
+                map.on('click', onMapClick);
+            });
+        }
+
+        // 带自定义半径的区域分析
+        function analyzeShadowAreaWithRadius(lat, lng, radius) {
+            if (!shadeMap) {
+                addStatus('阴影模拟器未初始化', 'error');
+                return;
+            }
+            
+            try {
+                // 清除之前的分析
+                if (window.currentAnalysisCircle) {
+                    map.removeLayer(window.currentAnalysisCircle);
+                }
+                
+                // 创建分析区域
+                const circle = L.circle([lat, lng], {
+                    radius: radius,
+                    color: '#3498db',
+                    fillColor: '#3498db',
+                    fillOpacity: 0.2,
+                    weight: 2
+                }).addTo(map);
+                
+                // 添加中心点标记
+                const centerMarker = L.marker([lat, lng], {
+                    icon: L.divIcon({
+                        className: 'analysis-center',
+                        html: '🎯',
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    })
+                }).addTo(map);
+                
+                // 分析区域内的阴影情况
+                const bounds = circle.getBounds();
+                const samplePoints = [];
+                const gridSize = Math.min(10, Math.max(5, Math.floor(radius / 100))); // 根据半径调整网格密度
+                
+                for (let i = 0; i < gridSize; i++) {
+                    for (let j = 0; j < gridSize; j++) {
+                        const latOffset = (bounds.getNorth() - bounds.getSouth()) * (i / (gridSize - 1));
+                        const lngOffset = (bounds.getEast() - bounds.getWest()) * (j / (gridSize - 1));
+                        
+                        const sampleLat = bounds.getSouth() + latOffset;
+                        const sampleLng = bounds.getWest() + lngOffset;
+                        
+                        const point = map.latLngToContainerPoint([sampleLat, sampleLng]);
+                        
+                        if (shadeMap.getHoursOfSun) {
+                            const hoursOfSun = shadeMap.getHoursOfSun(point.x, point.y);
+                            if (hoursOfSun !== undefined) {
+                                samplePoints.push({
+                                    lat: sampleLat,
+                                    lng: sampleLng,
+                                    hoursOfSun: hoursOfSun,
+                                    shadowPercent: ((24 - hoursOfSun) / 24 * 100)
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                if (samplePoints.length > 0) {
+                    // 计算详细统计数据
+                    const avgHoursOfSun = samplePoints.reduce((sum, p) => sum + p.hoursOfSun, 0) / samplePoints.length;
+                    const avgShadowPercent = samplePoints.reduce((sum, p) => sum + p.shadowPercent, 0) / samplePoints.length;
+                    const maxShadowPercent = Math.max(...samplePoints.map(p => p.shadowPercent));
+                    const minShadowPercent = Math.min(...samplePoints.map(p => p.shadowPercent));
+                    const stdDev = Math.sqrt(samplePoints.reduce((sum, p) => sum + Math.pow(p.shadowPercent - avgShadowPercent, 2), 0) / samplePoints.length);
+                    
+                    // 阴影等级分布
+                    const shadowLevels = {
+                        无阴影: samplePoints.filter(p => p.shadowPercent < 10).length,
+                        轻微阴影: samplePoints.filter(p => p.shadowPercent >= 10 && p.shadowPercent < 25).length,
+                        中等阴影: samplePoints.filter(p => p.shadowPercent >= 25 && p.shadowPercent < 50).length,
+                        重度阴影: samplePoints.filter(p => p.shadowPercent >= 50 && p.shadowPercent < 75).length,
+                        极重阴影: samplePoints.filter(p => p.shadowPercent >= 75).length
+                    };
+                    
+                    // 显示详细分析结果
+                    const popup = L.popup()
+                        .setLatLng([lat, lng])
+                        .setContent(`
+                            <div style="min-width: 320px; max-height: 400px; overflow-y: auto;">
+                                <h4>📊 高级区域阴影分析</h4>
+                                <p><strong>📍 分析中心:</strong> ${lat.toFixed(4)}°, ${lng.toFixed(4)}°</p>
+                                <p><strong>📏 分析半径:</strong> ${radius}米 (${(Math.PI * radius * radius / 10000).toFixed(2)}公顷)</p>
+                                <p><strong>📊 采样点数:</strong> ${samplePoints.length}个 (${gridSize}×${gridSize}网格)</p>
+                                
+                                <hr style="margin: 10px 0;">
+                                <h5>☀️ 日照统计</h5>
+                                <p><strong>平均日照:</strong> ${avgHoursOfSun.toFixed(1)} 小时/天</p>
+                                <p><strong>平均阴影:</strong> ${avgShadowPercent.toFixed(1)}%</p>
+                                <p><strong>阴影范围:</strong> ${minShadowPercent.toFixed(1)}% - ${maxShadowPercent.toFixed(1)}%</p>
+                                <p><strong>标准差:</strong> ${stdDev.toFixed(1)}%</p>
+                                
+                                <hr style="margin: 10px 0;">
+                                <h5>🌑 阴影分布</h5>
+                                <div style="font-size: 11px;">
+                                    <p>☀️ 无阴影 (<10%): ${shadowLevels.无阴影}点 (${(shadowLevels.无阴影/samplePoints.length*100).toFixed(1)}%)</p>
+                                    <p>🌤️ 轻微阴影 (10-25%): ${shadowLevels.轻微阴影}点 (${(shadowLevels.轻微阴影/samplePoints.length*100).toFixed(1)}%)</p>
+                                    <p>⛅ 中等阴影 (25-50%): ${shadowLevels.中等阴影}点 (${(shadowLevels.中等阴影/samplePoints.length*100).toFixed(1)}%)</p>
+                                    <p>☁️ 重度阴影 (50-75%): ${shadowLevels.重度阴影}点 (${(shadowLevels.重度阴影/samplePoints.length*100).toFixed(1)}%)</p>
+                                    <p>🌑 极重阴影 (>75%): ${shadowLevels.极重阴影}点 (${(shadowLevels.极重阴影/samplePoints.length*100).toFixed(1)}%)</p>
+                                </div>
+                                
+                                <hr style="margin: 10px 0;">
+                                <p><strong>📅 分析时间:</strong> ${currentDate.toLocaleString()}</p>
+                                
+                                <div style="margin-top: 10px;">
+                                    <button onclick="clearAllAnalysis()" style="padding: 5px 10px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px;">
+                                        ❌ 清除
+                                    </button>
+                                    <button onclick="saveAnalysisData()" style="padding: 5px 10px; background: #27ae60; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                                        💾 保存
+                                    </button>
+                                </div>
+                            </div>
+                        `)
+                        .openOn(map);
+                        
+                    // 保存分析数据
+                    window.currentAnalysisData = {
+                        circle: circle,
+                        marker: centerMarker,
+                        data: samplePoints,
+                        stats: {
+                            avgHoursOfSun,
+                            avgShadowPercent,
+                            maxShadowPercent,
+                            minShadowPercent,
+                            stdDev,
+                            shadowLevels
+                        },
+                        metadata: {
+                            center: [lat, lng],
+                            radius: radius,
+                            date: new Date(currentDate),
+                            sampleCount: samplePoints.length
+                        }
+                    };
+                    
+                    addStatus(`区域阴影分析完成: ${radius}米半径，平均阴影 ${avgShadowPercent.toFixed(1)}%`, 'info');
+                } else {
+                    addStatus('无法获取该区域的阴影数据', 'warning');
+                    map.removeLayer(circle);
+                    map.removeLayer(centerMarker);
+                }
+                
+            } catch (error) {
+                console.error('区域阴影分析失败:', error);
+                addStatus('区域阴影分析失败: ' + error.message, 'error');
+            }
+        }
+
+        // 清除所有分析
+        function clearAllAnalysis() {
+            if (window.currentAnalysisData) {
+                map.removeLayer(window.currentAnalysisData.circle);
+                map.removeLayer(window.currentAnalysisData.marker);
+                window.currentAnalysisData = null;
+            }
+            if (window.currentAnalysisCircle) {
+                map.removeLayer(window.currentAnalysisCircle);
+                window.currentAnalysisCircle = null;
+            }
+            map.closePopup();
+            addStatus('已清除所有分析数据', 'info');
+        }
+        
+        // 清除分析区域 (兼容旧版本)
+        function clearAnalysisArea() {
+            clearAllAnalysis();
+        }
+
+        // 生成阴影报告
+        function generateShadowReport() {
+            if (!window.currentAnalysisData) {
+                addStatus('请先进行区域分析', 'warning');
+                return;
+            }
+            
+            const data = window.currentAnalysisData;
+            const report = `
+# 阴影分析报告
+
+## 基本信息
+- **分析位置**: ${data.metadata.center[0].toFixed(6)}°, ${data.metadata.center[1].toFixed(6)}°
+- **分析半径**: ${data.metadata.radius}米
+- **分析面积**: ${(Math.PI * data.metadata.radius * data.metadata.radius / 10000).toFixed(2)}公顷
+- **分析时间**: ${data.metadata.date.toLocaleString()}
+- **采样点数**: ${data.metadata.sampleCount}个
+
+## 统计结果
+- **平均日照时长**: ${data.stats.avgHoursOfSun.toFixed(2)}小时/天
+- **平均阴影覆盖**: ${data.stats.avgShadowPercent.toFixed(2)}%
+- **阴影覆盖范围**: ${data.stats.minShadowPercent.toFixed(2)}% - ${data.stats.maxShadowPercent.toFixed(2)}%
+- **标准差**: ${data.stats.stdDev.toFixed(2)}%
+
+## 阴影分布
+- **无阴影区域** (<10%): ${(data.stats.shadowLevels.无阴影/data.metadata.sampleCount*100).toFixed(1)}%
+- **轻微阴影区域** (10-25%): ${(data.stats.shadowLevels.轻微阴影/data.metadata.sampleCount*100).toFixed(1)}%
+- **中等阴影区域** (25-50%): ${(data.stats.shadowLevels.中等阴影/data.metadata.sampleCount*100).toFixed(1)}%
+- **重度阴影区域** (50-75%): ${(data.stats.shadowLevels.重度阴影/data.metadata.sampleCount*100).toFixed(1)}%
+- **极重阴影区域** (>75%): ${(data.stats.shadowLevels.极重阴影/data.metadata.sampleCount*100).toFixed(1)}%
+
+---
+报告生成时间: ${new Date().toLocaleString()}
+            `.trim();
+            
+            // 复制到剪贴板
+            navigator.clipboard.writeText(report).then(() => {
+                addStatus('阴影分析报告已复制到剪贴板', 'info');
+            }).catch(() => {
+                // 降级方案：显示报告
+                const reportWindow = window.open('', '_blank');
+                reportWindow.document.write(`<pre style="font-family: monospace; white-space: pre-wrap; padding: 20px;">${report}</pre>`);
+                addStatus('阴影分析报告已在新窗口中打开', 'info');
+            });
+        }
+
+        // 导出阴影数据
+        function exportShadowData() {
+            if (!window.currentAnalysisData) {
+                addStatus('请先进行区域分析', 'warning');
+                return;
+            }
+            
+            const data = window.currentAnalysisData;
+            const exportData = {
+                metadata: data.metadata,
+                statistics: data.stats,
+                samplePoints: data.data.map(point => ({
+                    latitude: point.lat,
+                    longitude: point.lng,
+                    hoursOfSun: point.hoursOfSun,
+                    shadowPercentage: point.shadowPercent
+                }))
+            };
+            
+            // 创建下载链接
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `shadow-analysis-${data.metadata.date.toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            addStatus('阴影分析数据已导出', 'info');
+        }
+
+        // 保存分析数据
+        function saveAnalysisData() {
+            if (window.currentAnalysisData) {
+                localStorage.setItem('shadowAnalysisData', JSON.stringify(window.currentAnalysisData.data));
+                localStorage.setItem('shadowAnalysisMetadata', JSON.stringify(window.currentAnalysisData.metadata));
+                addStatus('分析数据已保存到本地', 'info');
+            }
+        }
+
+        // 添加状态消息
+        function addStatus(message, type = 'info') {
+            const container = document.getElementById('statusMessages');
+            const statusDiv = document.createElement('div');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            
+            container.insertBefore(statusDiv, container.firstChild);
+            
+            // 限制消息数量
+            while (container.children.length > 5) {
+                container.removeChild(container.lastChild);
+            }
+            
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('完整阴影模拟器初始化中...');
+            initMap();
+            addStatus('完整阴影模拟器已启动', 'info');
+        });
+
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', function() {
+            if (animationInterval) {
+                clearInterval(animationInterval);
+            }
+        });
+    </script>
+</body>
+</html>

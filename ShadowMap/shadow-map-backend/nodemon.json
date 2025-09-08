@@ -1,0 +1,14 @@
+{
+  "watch": ["src"],
+  "ext": "ts,js,json",
+  "ignore": ["src/**/*.test.ts", "dist/**/*"],
+  "exec": "ts-node --transpile-only src/server.ts",
+  "env": {
+    "NODE_ENV": "development",
+    "TS_NODE_TRANSPILE_ONLY": "true"
+  },
+  "delay": "1000",
+  "verbose": true,
+  "restartable": "rs",
+  "colours": true
+}

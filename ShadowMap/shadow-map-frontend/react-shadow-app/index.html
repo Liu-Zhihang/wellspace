@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>阴影地图分析系统</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- 加载 Leaflet -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- 加载 SunCalc -->
+    <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
+    <script>
+      // 调试信息
+      window.addEventListener('load', function() {
+        setTimeout(() => {
+          console.log('页面加载完成，检查插件状态:');
+          console.log('Leaflet:', typeof L !== 'undefined' ? '已加载' : '未加载');
+          console.log('SunCalc:', typeof SunCalc !== 'undefined' ? '已加载' : '未加载');
+          console.log('Shadow Simulator:', typeof L !== 'undefined' && L.shadeMap ? '已加载' : '未加载');
+          
+          if (typeof L !== 'undefined') {
+            console.log('L.shadeMap 函数:', L.shadeMap || '未定义');
+            
+            if (L.shadeMap) {
+              console.log('✅ Shadow Simulator 已成功加载');
+            } else {
+              console.log('❌ Shadow Simulator 未加载');
+            }
+          }
+        }, 2000); // 增加延迟确保 React 组件加载完成
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

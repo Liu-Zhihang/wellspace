@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>建筑物API测试</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: 400px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .info-panel {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .test-results {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #d4edda;
+        }
+        .error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>🏢 建筑物API测试页面</h1>
+    
+    <div class="info-panel">
+        <h3>测试说明</h3>
+        <p>这个页面用于测试建筑物数据API的集成。点击下面的按钮来测试不同的API端点。</p>
+        <p><strong>后端地址:</strong> http://localhost:3001</p>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="test-controls">
+        <h3>API测试</h3>
+        <button id="btn-info">测试建筑物信息API</button>
+        <button id="btn-tile">测试建筑物瓦片API</button>
+        <button id="btn-preload">测试建筑物预加载API</button>
+    </div>
+
+    <div id="results" class="test-results">
+        <h3>测试结果</h3>
+        <div id="output">点击上面的按钮开始测试...</div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 初始化地图（带错误处理）
+        let map;
+        try {
+            map = L.map('map').setView([39.9042, 116.4074], 15);
+            
+            // 添加OpenStreetMap底图
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // 添加DEM瓦片图层（如果可用）
+            const demLayer = L.tileLayer('http://localhost:3001/api/dem/{z}/{x}/{y}.png', {
+                attribution: 'DEM Data',
+                opacity: 0.6
+            }).addTo(map);
+            
+            console.log('地图初始化成功');
+        } catch (error) {
+            console.error('地图初始化失败:', error);
+            // 即使地图初始化失败，API测试功能仍然可以工作
+        }
+
+        // 显示结果的函数
+        function showResult(title, data, isError = false) {
+            const output = document.getElementById('output');
+            const resultDiv = document.createElement('div');
+            resultDiv.innerHTML = `
+                <h4>${title}</h4>
+                <pre>${typeof data === 'object' ? JSON.stringify(data, null, 2) : data}</pre>
+                <small>测试时间: ${new Date().toLocaleString()}</small>
+                <hr>
+            `;
+            
+            if (isError) {
+                resultDiv.className = 'error';
+            }
+            
+            output.insertBefore(resultDiv, output.firstChild);
+        }
+
+        // 测试建筑物信息API
+        async function testBuildingInfo() {
+            try {
+                showResult('🔄 正在测试建筑物信息API...', '请求中...');
+                
+                const response = await fetch('http://localhost:3001/api/buildings/info');
+                const data = await response.json();
+                
+                showResult('✅ 建筑物信息API测试成功', data);
+            } catch (error) {
+                showResult('❌ 建筑物信息API测试失败', error.message, true);
+            }
+        }
+
+        // 测试建筑物瓦片API
+        async function testBuildingTile() {
+            try {
+                showResult('🔄 正在测试建筑物瓦片API...', '请求中...');
+                
+                // 使用北京市中心的瓦片坐标
+                const z = 16;
+                const x = 53957;
+                const y = 24832;
+                
+                const response = await fetch(`http://localhost:3001/api/buildings/${z}/${x}/${y}.json`);
+                const data = await response.json();
+                
+                showResult(`✅ 建筑物瓦片API测试成功 (${z}/${x}/${y})`, {
+                    tileInfo: data.tileInfo,
+                    buildingCount: data.features.length,
+                    bbox: data.bbox,
+                    sampleBuilding: data.features[0] || '无建筑物数据'
+                });
+                
+                // 如果有建筑物数据，在地图上显示
+                if (data.features && data.features.length > 0 && map) {
+                    try {
+                        const geoJsonLayer = L.geoJSON(data, {
+                            style: {
+                                color: '#ff0000',
+                                weight: 2,
+                                fillOpacity: 0.3
+                            },
+                            onEachFeature: function(feature, layer) {
+                                if (feature.properties) {
+                                    layer.bindPopup(`
+                                        <strong>建筑物</strong><br>
+                                        类型: ${feature.properties.buildingType || '未知'}<br>
+                                        高度: ${feature.properties.height || '未知'}m<br>
+                                        楼层: ${feature.properties.levels || '未知'}
+                                    `);
+                                }
+                            }
+                        }).addTo(map);
+                    } catch (error) {
+                        console.error('地图显示建筑物失败:', error);
+                    }
+                }
+                
+            } catch (error) {
+                showResult('❌ 建筑物瓦片API测试失败', error.message, true);
+            }
+        }
+
+        // 测试建筑物预加载API
+        async function testBuildingPreload() {
+            try {
+                showResult('🔄 正在测试建筑物预加载API...', '请求中...');
+                
+                const lng = 116.4074;
+                const lat = 39.9042;
+                const radius = 1; // 1公里
+                const zoom = 16;
+                
+                const response = await fetch(`http://localhost:3001/api/buildings/preload?lng=${lng}&lat=${lat}&radius=${radius}&zoom=${zoom}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                showResult('✅ 建筑物预加载API测试成功', data);
+            } catch (error) {
+                showResult('❌ 建筑物预加载API测试失败', error.message, true);
+            }
+        }
+
+        // 页面加载时自动测试健康检查
+        window.addEventListener('load', async () => {
+            try {
+                showResult('🔄 正在检查后端连接...', '请求中...');
+                const response = await fetch('http://localhost:3001/api/health');
+                const data = await response.json();
+                showResult('🏥 后端健康检查', data);
+            } catch (error) {
+                showResult('❌ 后端连接失败', error.message, true);
+            }
+        });
+
+        // 添加按钮事件监听器
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM已加载，绑定事件监听器');
+            
+            // 绑定按钮事件
+            const btnInfo = document.getElementById('btn-info');
+            const btnTile = document.getElementById('btn-tile');
+            const btnPreload = document.getElementById('btn-preload');
+            
+            if (btnInfo) {
+                btnInfo.addEventListener('click', testBuildingInfo);
+                console.log('信息API按钮事件已绑定');
+            }
+            
+            if (btnTile) {
+                btnTile.addEventListener('click', testBuildingTile);
+                console.log('瓦片API按钮事件已绑定');
+            }
+            
+            if (btnPreload) {
+                btnPreload.addEventListener('click', testBuildingPreload);
+                console.log('预加载API按钮事件已绑定');
+            }
+        });
+
+        // 添加全局错误处理
+        window.addEventListener('error', function(event) {
+            console.error('页面错误:', event);
+            showResult('❌ JavaScript错误', `${event.message} (${event.filename}:${event.lineno})`, true);
+        });
+
+        // 添加调试信息
+        console.log('建筑物API测试页面JavaScript已加载');
+    </script>
+</body>
+</html>

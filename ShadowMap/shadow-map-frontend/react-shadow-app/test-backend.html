@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>后端测试</title>
+</head>
+<body>
+    <h1>后端服务测试</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testBackend() {
+            const results = document.getElementById('results');
+            
+            // 测试1: 健康检查
+            try {
+                console.log('测试健康检查...');
+                const healthResponse = await fetch('http://localhost:3002/api/health');
+                if (healthResponse.ok) {
+                    const health = await healthResponse.json();
+                    results.innerHTML += `<p>✅ 健康检查成功: ${JSON.stringify(health)}</p>`;
+                } else {
+                    results.innerHTML += `<p>❌ 健康检查失败: ${healthResponse.status}</p>`;
+                }
+            } catch (error) {
+                results.innerHTML += `<p>❌ 健康检查错误: ${error}</p>`;
+            }
+            
+            // 测试2: 建筑物API
+            try {
+                console.log('测试建筑物API...');
+                const buildingResponse = await fetch('http://localhost:3002/api/buildings/15/26979/12416.json');
+                if (buildingResponse.ok) {
+                    const building = await buildingResponse.json();
+                    results.innerHTML += `<p>✅ 建筑物API成功: ${building.features?.length || 0} 个建筑物</p>`;
+                } else {
+                    results.innerHTML += `<p>❌ 建筑物API失败: ${buildingResponse.status}</p>`;
+                }
+            } catch (error) {
+                results.innerHTML += `<p>❌ 建筑物API错误: ${error}</p>`;
+            }
+            
+            // 测试3: DEM API
+            try {
+                console.log('测试DEM API...');
+                const demResponse = await fetch('http://localhost:3002/api/dem/10/840/385.png');
+                if (demResponse.ok) {
+                    results.innerHTML += `<p>✅ DEM API成功</p>`;
+                } else {
+                    results.innerHTML += `<p>❌ DEM API失败: ${demResponse.status}</p>`;
+                }
+            } catch (error) {
+                results.innerHTML += `<p>❌ DEM API错误: ${error}</p>`;
+            }
+        }
+        
+        // 页面加载后立即测试
+        testBackend();
+    </script>
+</body>
+</html>

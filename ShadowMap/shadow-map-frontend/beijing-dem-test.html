@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>北京真实DEM数据测试 - Shadow Map</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2em;
+            font-weight: 600;
+        }
+        
+        .header p {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .container {
+            display: flex;
+            height: calc(100vh - 120px);
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .map-container {
+            flex: 1;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            background: white;
+        }
+        
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        
+        .info-panel {
+            width: 350px;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            overflow-y: auto;
+        }
+        
+        .info-section {
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .info-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        
+        .info-section h3 {
+            margin: 0 0 15px 0;
+            color: #333;
+            font-size: 1.2em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+            display: inline-block;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .status-indicator.loading {
+            background: #f59e0b;
+        }
+        
+        .status-indicator.error {
+            background: #ef4444;
+        }
+        
+        .data-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .data-item {
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .data-item .label {
+            font-size: 0.85em;
+            color: #64748b;
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+        
+        .data-item .value {
+            font-size: 1.1em;
+            color: #1e293b;
+            font-weight: 600;
+        }
+        
+        .test-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .btn {
+            padding: 12px 16px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.95em;
+        }
+        
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2563eb;
+            transform: translateY(-1px);
+        }
+        
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
+            transform: translateY(-1px);
+        }
+        
+        .log-container {
+            background: #1f2937;
+            color: #e5e7eb;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.85em;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 4px 0;
+            border-bottom: 1px solid #374151;
+        }
+        
+        .log-entry:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        
+        .log-time {
+            color: #9ca3af;
+            font-size: 0.8em;
+        }
+        
+        .log-real {
+            color: #10b981;
+        }
+        
+        .log-mock {
+            color: #f59e0b;
+        }
+        
+        .log-error {
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏔️ 北京真实DEM数据测试</h1>
+        <p>测试AWS Terrarium格式的真实地形数据 vs 模拟数据</p>
+    </div>
+    
+    <div class="container">
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+        
+        <div class="info-panel">
+            <div class="info-section">
+                <h3>
+                    <span class="status-indicator" id="serverStatus"></span>
+                    服务器状态
+                </h3>
+                <div class="data-grid">
+                    <div class="data-item">
+                        <div class="label">API状态</div>
+                        <div class="value" id="apiStatus">检查中...</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="label">DEM数据源</div>
+                        <div class="value" id="demSource">检查中...</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="label">覆盖范围</div>
+                        <div class="value" id="coverage">-</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="label">瓦片格式</div>
+                        <div class="value" id="tileFormat">-</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="info-section">
+                <h3>🎯 测试控制</h3>
+                <div class="test-buttons">
+                    <button class="btn btn-primary" onclick="testBeijingDEM()">
+                        测试北京地区真实DEM
+                    </button>
+                    <button class="btn btn-secondary" onclick="testGlobalMock()">
+                        测试全球模拟DEM
+                    </button>
+                    <button class="btn btn-secondary" onclick="clearLogs()">
+                        清除日志
+                    </button>
+                </div>
+            </div>
+            
+            <div class="info-section">
+                <h3>📊 瓦片统计</h3>
+                <div class="data-grid">
+                    <div class="data-item">
+                        <div class="label">真实瓦片</div>
+                        <div class="value" id="realTiles">0</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="label">模拟瓦片</div>
+                        <div class="value" id="mockTiles">0</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="label">当前缩放</div>
+                        <div class="value" id="currentZoom">13</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="label">瓦片大小</div>
+                        <div class="value" id="tileSize">256px</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="info-section">
+                <h3>📝 实时日志</h3>
+                <div class="log-container" id="logContainer">
+                    <div class="log-entry">
+                        <span class="log-time">[等待中]</span> 正在初始化地图...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        const API_BASE = 'http://localhost:3001/api';
+        let map;
+        let demLayer;
+        let realTileCount = 0;
+        let mockTileCount = 0;
+        
+        // 初始化地图
+        function initMap() {
+            // 北京坐标
+            const beijingCenter = [39.9042, 116.4074];
+            
+            map = L.map('map').setView(beijingCenter, 13);
+            
+            // 添加底图
+            const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                opacity: 0.7
+            }).addTo(map);
+            
+            // 添加DEM图层
+            addDEMLayer();
+            
+            // 监听缩放变化
+            map.on('zoomend', () => {
+                document.getElementById('currentZoom').textContent = map.getZoom();
+                addLog(`缩放级别变为: ${map.getZoom()}`);
+            });
+            
+            // 监听地图移动
+            map.on('moveend', () => {
+                const center = map.getCenter();
+                addLog(`地图中心: [${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}]`);
+            });
+            
+            addLog('地图初始化完成，中心定位到北京');
+        }
+        
+        // 添加DEM图层
+        function addDEMLayer() {
+            if (demLayer) {
+                map.removeLayer(demLayer);
+            }
+            
+            demLayer = L.tileLayer(`${API_BASE}/dem/{z}/{x}/{y}.png`, {
+                attribution: 'DEM Data: AWS Open Data',
+                opacity: 0.6,
+                errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+            });
+            
+            // 监听瓦片加载事件
+            demLayer.on('tileload', (e) => {
+                // 这里无法直接判断是真实还是模拟数据
+                // 需要通过服务器日志或其他方式判断
+                addLog(`瓦片加载: ${e.url}`, 'info');
+            });
+            
+            demLayer.on('tileerror', (e) => {
+                addLog(`瓦片加载失败: ${e.tile.src}`, 'error');
+            });
+            
+            demLayer.addTo(map);
+        }
+        
+        // 检查服务器状态
+        async function checkServerStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                
+                document.getElementById('apiStatus').textContent = data.status || '正常';
+                updateServerStatus('success');
+                addLog('服务器连接正常', 'success');
+                
+                // 获取DEM信息
+                await checkDEMInfo();
+                
+            } catch (error) {
+                document.getElementById('apiStatus').textContent = '连接失败';
+                updateServerStatus('error');
+                addLog(`服务器连接失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 检查DEM信息
+        async function checkDEMInfo() {
+            try {
+                const response = await fetch(`${API_BASE}/dem/info`);
+                const data = await response.json();
+                
+                document.getElementById('demSource').textContent = data.dataSource || '-';
+                document.getElementById('coverage').textContent = data.coverage || '-';
+                document.getElementById('tileFormat').textContent = data.format || '-';
+                
+                addLog('DEM服务信息获取成功', 'success');
+                
+            } catch (error) {
+                addLog(`DEM信息获取失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 更新服务器状态指示器
+        function updateServerStatus(status) {
+            const indicator = document.getElementById('serverStatus');
+            indicator.className = 'status-indicator';
+            
+            if (status === 'success') {
+                // 绿色 - 正常
+            } else if (status === 'loading') {
+                indicator.classList.add('loading');
+            } else if (status === 'error') {
+                indicator.classList.add('error');
+            }
+        }
+        
+        // 测试北京地区真实DEM
+        function testBeijingDEM() {
+            const beijingBounds = [
+                [39.7, 116.0],  // 西南角
+                [40.2, 116.8]   // 东北角
+            ];
+            
+            map.fitBounds(beijingBounds);
+            map.setZoom(12); // 设置到有真实数据的缩放级别
+            
+            addLog('定位到北京地区，测试真实DEM数据', 'info');
+        }
+        
+        // 测试全球模拟DEM
+        function testGlobalMock() {
+            // 切换到纽约（应该没有真实数据）
+            const nyCenter = [40.7128, -74.0060];
+            map.setView(nyCenter, 12);
+            
+            addLog('定位到纽约地区，测试模拟DEM数据', 'info');
+        }
+        
+        // 添加日志
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            
+            const time = new Date().toLocaleTimeString();
+            let className = '';
+            
+            if (type === 'success') className = 'log-real';
+            else if (type === 'error') className = 'log-error';
+            else if (type === 'mock') className = 'log-mock';
+            
+            logEntry.innerHTML = `
+                <span class="log-time">[${time}]</span>
+                <span class="${className}">${message}</span>
+            `;
+            
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            
+            // 限制日志条数
+            const entries = logContainer.querySelectorAll('.log-entry');
+            if (entries.length > 50) {
+                entries[0].remove();
+            }
+        }
+        
+        // 清除日志
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+            addLog('日志已清除', 'info');
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            updateServerStatus('loading');
+            initMap();
+            checkServerStatus();
+        });
+    </script>
+</body>
+</html>

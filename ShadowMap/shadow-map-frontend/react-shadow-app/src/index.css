@@ -1,0 +1,363 @@
+/* 基础样式 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  color: #333;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+}
+
+/* 基础布局类 */
+.h-screen { height: 100vh; }
+.h-full { height: 100%; }
+.w-full { width: 100%; }
+.w-80 { width: 20rem; }
+.flex { display: flex; }
+.flex-1 { flex: 1; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.space-x-4 > * + * { margin-left: 1rem; }
+.space-y-6 > * + * { margin-top: 1.5rem; }
+.space-y-3 > * + * { margin-top: 0.75rem; }
+.space-y-2 > * + * { margin-top: 0.5rem; }
+
+/* 背景色 */
+.bg-white { background-color: white; }
+.bg-gray-100 { background-color: #f3f4f6; }
+.bg-gray-50 { background-color: #f9fafb; }
+
+/* 边框 */
+.border-b { border-bottom: 1px solid #e5e7eb; }
+.border-r { border-right: 1px solid #e5e7eb; }
+.border-l { border-left: 1px solid #e5e7eb; }
+.border-t { border-top: 1px solid #e5e7eb; }
+.border-gray-200 { border-color: #e5e7eb; }
+
+/* 阴影 */
+.shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+.shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+
+/* 内边距 */
+.p-4 { padding: 1rem; }
+.px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+.py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+.px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+.py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+
+/* 文字 */
+.text-2xl { font-size: 1.5rem; }
+.text-xl { font-size: 1.25rem; }
+.text-lg { font-size: 1.125rem; }
+.text-sm { font-size: 0.875rem; }
+.font-bold { font-weight: 700; }
+.font-semibold { font-weight: 600; }
+.font-medium { font-weight: 500; }
+.text-gray-800 { color: #1f2937; }
+.text-gray-700 { color: #374151; }
+.text-gray-600 { color: #4b5563; }
+.text-gray-500 { color: #6b7280; }
+
+/* 圆角 */
+.rounded-lg { border-radius: 0.5rem; }
+.rounded-full { border-radius: 9999px; }
+
+/* 溢出 */
+.overflow-hidden { overflow: hidden; }
+.overflow-y-auto { overflow-y: auto; }
+
+/* 相对定位 */
+.relative { position: relative; }
+.absolute { position: absolute; }
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+
+/* 最小高度 */
+.min-h-48 { min-height: 12rem; }
+
+/* Leaflet 地图样式修复 */
+.leaflet-container {
+  font-family: inherit;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+/* 按钮样式 - 优先级更高 */
+button.btn {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+/* 特定按钮样式 */
+.px-3.py-1 {
+  padding: 0.25rem 0.75rem !important;
+  font-size: 0.875rem !important;
+  border-radius: 0.375rem !important;
+  border: 1px solid #d1d5db !important;
+  background-color: #f9fafb !important;
+  color: #374151 !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.px-3.py-1:hover {
+  background-color: #e5e7eb !important;
+  border-color: #9ca3af !important;
+}
+
+.px-3.py-2 {
+  padding: 0.5rem 0.75rem !important;
+  font-size: 0.875rem !important;
+  border-radius: 0.375rem !important;
+  border: 1px solid transparent !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.bg-green-100 {
+  background-color: #dcfce7 !important;
+  color: #15803d !important;
+}
+
+.bg-green-100:hover {
+  background-color: #bbf7d0 !important;
+}
+
+.bg-yellow-100 {
+  background-color: #fef3c7 !important;
+  color: #d97706 !important;
+}
+
+.bg-yellow-100:hover {
+  background-color: #fde68a !important;
+}
+
+.bg-blue-100 {
+  background-color: #dbeafe !important;
+  color: #1d4ed8 !important;
+}
+
+.bg-blue-100:hover {
+  background-color: #bfdbfe !important;
+}
+
+.bg-gray-100 {
+  background-color: #f3f4f6 !important;
+  color: #374151 !important;
+}
+
+.bg-gray-100:hover {
+  background-color: #e5e7eb !important;
+}
+
+/* 输入框样式 */
+input[type="datetime-local"],
+input[type="range"],
+input[type="checkbox"] {
+  font-family: inherit !important;
+}
+
+input[type="datetime-local"] {
+  padding: 0.5rem 0.75rem !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 0.375rem !important;
+  font-size: 0.875rem !important;
+}
+
+input[type="datetime-local"]:focus {
+  outline: none !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+}
+
+/* 复选框样式 */
+input[type="checkbox"] {
+  width: 1rem !important;
+  height: 1rem !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 0.25rem !important;
+  accent-color: #3b82f6 !important;
+}
+
+/* 范围滑块样式 */
+input[type="range"] {
+  width: 100% !important;
+  height: 0.5rem !important;
+  border-radius: 0.25rem !important;
+  background: #e5e7eb !important;
+  outline: none !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  height: 1.25rem !important;
+  width: 1.25rem !important;
+  border-radius: 50% !important;
+  background: #3b82f6 !important;
+  cursor: pointer !important;
+  border: 2px solid white !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+}
+
+input[type="range"]::-moz-range-thumb {
+  height: 1.25rem !important;
+  width: 1.25rem !important;
+  border-radius: 50% !important;
+  background: #3b82f6 !important;
+  cursor: pointer !important;
+  border: 2px solid white !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* 现代化滑块样式 */
+.slider::-webkit-slider-thumb {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  height: 20px !important;
+  width: 20px !important;
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+  cursor: pointer !important;
+  border: 3px solid white !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15) !important;
+  transition: all 0.2s ease !important;
+}
+
+.slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1) !important;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* 渐变按钮效果 */
+.bg-gradient-to-r {
+  background-image: linear-gradient(to right, var(--tw-gradient-stops)) !important;
+}
+
+.from-orange-50 {
+  --tw-gradient-from: #fff7ed !important;
+  --tw-gradient-to: rgb(255 247 237 / 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.to-yellow-50 {
+  --tw-gradient-to: #fefce8 !important;
+}
+
+.hover\:from-orange-100:hover {
+  --tw-gradient-from: #ffedd5 !important;
+}
+
+.hover\:to-yellow-100:hover {
+  --tw-gradient-to: #fef3c7 !important;
+}
+
+/* 动画脉冲效果 */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* 现代化开关样式 */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* 渐变背景 */
+.gradient-bg {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* 卡片阴影 */
+.card-shadow {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.card-shadow:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.3s ease;
+}
+
+/* 圆形按钮样式 */
+.btn-circle {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 50% !important;
+  transition: all 0.2s ease !important;
+  border: none !important;
+}
+
+.btn-circle:hover {
+  transform: scale(1.05) !important;
+}
+
+.btn-circle:active {
+  transform: scale(0.95) !important;
+}
