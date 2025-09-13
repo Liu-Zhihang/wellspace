@@ -58,13 +58,38 @@ export interface ShadowAnalysisResult {
   };
 }
 
+// 数据层类型枚举
+export type DataLayerType = 'shadows' | 'sunlight_hours' | 'annual_sunlight' | 'buildings' | 'terrain';
+
+// 数据层配置接口
+export interface DataLayer {
+  id: DataLayerType;
+  name: string;
+  description: string;
+  icon: string; // 图标URL或emoji
+  enabled: boolean;
+  opacity: number;
+  color?: string;
+  renderMode: 'overlay' | 'heatmap' | 'vector';
+}
+
 export interface MapSettings {
+  // 传统设置（保持兼容性）
   shadowColor: string;
   shadowOpacity: number;
   showShadowLayer: boolean;
   showBuildingLayer: boolean;
   showDEMLayer: boolean;
   showCacheStats: boolean;
+  showSunExposure: boolean;
+  
+  // 新的数据层系统
+  dataLayers: {
+    [K in DataLayerType]: DataLayer;
+  };
+  
+  // 当前活跃的数据层
+  activeDataLayer: DataLayerType;
 }
 
 export interface ShadowSettings {
@@ -75,6 +100,7 @@ export interface ShadowSettings {
   shadowColor: string;
   shadowBlur: number;
   enableShadowAnimation: boolean;
+  showSunExposure: boolean; // 太阳曝光热力图开关
 }
 
 export interface SunPosition {

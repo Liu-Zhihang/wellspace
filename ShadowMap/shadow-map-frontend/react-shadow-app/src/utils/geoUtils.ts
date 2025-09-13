@@ -1,21 +1,4 @@
-// 声明 SunCalc 的类型
-declare global {
-  interface Window {
-    SunCalc: {
-      getPosition: (date: Date, lat: number, lng: number) => {
-        altitude: number;
-        azimuth: number;
-      };
-    };
-  }
-  const SunCalc: {
-    getPosition: (date: Date, lat: number, lng: number) => {
-      altitude: number;
-      azimuth: number;
-    };
-  };
-}
-
+import * as SunCalc from 'suncalc';
 import type { SunPosition } from '../types';
 
 export class GeoUtils {
@@ -23,29 +6,11 @@ export class GeoUtils {
    * 计算指定时间和位置的太阳位置
    */
   static getSunPosition(date: Date, lat: number, lng: number): SunPosition {
-    // 检查 SunCalc 是否可用
-    const sunCalc = (window as any).SunCalc || (globalThis as any).SunCalc;
-    
-    if (!sunCalc) {
-      console.warn('SunCalc 未加载，使用简化计算');
-      // 简化的太阳位置计算
-      const hours = date.getHours() + date.getMinutes() / 60;
-      const altitude = Math.max(0, Math.sin((hours - 6) * Math.PI / 12) * 60);
-      const azimuth = (hours - 6) * 15; // 简化的方位角计算
-      return { altitude, azimuth };
-    }
-    
-    try {
-      const sunPosition = sunCalc.getPosition(date, lat, lng);
-      return {
-        altitude: (sunPosition.altitude * 180) / Math.PI,
-        azimuth: ((sunPosition.azimuth * 180) / Math.PI) + 180,
-      };
-    } catch (error) {
-      console.error('SunCalc 计算错误:', error);
-      // 返回默认值
-      return { altitude: 30, azimuth: 180 };
-    }
+    const sunPosition = SunCalc.getPosition(date, lat, lng);
+    return {
+      altitude: (sunPosition.altitude * 180) / Math.PI,
+      azimuth: ((sunPosition.azimuth * 180) / Math.PI) + 180,
+    };
   }
 
   /**

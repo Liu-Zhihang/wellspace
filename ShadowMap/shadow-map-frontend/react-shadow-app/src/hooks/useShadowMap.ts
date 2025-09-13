@@ -5,7 +5,8 @@ import ShadeMap from 'leaflet-shadow-simulator';
 import { useShadowMapStore } from '../store/shadowMapStore';
 import { GeoUtils } from '../utils/geoUtils';
 import { ApiService } from '../services/apiService';
-import type { TerrainSource } from '../types';
+import { shadowLayerManager } from '../services/shadowLayerManager';
+import type { TerrainSource, DataLayerType } from '../types';
 
 // 声明 leaflet-shadow-simulator 的类型
 declare global {
@@ -23,7 +24,9 @@ if (typeof window !== 'undefined' && window.L && !window.L.shadeMap) {
 }
 
 export const useShadowMap = () => {
-  const shadeMapRef = useRef<any>(null);
+  const shadowOnlyRef = useRef<any>(null); // 纯阴影模拟器
+  const heatmapOnlyRef = useRef<any>(null); // 纯热力图模拟器
+  const shadeMapRef = useRef<any>(null); // 当前活跃的模拟器
   const mapRef = useRef<L.Map | null>(null);
   const {
     currentDate,
@@ -33,7 +36,72 @@ export const useShadowMap = () => {
     setAnalysisResults,
     addStatusMessage,
     mapCenter,
+    toggleDataLayer,
+    updateDataLayer,
   } = useShadowMapStore();
+
+  // 创建纯阴影模拟器
+  const createShadowOnlySimulator = async (map: L.Map) => {
+    const terrainSource = {
+      tileSize: 256,
+      maxZoom: 15,
+      getSourceUrl: ({ x, y, z }: { x: number; y: number; z: number }) => {
+        return ApiService.getDEMTileUrl(z, x, y);
+      },
+      getElevation: ({ r, g, b }: { r: number; g: number; b: number }) => {
+        return (r * 256 + g + b / 256) - 32768;
+      },
+    };
+
+    const shadowSimulator = L.shadeMap({
+      date: currentDate,
+      color: mapSettings.shadowColor,
+      opacity: mapSettings.shadowOpacity,
+      apiKey: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Imp3dTkyM0Bjb25uZWN0LmhrdXN0LWd6LmVkdS5jbiIsImNyZWF0ZWQiOjE3NTcyNDMxNzAxMzIsImlhdCI6MTc1NzI0MzE3MH0.Z7ejYmxcuKL3Le1Ydil1uRbP_EOS_wtLA6rsSewDUoA',
+      showExposure: false, // 纯阴影，无热力图
+      belowCanopy: false,
+      terrainSource,
+      getFeatures: async () => await getCurrentViewBuildings(map),
+    });
+
+    shadowSimulator.addTo(map);
+    return shadowSimulator;
+  };
+
+  // 创建纯热力图模拟器
+  const createHeatmapOnlySimulator = async (map: L.Map) => {
+    const terrainSource = {
+      tileSize: 256,
+      maxZoom: 15,
+      getSourceUrl: ({ x, y, z }: { x: number; y: number; z: number }) => {
+        return ApiService.getDEMTileUrl(z, x, y);
+      },
+      getElevation: ({ r, g, b }: { r: number; g: number; b: number }) => {
+        return (r * 256 + g + b / 256) - 32768;
+      },
+    };
+
+    const heatmapSimulator = L.shadeMap({
+      date: currentDate,
+      color: '#000000', // 阴影设为透明
+      opacity: 0, // 阴影完全透明
+      apiKey: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Imp3dTkyM0Bjb25uZWN0LmhrdXN0LWd6LmVkdS5jbiIsImNyZWF0ZWQiOjE3NTcyNDMxNzAxMzIsImlhdCI6MTc1NzI0MzE3MH0.Z7ejYmxcuKL3Le1Ydil1uRbP_EOS_wtLA6rsSewDUoA',
+      showExposure: true, // 只显示热力图
+      belowCanopy: false,
+      terrainSource,
+      getFeatures: async () => await getCurrentViewBuildings(map),
+    });
+
+    // 启用太阳曝光分析
+    await heatmapSimulator.setSunExposure(true, {
+      startDate: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 6, 0, 0),
+      endDate: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 18, 0, 0),
+      iterations: 24
+    });
+
+    heatmapSimulator.addTo(map);
+    return heatmapSimulator;
+  };
 
   // 初始化阴影模拟器
   const initShadowSimulator = async (map: L.Map) => {
@@ -76,12 +144,14 @@ export const useShadowMap = () => {
         };
 
         // 初始化阴影地图
+        console.log('🔧 开始创建阴影模拟器实例...');
+        
         const shadeMap = L.shadeMap({
           date: currentDate,
           color: mapSettings.shadowColor,
           opacity: mapSettings.shadowOpacity,
           apiKey: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Imp3dTkyM0Bjb25uZWN0LmhrdXN0LWd6LmVkdS5jbiIsImNyZWF0ZWQiOjE3NTcyNDMxNzAxMzIsImlhdCI6MTc1NzI0MzE3MH0.Z7ejYmxcuKL3Le1Ydil1uRbP_EOS_wtLA6rsSewDUoA',
-          showExposure: true, // 启用太阳曝光计算
+          showExposure: mapSettings.showSunExposure, // 动态控制太阳曝光计算
           belowCanopy: false, // 不考虑树冠遮挡
           terrainSource,
           getFeatures: async () => {
@@ -102,43 +172,77 @@ export const useShadowMap = () => {
             console.log('🔧 Shadow Simulator Debug:', msg);
           },
         });
+        
+        console.log('🔧 阴影模拟器实例已创建:', typeof shadeMap);
+        console.log('🔧 检查关键方法:');
+        console.log('  - addTo:', typeof shadeMap.addTo);
+        console.log('  - remove:', typeof shadeMap.remove);
+        console.log('  - setColor:', typeof shadeMap.setColor);
+        console.log('  - setOpacity:', typeof shadeMap.setOpacity);
 
-        // 延迟添加到地图，确保地图容器稳定
-        setTimeout(() => {
-          if (mapSettings.showShadowLayer && shadeMap && map.getContainer()) {
-            try {
-              shadeMap.addTo(map);
-              console.log('🎉 阴影图层已添加到地图');
-            } catch (addError) {
-              console.warn('添加阴影图层失败:', addError);
-            }
-          }
-        }, 1000);
-
-        // 启用太阳曝光分析以计算日照时长
+        // 直接添加阴影图层到地图
         try {
-          const startDate = new Date(currentDate);
-          startDate.setHours(6, 0, 0, 0); // 从早上6点开始
-          
-          const endDate = new Date(currentDate);
-          endDate.setHours(18, 0, 0, 0); // 到晚上6点结束
-          
-          console.log('🌅 启用太阳曝光分析:', startDate, '到', endDate);
-          
-          // 启用太阳曝光计算
-          await shadeMap.setSunExposure(true, {
-            startDate,
-            endDate,
-            iterations: 24 // 每小时一次采样
-          });
-          
-          console.log('✅ 太阳曝光分析已启用');
-        } catch (exposureError) {
-          console.warn('启用太阳曝光分析失败:', exposureError);
+          console.log('🔄 添加阴影图层到地图...');
+          shadeMap.addTo(map);
+          console.log('✅ 阴影图层已成功添加到地图');
+          addStatusMessage('✅ 阴影图层加载完成', 'info');
+        } catch (addError) {
+          console.error('❌ 添加阴影图层失败:', addError);
+          // 如果addTo失败，尝试手动设置地图引用
+          if (shadeMap._map !== map) {
+            shadeMap._map = map;
+            console.log('🔧 手动设置阴影模拟器的地图引用');
+          }
+          addStatusMessage('⚠️ 阴影图层可能未完全加载', 'warning');
+        }
+
+        // 根据设置决定是否启用太阳曝光分析
+        if (mapSettings.showSunExposure) {
+          try {
+            const startDate = new Date(currentDate);
+            startDate.setHours(6, 0, 0, 0); // 从早上6点开始
+            
+            const endDate = new Date(currentDate);
+            endDate.setHours(18, 0, 0, 0); // 到晚上6点结束
+            
+            console.log('🌅 启用太阳曝光分析:', startDate, '到', endDate);
+            
+            // 启用太阳曝光计算
+            await shadeMap.setSunExposure(true, {
+              startDate,
+              endDate,
+              iterations: 24 // 每小时一次采样
+            });
+            
+            console.log('✅ 太阳曝光分析已启用');
+          } catch (exposureError) {
+            console.warn('启用太阳曝光分析失败:', exposureError);
+          }
+        } else {
+          try {
+            // 禁用太阳曝光分析
+            await shadeMap.setSunExposure(false);
+            console.log('🌑 太阳曝光分析已禁用');
+          } catch (exposureError) {
+            console.warn('禁用太阳曝光分析失败:', exposureError);
+          }
         }
 
         shadeMapRef.current = shadeMap;
-        addStatusMessage('✅ 阴影模拟器初始化成功', 'info');
+        
+        // 验证阴影模拟器是否正确初始化（使用正确的方法检查）
+        const isValidShadowSimulator = shadeMap && 
+                                      typeof shadeMap.addTo === 'function' &&
+                                      typeof shadeMap.onRemove === 'function';
+        
+        if (isValidShadowSimulator) {
+          console.log('✅ 阴影模拟器验证通过');
+          addStatusMessage('✅ 阴影模拟器初始化成功', 'info');
+        } else {
+          console.error('❌ 阴影模拟器验证失败');
+          addStatusMessage('⚠️ 阴影模拟器初始化异常', 'warning');
+        }
+        
         console.log('🎉 阴影模拟器初始化完成');
       } else {
         console.error('❌ leaflet-shadow-simulator 插件加载失败');
@@ -190,14 +294,14 @@ export const useShadowMap = () => {
         west: bounds.getWest(),
       };
 
-      // 限制瓦片数量，避免数据过载
+      // 智能瓦片限制策略（MongoDB缓存后可以更激进）
       const maxZoom = Math.min(zoom, 17);
       const tiles = GeoUtils.getTilesInBounds(mapBounds, maxZoom);
       
-      // 大幅减少瓦片数量 - Overpass API 有严格限制
-      let maxTiles = 4;  // 大幅减少基础瓦片数
-      if (zoom >= 15) maxTiles = 2;  // 高缩放级别只加载2个瓦片
-      if (zoom >= 16) maxTiles = 1;  // 极高缩放级别只加载1个瓦片
+      // MongoDB缓存优化：可以加载更多瓦片
+      let maxTiles = 9;  // 基础瓦片数提升
+      if (zoom >= 15) maxTiles = 6;  // 高缩放级别加载更多
+      if (zoom >= 16) maxTiles = 4;  // 极高缩放级别仍然限制
       
       // 检查网络状况，调整加载策略
       const connectionType = (navigator as any).connection?.effectiveType;
@@ -215,18 +319,21 @@ export const useShadowMap = () => {
       console.log(`🔍 准备加载 ${limitedTiles.length} 个建筑物瓦片 (缩放级别: ${zoom})`);
       
       // 添加加载状态提示
-      addStatusMessage(`正在加载 ${limitedTiles.length} 个建筑物瓦片...`, 'info');
+      addStatusMessage(`🔄 正在加载 ${limitedTiles.length} 个建筑物瓦片...`, 'info');
       
       // 使用批量获取提升性能
+      const startTime = Date.now();
       const tileDataList = await ApiService.getBuildingTilesBatch(limitedTiles);
+      const loadTime = Date.now() - startTime;
       
       const buildings: any[] = [];
       let totalFeatures = 0;
       
       tileDataList.forEach((data) => {
         if (data.features && Array.isArray(data.features)) {
-          const processedFeatures = data.features.map((feature: any) => {
-            if (feature.properties) {
+          const processedFeatures = data.features
+            .filter((feature: any) => feature && feature.properties && feature.geometry) // 先过滤有效数据
+            .map((feature: any) => {
               // 智能高度估算算法
               let height = feature.properties.height;
               
@@ -239,28 +346,31 @@ export const useShadowMap = () => {
                   height = getBuildingHeightByType(feature.properties.buildingType);
                 } else {
                   // 基于建筑面积估算（面积越大，建筑可能越高）
-                  const area = calculatePolygonArea(feature.geometry);
-                  height = Math.max(6, Math.min(50, Math.sqrt(area) * 0.1));
+                  try {
+                    const area = calculatePolygonArea(feature.geometry);
+                    height = Math.max(6, Math.min(50, Math.sqrt(area) * 0.1));
+                  } catch (areaError) {
+                    height = 8; // 默认高度
+                  }
                 }
               }
               
               // 确保高度在合理范围内
               height = Math.max(3, Math.min(300, height));
               
-              // 设置阴影模拟器需要的属性
-              feature.properties.height = height;
-              feature.properties.render_height = height;
-              feature.properties.elevation = 0; // 地面高程，后续可以集成DEM数据
-              
-              // 添加建筑物类型信息，影响阴影计算精度
-              if (!feature.properties.buildingType) {
-                feature.properties.buildingType = 'building';
-              }
-              
-              return feature;
-            }
-            return null;
-          }).filter(Boolean);
+              // 创建符合leaflet-shadow-simulator要求的干净对象
+              return {
+                type: 'Feature',
+                geometry: feature.geometry,
+                properties: {
+                  height: height,
+                  render_height: height,
+                  elevation: 0,
+                  buildingType: feature.properties.buildingType || 'building',
+                  id: feature.properties.id || `building_${Math.random().toString(36).substr(2, 9)}`
+                }
+              };
+            });
           
           buildings.push(...processedFeatures);
           totalFeatures += processedFeatures.length;
@@ -268,9 +378,25 @@ export const useShadowMap = () => {
       });
 
       console.log(`🏢 成功获取 ${totalFeatures} 个建筑物用于阴影计算 (来自 ${limitedTiles.length} 个瓦片)`);
+      addStatusMessage(`✅ 建筑物数据加载完成：${totalFeatures} 个建筑物 (${loadTime}ms)`, 'info');
       
-      // 如果没有获取到建筑物数据，提示用户而不是使用模拟数据
-      if (totalFeatures === 0) {
+      // 验证建筑物数据完整性
+      const validBuildings = buildings.filter(building => {
+        return building && 
+               building.type === 'Feature' &&
+               building.geometry && 
+               building.geometry.coordinates &&
+               building.properties && 
+               typeof building.properties.height === 'number';
+      });
+      
+      if (validBuildings.length !== buildings.length) {
+        console.warn(`⚠️ 过滤掉 ${buildings.length - validBuildings.length} 个无效建筑物`);
+        addStatusMessage(`⚠️ 过滤掉 ${buildings.length - validBuildings.length} 个无效建筑物`, 'warning');
+      }
+      
+      // 如果没有获取到建筑物数据，提示用户
+      if (validBuildings.length === 0) {
         if (zoom < 14) {
           addStatusMessage('请放大地图查看建筑物数据 (缩放级别需 ≥ 14)', 'info');
         } else {
@@ -279,13 +405,13 @@ export const useShadowMap = () => {
       }
       
       // 更新分析结果
-      if (totalFeatures > 0) {
-        const heights = buildings.map(b => b.properties?.height || 0);
+      if (validBuildings.length > 0) {
+        const heights = validBuildings.map(b => b.properties.height);
         setAnalysisResult({
           center: [map.getCenter().lat, map.getCenter().lng],
           radius: 1000,
           samplePoints: [],
-          buildingCount: totalFeatures,
+          buildingCount: validBuildings.length,
           averageHeight: heights.reduce((sum, h) => sum + h, 0) / heights.length,
           maxHeight: Math.max(...heights),
           minHeight: Math.min(...heights),
@@ -305,12 +431,12 @@ export const useShadowMap = () => {
           },
           metadata: {
             date: currentDate,
-            sampleCount: totalFeatures,
+            sampleCount: validBuildings.length,
           },
         });
       }
       
-      return buildings;
+      return validBuildings;
     } catch (error) {
       console.error('获取建筑物数据失败:', error);
       addStatusMessage(`获取建筑物数据失败: ${error}`, 'error');
@@ -379,16 +505,66 @@ export const useShadowMap = () => {
   // 当地图设置改变时更新阴影地图
   useEffect(() => {
     if (shadeMapRef.current && mapRef.current) {
-      shadeMapRef.current.setColor(mapSettings.shadowColor);
-      shadeMapRef.current.setOpacity(mapSettings.shadowOpacity);
+      try {
+        // 安全地更新阴影模拟器设置
+        if (typeof shadeMapRef.current.setColor === 'function') {
+          shadeMapRef.current.setColor(mapSettings.shadowColor);
+        }
+        if (typeof shadeMapRef.current.setOpacity === 'function') {
+          shadeMapRef.current.setOpacity(mapSettings.shadowOpacity);
+        }
 
-      if (mapSettings.showShadowLayer) {
-        mapRef.current.addLayer(shadeMapRef.current);
-      } else {
-        mapRef.current.removeLayer(shadeMapRef.current);
+        // 控制阴影图层显示（使用透明度）
+        if (mapSettings.showShadowLayer) {
+          // 显示阴影：恢复设定的透明度
+          shadeMapRef.current.setOpacity(mapSettings.shadowOpacity);
+          console.log(`✅ 阴影图层已显示 (透明度: ${mapSettings.shadowOpacity})`);
+        } else {
+          // 隐藏阴影：设置完全透明
+          shadeMapRef.current.setOpacity(0);
+          console.log('✅ 阴影图层已隐藏 (透明度: 0)');
+        }
+      } catch (error) {
+        console.error('❌ 更新阴影图层失败:', error);
       }
     }
-  }, [mapSettings]);
+  }, [mapSettings.shadowColor, mapSettings.shadowOpacity, mapSettings.showShadowLayer]);
+
+  // 当太阳曝光设置改变时切换模拟器模式
+  useEffect(() => {
+    if (mapRef.current && shadeMapRef.current) {
+      console.log(`🌈 太阳曝光热力图设置变更: ${mapSettings.showSunExposure ? '开启' : '关闭'}`);
+      
+      // 直接切换太阳曝光分析，不重新创建
+      try {
+        if (typeof shadeMapRef.current.setSunExposure === 'function') {
+          if (mapSettings.showSunExposure) {
+            // 开启热力图
+            shadeMapRef.current.setSunExposure(true, {
+              startDate: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 6, 0, 0),
+              endDate: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 18, 0, 0),
+              iterations: 24
+            });
+            console.log('✅ 热力图已开启');
+          } else {
+            // 关闭热力图
+            shadeMapRef.current.setSunExposure(false);
+            console.log('✅ 热力图已关闭');
+          }
+        } else {
+          console.warn('⚠️ setSunExposure 方法不可用，需要重新初始化');
+          // 只有在方法不可用时才重新初始化
+          setTimeout(() => {
+            if (mapRef.current) {
+              initShadowSimulator(mapRef.current);
+            }
+          }, 100);
+        }
+      } catch (error) {
+        console.error('❌ 切换热力图失败:', error);
+      }
+    }
+  }, [mapSettings.showSunExposure]);
 
   // 当地图中心改变时更新太阳位置
   useEffect(() => {

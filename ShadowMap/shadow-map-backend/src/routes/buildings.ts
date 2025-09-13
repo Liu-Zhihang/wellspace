@@ -1,9 +1,10 @@
 /**
- * 建筑物数据API路由
+ * 建筑物数据API路由 - MongoDB版本
  */
 
 import express from 'express';
-import { BuildingService } from '../services/buildingService_simple';
+import { buildingServiceMongoDB } from '../services/buildingServiceMongoDB';
+import { dbManager } from '../config/database';
 
 const router = express.Router();
 
@@ -36,29 +37,22 @@ router.get('/:z/:x/:y.json', async (req, res) => {
         }
 
         console.log(`🏢 请求建筑物瓦片: ${z}/${x}/${y}`);
+        const startTime = Date.now();
 
-        // 获取建筑物数据
-        let tileData;
-        try {
-            tileData = await BuildingService.getBuildingTile(z, x, y);
-        } catch (serviceError) {
-            console.error(`建筑物服务错误 ${z}/${x}/${y}:`, serviceError);
-            // 返回空数据而不是抛出错误
-            tileData = {
-                type: 'FeatureCollection',
-                features: [],
-                bbox: [0, 0, 0, 0],
-                tileInfo: { z, x, y, generatedAt: new Date().toISOString() }
-            };
-        }
+        // 使用MongoDB建筑物服务获取数据
+        const tileData = await buildingServiceMongoDB.getBuildingTile(z, x, y);
+        
+        const processingTime = Date.now() - startTime;
+        console.log(`⏱️  处理时间: ${processingTime}ms, 建筑物数量: ${tileData.features.length}`);
 
         // 设置响应头
         res.set({
             'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=604800', // 缓存7天
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+            'Cache-Control': 'public, max-age=3600', // 1小时缓存
+            'X-Processing-Time': `${processingTime}ms`,
+            'X-Building-Count': tileData.features.length.toString(),
+            'X-Data-Source': tileData.fromDatabase ? 'mongodb' : 'osm-api',
+            'X-Cached': tileData.cached.toString()
         });
 
         // 返回瓦片数据
@@ -79,21 +73,35 @@ router.get('/:z/:x/:y.json', async (req, res) => {
  * GET /api/buildings/info
  * 获取建筑物服务信息
  */
-router.get('/info', (req, res) => {
+router.get('/info', async (req, res) => {
     try {
+        // 获取MongoDB服务信息和统计
+        const [dbStatus, stats] = await Promise.all([
+            dbManager.healthCheck(),
+            buildingServiceMongoDB.getStatistics()
+        ]);
+
         const info = {
-            service: 'Building Tile Service',
-            description: 'OpenStreetMap building data for shadow simulation',
+            service: 'Building Data Service with MongoDB',
+            version: '2.0.0',
+            description: 'OpenStreetMap building data with MongoDB caching',
             format: 'GeoJSON',
-            dataSource: 'OpenStreetMap via Overpass API',
+            dataSource: 'MongoDB + OSM Overpass API fallback',
             supportedZoomLevels: '10-18',
-            cacheTime: '7 days',
+            cacheTime: 'Intelligent MongoDB caching',
             estimatedHeights: true,
             lastUpdated: new Date().toISOString(),
+            database: {
+                status: dbStatus.status,
+                connection: dbManager.getConnectionStatus()
+            },
+            statistics: stats,
             endpoints: {
                 tile: '/api/buildings/{z}/{x}/{y}.json',
                 info: '/api/buildings/info',
-                preload: '/api/buildings/preload'
+                preload: '/api/buildings/preload',
+                stats: '/api/buildings/stats',
+                cleanup: '/api/buildings/cleanup'
             }
         };
         
@@ -156,16 +164,41 @@ router.all('/preload', async (req, res) => {
         const minLng = lng - dlng;
         const maxLng = lng + dlng;
 
-        // 异步预加载，不阻塞响应
-        BuildingService.preloadRegion([minLng, minLat, maxLng, maxLat], zoom, zoom)
-            .catch((error: any) => console.error('预加载失败:', error));
+        // 计算需要预加载的瓦片
+        const tiles = [];
+        const tileSize = 256;
+        const n = Math.pow(2, zoom);
+        
+        const minTileX = Math.floor((minLng + 180) / 360 * n);
+        const maxTileX = Math.floor((maxLng + 180) / 360 * n);
+        const minTileY = Math.floor((1 - Math.log(Math.tan(maxLat * Math.PI/180) + 1/Math.cos(maxLat * Math.PI/180)) / Math.PI) / 2 * n);
+        const maxTileY = Math.floor((1 - Math.log(Math.tan(minLat * Math.PI/180) + 1/Math.cos(minLat * Math.PI/180)) / Math.PI) / 2 * n);
+        
+        for (let x = minTileX; x <= maxTileX; x++) {
+            for (let y = minTileY; y <= maxTileY; y++) {
+                tiles.push({ z: zoom, x, y });
+            }
+        }
+
+        console.log(`🔄 开始预加载 ${tiles.length} 个建筑物瓦片...`);
+        const startTime = Date.now();
+
+        const results = await buildingServiceMongoDB.preloadBuildingData(tiles);
+        
+        const totalTime = Date.now() - startTime;
+        console.log(`✅ 预加载完成: ${results.success} 成功, ${results.failed} 失败, 耗时 ${totalTime}ms`);
 
         res.json({
-            message: 'Building preload started',
+            message: 'Building preload completed',
             center: [lng, lat],
             radius,
             zoomLevel: zoom,
-            status: 'in_progress'
+            results: {
+                total: tiles.length,
+                success: results.success,
+                failed: results.failed,
+                processingTime: totalTime
+            }
         });
 
     } catch (error) {
@@ -193,13 +226,19 @@ router.get('/debug', async (req, res) => {
         const debugInfo = {
             service: 'Building Tile Debug',
             timestamp: new Date().toISOString(),
-            testResults: []
+            testResults: [] as Array<{
+                tile: string;
+                status: string;
+                duration: string;
+                features?: number;
+                error?: string;
+            }>
         };
         
         for (const tile of testTiles) {
             const startTime = Date.now();
             try {
-                const result = await BuildingService.getBuildingTile(tile.z, tile.x, tile.y);
+                const result = await buildingServiceMongoDB.getBuildingTile(tile.z, tile.x, tile.y);
                 const duration = Date.now() - startTime;
                 
                 debugInfo.testResults.push({

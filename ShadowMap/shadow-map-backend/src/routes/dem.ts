@@ -32,12 +32,15 @@ router.get('/:z/:x/:y.png', async (req, res) => {
     // 生成DEM瓦片 (第一阶段使用模拟数据)
     const tileBuffer = await getDEMTile(z, x, y);
 
-    // 设置响应头
+    // 设置响应头（CDN友好）
     res.set({
       'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=3600', // 缓存1小时
+      'Cache-Control': 'public, max-age=86400, immutable', // 24小时缓存，不可变
       'Access-Control-Allow-Origin': '*',
-      'Content-Length': tileBuffer.length.toString()
+      'Content-Length': tileBuffer.length.toString(),
+      'ETag': `"dem-${z}-${x}-${y}"`, // 添加ETag支持
+      'X-Tile-Coordinates': `${z}/${x}/${y}`,
+      'X-Content-Source': 'dem-service'
     });
 
     res.send(tileBuffer);

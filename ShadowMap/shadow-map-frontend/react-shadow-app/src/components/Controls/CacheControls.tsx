@@ -119,7 +119,7 @@ export const CacheControls: React.FC = () => {
           onClick={async () => {
             try {
               addStatusMessage('正在诊断建筑物API...', 'info');
-              const response = await fetch('http://localhost:3002/api/buildings/debug');
+              const response = await fetch('http://localhost:3001/api/buildings/debug');
               if (response.ok) {
                 const debug = await response.json();
                 console.log('🔍 建筑物API诊断结果:', debug);

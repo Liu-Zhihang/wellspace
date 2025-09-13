@@ -112,6 +112,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
         initShadowSimulator(map);
         loadCurrentViewBuildings();
         updateCacheStats(); // 更新缓存统计
+        
       }, 500);
     });
 
@@ -210,7 +211,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
     if (!mapRef.current) return;
 
     if (mapSettings.showDEMLayer && !demTileLayerRef.current) {
-      demTileLayerRef.current = L.tileLayer('http://localhost:3002/api/dem/{z}/{x}/{y}.png', {
+      demTileLayerRef.current = L.tileLayer('http://localhost:3001/api/dem/{z}/{x}/{y}.png', {
         attribution: '© 自建DEM服务',
         maxZoom: 15,
         opacity: 0.5,

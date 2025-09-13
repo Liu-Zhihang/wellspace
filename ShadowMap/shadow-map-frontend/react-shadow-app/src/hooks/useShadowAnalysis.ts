@@ -7,6 +7,7 @@ import type { ShadowAnalysisResult, ShadowAnalysisPoint } from '../types';
 export const useShadowAnalysis = () => {
   const analysisMarkerRef = useRef<L.Marker | null>(null);
   const analysisCircleRef = useRef<L.Circle | null>(null);
+  const analysisCache = useRef<Map<string, any>>(new Map()); // 分析结果缓存
   
   const {
     currentDate,
@@ -23,7 +24,17 @@ export const useShadowAnalysis = () => {
     shadeMapInstance: any
   ): Promise<void> => {
     try {
-      addStatusMessage(`开始分析位置 ${lat.toFixed(4)}°, ${lng.toFixed(4)}° 的阴影情况`, 'info');
+      addStatusMessage(`🔍 开始分析位置 ${lat.toFixed(4)}°, ${lng.toFixed(4)}° 的阴影情况`, 'info');
+      
+      // 等待阴影模拟器完全就绪
+      if (!shadeMapInstance || !shadeMapInstance._map) {
+        addStatusMessage('⚠️ 阴影模拟器未就绪，请稍后重试', 'warning');
+        return;
+      }
+      
+      // 确保建筑物数据已加载完成
+      addStatusMessage('🔄 确保建筑物数据已加载...', 'info');
+      await new Promise(resolve => setTimeout(resolve, 200)); // 等待数据稳定
       
       // 移除之前的分析标记
       if (analysisMarkerRef.current) {
@@ -62,13 +73,19 @@ export const useShadowAnalysis = () => {
       
       // 分析每个采样点的阴影情况
       const analysisPromises = samplePoints.map(async (point) => {
-        const shadowInfo = await analyzeSinglePoint(point.lat, point.lng, shadeMapInstance);
-        return {
-          lat: point.lat,
-          lng: point.lng,
-          hoursOfSun: shadowInfo.hoursOfSun,
-          shadowPercent: shadowInfo.shadowPercent,
-        };
+        try {
+          const shadowInfo = await analyzeSinglePoint(point.lat, point.lng, shadeMapInstance);
+          return {
+            lat: point.lat,
+            lng: point.lng,
+            hoursOfSun: shadowInfo.hoursOfSun,
+            shadowPercent: shadowInfo.shadowPercent,
+          };
+        } catch (error) {
+          // 单个点分析失败时，记录错误但继续分析其他点
+          console.error(`❌ 采样点 ${point.lat.toFixed(4)}, ${point.lng.toFixed(4)} 分析失败:`, error);
+          throw error; // 传播错误，让用户知道具体问题
+        }
       });
 
       const analysisResults = await Promise.all(analysisPromises);
@@ -93,11 +110,23 @@ export const useShadowAnalysis = () => {
       // 显示弹窗信息
       showAnalysisPopup(map, lat, lng, result);
       
-      addStatusMessage(`阴影分析完成！平均日照时长: ${stats.avgHoursOfSun.toFixed(1)} 小时`, 'info');
+      addStatusMessage(`✅ 阴影分析完成！平均日照时长: ${stats.avgHoursOfSun.toFixed(1)} 小时`, 'info');
       
     } catch (error) {
-      console.error('阴影分析失败:', error);
-      addStatusMessage(`阴影分析失败: ${error}`, 'error');
+      console.error('❌ 阴影分析失败:', error);
+      
+      // 显示具体的错误原因，不使用fallback
+      if (error instanceof Error) {
+        if (error.message.includes('太阳曝光分析未启用')) {
+          addStatusMessage('❌ 请先开启"🌈 太阳热力图"进行准确的阴影分析', 'error');
+        } else if (error.message.includes('阴影模拟器')) {
+          addStatusMessage('❌ 阴影模拟器未正确初始化，请刷新页面重试', 'error');
+        } else {
+          addStatusMessage(`❌ 阴影分析失败: ${error.message}`, 'error');
+        }
+      } else {
+        addStatusMessage('❌ 阴影分析遇到未知错误', 'error');
+      }
     }
   };
 
@@ -125,6 +154,15 @@ export const useShadowAnalysis = () => {
   // 分析单个点的阴影情况
   const analyzeSinglePoint = async (lat: number, lng: number, shadeMapInstance: any) => {
     try {
+      // 生成缓存键
+      const cacheKey = `${lat.toFixed(6)}_${lng.toFixed(6)}_${currentDate.toISOString().split('T')[0]}`;
+      
+      // 检查缓存
+      if (analysisCache.current.has(cacheKey)) {
+        console.log(`📋 使用缓存结果: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+        return analysisCache.current.get(cacheKey);
+      }
+      
       // 获取当前地图实例
       const map = shadeMapInstance._map || (window as any).mapInstance;
       
@@ -134,27 +172,57 @@ export const useShadowAnalysis = () => {
         
         console.log(`🔍 分析点 ${lat.toFixed(4)}, ${lng.toFixed(4)} -> 像素坐标 ${pixelPoint.x}, ${pixelPoint.y}`);
         
-        // 方法1: 尝试使用 getHoursOfSun 方法
+        // 方法1: 尝试使用 getHoursOfSun 方法（需要太阳曝光分析开启）
         if (typeof shadeMapInstance.getHoursOfSun === 'function') {
           try {
-            // 等待一小段时间确保阴影计算完成
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // 检查是否启用了太阳曝光分析
+            const isExposureEnabled = shadeMapInstance.options?.sunExposure?.enabled;
             
-            const hoursOfSun = shadeMapInstance.getHoursOfSun(pixelPoint.x, pixelPoint.y);
-            console.log(`📊 getHoursOfSun 结果: ${hoursOfSun} (像素坐标: ${pixelPoint.x}, ${pixelPoint.y})`);
-            
-            // 检查是否为有效值
-            if (typeof hoursOfSun === 'number' && !isNaN(hoursOfSun)) {
-              return {
-                hoursOfSun: Math.max(0, hoursOfSun),
-                shadowPercent: Math.max(0, Math.min(100, (12 - hoursOfSun) / 12 * 100)),
-              };
+            if (!isExposureEnabled) {
+              console.error(`❌ 太阳曝光分析未启用，无法进行准确的阴影分析`);
+              throw new Error('太阳曝光分析未启用。请开启"🌈 太阳热力图"以获得准确的日照分析结果。');
+            } else {
+              // 多次尝试获取稳定结果
+              let hoursOfSun = 0;
+              let validResults = 0;
+              const maxAttempts = 3;
+              
+              for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, 150 + attempt * 50)); // 递增延迟
+                
+                const result = shadeMapInstance.getHoursOfSun(pixelPoint.x, pixelPoint.y);
+                
+                if (typeof result === 'number' && !isNaN(result) && result >= 0) {
+                  hoursOfSun += result;
+                  validResults++;
+                  console.log(`📊 尝试 ${attempt + 1}: ${result} 小时 (像素: ${pixelPoint.x}, ${pixelPoint.y})`);
+                }
+              }
+              
+              // 如果有有效结果，使用平均值
+              if (validResults > 0) {
+                const avgHours = hoursOfSun / validResults;
+                console.log(`✅ 稳定结果: ${avgHours.toFixed(2)} 小时 (${validResults}/${maxAttempts} 次成功)`);
+                
+                const result = {
+                  hoursOfSun: Math.max(0, avgHours),
+                  shadowPercent: Math.max(0, Math.min(100, (12 - avgHours) / 12 * 100)),
+                };
+                
+                // 缓存稳定的结果
+                analysisCache.current.set(cacheKey, result);
+                
+                return result;
+              } else {
+                throw new Error(`无法获取有效的日照数据。尝试了${maxAttempts}次，都未获得有效结果。`);
+              }
             }
           } catch (sunError) {
-            console.warn('getHoursOfSun 方法调用失败:', sunError);
+            console.error('getHoursOfSun 方法调用失败:', sunError);
+            throw sunError; // 不再隐藏错误，直接抛出
           }
         } else {
-          console.warn('getHoursOfSun 方法不可用');
+          throw new Error('getHoursOfSun 方法不可用。阴影模拟器可能未正确初始化。');
         }
         
         // 方法2: 使用 readPixel 方法读取阴影数据
@@ -183,19 +251,13 @@ export const useShadowAnalysis = () => {
         }
       }
       
-      // 方法3: 基于一天内太阳轨迹的详细计算
-      console.log(`☀️ 开始详细日照分析: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-      
-      const hoursOfSun = await calculateDailyHoursOfSun(lat, lng, currentDate);
-      
-      return {
-        hoursOfSun,
-        shadowPercent: Math.max(0, Math.min(100, (12 - hoursOfSun) / 12 * 100)),
-      };
+      // 如果所有方法都失败，直接报错
+      throw new Error('所有阴影分析方法都失败。请检查：1) 太阳热力图是否开启 2) 阴影模拟器是否正确加载 3) 地图是否完全初始化');
       
     } catch (error) {
-      console.warn(`分析点 ${lat}, ${lng} 失败:`, error);
-      return { hoursOfSun: 0, shadowPercent: 100 };
+      console.error(`❌ 分析点 ${lat.toFixed(4)}, ${lng.toFixed(4)} 失败:`, error);
+      // 直接抛出错误，不返回默认值
+      throw error;
     }
   };
 
@@ -348,8 +410,15 @@ export const useShadowAnalysis = () => {
     return Math.min(0.9, Math.max(0.05, shadowFactor)); // 限制在5%-90%范围内
   };
 
+  // 清理分析缓存
+  const clearAnalysisCache = () => {
+    analysisCache.current.clear();
+    console.log('🧹 分析缓存已清理');
+  };
+
   return {
     analyzePointShadow,
     clearAnalysis,
+    clearAnalysisCache,
   };
 };

@@ -82,31 +82,58 @@ export const ShadowControls: React.FC = () => {
           </div>
         </div>
 
-        {/* 图层开关 */}
-        <div className="flex items-center justify-between py-2">
-          <span className="text-sm text-gray-600">显示阴影</span>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={mapSettings.showShadowLayer}
-              onChange={(e) => updateMapSettings({ showShadowLayer: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
-        </div>
+        {/* 图层开关 - 简化样式 */}
+        <div className="space-y-3">
+          {/* 阴影图层开关 */}
+          <div className="flex items-center justify-between py-2">
+            <span className="text-sm text-gray-600">显示阴影</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mapSettings.showShadowLayer}
+                onChange={(e) => updateMapSettings({ showShadowLayer: e.target.checked })}
+                className="mr-2 h-4 w-4 text-blue-600 rounded border-gray-300"
+              />
+              <span className="text-xs text-gray-500">
+                {mapSettings.showShadowLayer ? '开启' : '关闭'}
+              </span>
+            </label>
+          </div>
 
-        <div className="flex items-center justify-between py-2">
-          <span className="text-sm text-gray-600">显示建筑物</span>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={mapSettings.showBuildingLayer}
-              onChange={(e) => updateMapSettings({ showBuildingLayer: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          {/* 太阳曝光热力图开关 */}
+          <div className="flex items-center justify-between py-2">
+            <div className="flex flex-col">
+              <span className="text-sm text-gray-600">🌈 太阳热力图</span>
+              <span className="text-xs text-gray-400">彩色显示太阳辐射</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mapSettings.showSunExposure}
+                onChange={(e) => updateMapSettings({ showSunExposure: e.target.checked })}
+                className="mr-2 h-4 w-4 text-orange-600 rounded border-gray-300"
+              />
+              <span className="text-xs text-gray-500">
+                {mapSettings.showSunExposure ? '开启' : '关闭'}
+              </span>
+            </label>
+          </div>
+
+          {/* 建筑物图层开关 */}
+          <div className="flex items-center justify-between py-2">
+            <span className="text-sm text-gray-600">显示建筑物</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mapSettings.showBuildingLayer}
+                onChange={(e) => updateMapSettings({ showBuildingLayer: e.target.checked })}
+                className="mr-2 h-4 w-4 text-green-600 rounded border-gray-300"
+              />
+              <span className="text-xs text-gray-500">
+                {mapSettings.showBuildingLayer ? '开启' : '关闭'}
+              </span>
+            </label>
+          </div>
         </div>
       </div>
     </div>

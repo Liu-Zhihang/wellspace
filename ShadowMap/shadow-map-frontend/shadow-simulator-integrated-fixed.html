@@ -422,7 +422,7 @@
                         maxZoom: 15,
                         getSourceUrl: ({ x, y, z }) => {
                             // 使用我们自建的DEM服务
-                            return `http://localhost:3002/api/dem/${z}/${x}/${y}.png`;
+                            return `http://localhost:3001/api/dem/${z}/${x}/${y}.png`;
                         },
                         getElevation: ({ r, g, b, a }) => {
                             // AWS Terrarium格式的高程解析
@@ -455,7 +455,7 @@
 
                 for (const tile of tiles) {
                     try {
-                        const response = await fetch(`http://localhost:3002/api/buildings/${tile.z}/${tile.x}/${tile.y}.json`);
+                        const response = await fetch(`http://localhost:3001/api/buildings/${tile.z}/${tile.x}/${tile.y}.json`);
                         if (response.ok) {
                             const data = await response.json();
                             if (data.features) {
@@ -709,7 +709,7 @@
             const enabled = document.getElementById('demLayer').checked;
             
             if (enabled && !demTileLayer) {
-                demTileLayer = L.tileLayer('http://localhost:3002/api/dem/{z}/{x}/{y}.png', {
+                demTileLayer = L.tileLayer('http://localhost:3001/api/dem/{z}/{x}/{y}.png', {
                     attribution: '© 自建DEM服务',
                     maxZoom: 15,
                     opacity: 0.5
