@@ -58,7 +58,15 @@ interface ShadowMapState {
 
 export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   currentDate: new Date(2024, 0, 1, 12, 0, 0), // 🔧 默认中午12点，避免自动跳转到当前时间
-  setCurrentDate: (date: Date) => set({ currentDate: date }),
+  setCurrentDate: (date: Date) => {
+    // ✅ Validate date to prevent invalid values
+    if (!date || isNaN(date.getTime())) {
+      console.error('❌ Invalid date provided to setCurrentDate:', date);
+      return;
+    }
+    console.log('⏰ Setting current date:', date);
+    set({ currentDate: new Date(date) });
+  },
   
   mapSettings: {
     // 传统设置（保持兼容性）

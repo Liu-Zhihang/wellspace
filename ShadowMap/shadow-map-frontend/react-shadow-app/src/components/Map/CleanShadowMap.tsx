@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import TUMCacheManager from '../UI/TUMCacheManager';
+import { CleanControlPanel } from '../UI/CleanControlPanel';
 import type { Feature } from 'geojson';
 import { getTUMBuildings } from '../../services/tumBuildingService';
 import { buildingCache } from '../../cache/buildingCache';
 import { useShadowMapStore } from '../../store/shadowMapStore';
+import { shadowOptimizer } from '../../services/shadowOptimizer';
 
 // 声明全局ShadeMap类型
 declare global {
@@ -27,6 +29,9 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('准备中...');
   const [showCacheManager, setShowCacheManager] = useState(false);
+  const [autoLoadBuildings, setAutoLoadBuildings] = useState(true); // 🆕 默认开启自动加载
+  const loadBuildingsRef = useRef<(() => Promise<void>) | undefined>(undefined); // 🆕 用于打破循环依赖
+  const moveEndTimeoutRef = useRef<number | null>(null); // 🆕 防抖timer（在load事件中使用）
   
   // Connect to Zustand store
   const { currentDate, mapSettings } = useShadowMapStore();
@@ -119,6 +124,11 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
     }
   }, []);
 
+  // 🆕 将最新的 loadBuildings 存入 ref
+  useEffect(() => {
+    loadBuildingsRef.current = loadBuildings;
+  }, [loadBuildings]);
+
   // 添加建筑物到地图 - 完整调试版本
   const addBuildingsToMap = useCallback((buildingData: any) => {
     console.log('🚀 开始添加建筑物到地图...');
@@ -140,15 +150,14 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       pitch: map.getPitch()
     });
 
-    // 移除现有图层
-    if (map.getLayer(layerId)) {
-      console.log('🗑️ 移除现有图层:', layerId);
-      map.removeLayer(layerId);
-    }
-    if (map.getSource(sourceId)) {
-      console.log('🗑️ 移除现有数据源:', sourceId);
-      map.removeSource(sourceId);
-    }
+    // 🆕 检查是否已有数据源
+    const existingSource = map.getSource(sourceId);
+    const hasExistingLayer = !!map.getLayer(layerId);
+    
+    console.log('� 现有状态:', {
+      hasSource: !!existingSource,
+      hasLayer: hasExistingLayer
+    });
 
     // 详细数据检查
     console.log('🔍 详细数据分析:', {
@@ -232,22 +241,28 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       features: processedFeatures
     };
 
-    console.log('📍 添加数据源到地图...');
-    try {
-      map.addSource(sourceId, {
-        type: 'geojson',
-        data: geoJsonData
-      });
-      console.log('✅ 数据源添加成功');
-    } catch (sourceError) {
-      console.error('❌ 添加数据源失败:', sourceError);
-      return;
-    }
+    // 🆕 如果数据源已存在，只更新数据；否则创建新数据源和图层
+    if (existingSource && 'setData' in existingSource) {
+      console.log('� 更新现有数据源（不删除图层，避免阴影模拟器冲突）');
+      (existingSource as mapboxgl.GeoJSONSource).setData(geoJsonData);
+      console.log('✅ 数据源更新成功');
+    } else {
+      console.log('�📍 创建新数据源...');
+      try {
+        map.addSource(sourceId, {
+          type: 'geojson',
+          data: geoJsonData
+        });
+        console.log('✅ 数据源添加成功');
+      } catch (sourceError) {
+        console.error('❌ 添加数据源失败:', sourceError);
+        return;
+      }
 
-    // 添加图层
-    console.log('🎨 添加图层到地图...');
-    try {
-      map.addLayer({
+      // 添加图层（仅首次）
+      console.log('🎨 添加图层到地图...');
+      try {
+        map.addLayer({
         id: layerId,
         type: 'fill-extrusion',
         source: sourceId,
@@ -259,10 +274,11 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         }
       });
       console.log('✅ 图层添加成功');
-    } catch (layerError) {
-      console.error('❌ 添加图层失败:', layerError);
-      return;
-    }
+      } catch (layerError) {
+        console.error('❌ 添加图层失败:', layerError);
+        return;
+      }
+    } // 🆕 关闭 else 块
 
     // 立即验证
     console.log('🔍 立即验证图层状态:');
@@ -322,7 +338,29 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
     }
 
     try {
-      console.log('🌅 开始初始化阴影模拟器...');
+      // ✅ Get fresh state from store at call time, not from closure
+      const { currentDate: latestDate, mapSettings: latestMapSettings } = useShadowMapStore.getState();
+      
+      // 🎯 Check if we should recalculate (optimization)
+      const checkBuildingSource = mapRef.current.getSource('clean-buildings');
+      const buildingCount = checkBuildingSource ? ((checkBuildingSource as any)._data?.features?.length || 0) : 0;
+      
+      const optimizationCheck = shadowOptimizer.shouldRecalculate(
+        mapRef.current,
+        latestDate,
+        buildingCount
+      );
+
+      if (!optimizationCheck.shouldCalculate && shadeMapRef.current) {
+        console.log('⏭️ 跳过阴影计算:', optimizationCheck.reason);
+        setStatusMessage(`阴影已是最新 (${optimizationCheck.reason})`);
+        return;
+      }
+
+      console.log('🌅 开始初始化阴影模拟器...', { 
+        date: latestDate,
+        reason: optimizationCheck.reason 
+      });
       
       // 安全地移除现有阴影模拟器
       if (shadeMapRef.current) {
@@ -367,11 +405,11 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         return;
       }
 
-      // 创建新的阴影模拟器 - 使用store中的设置
+      // 创建新的阴影模拟器 - 使用store中的最新设置
       shadeMapRef.current = new window.ShadeMap({
-        date: currentDate,
-        color: mapSettings.shadowColor,
-        opacity: mapSettings.shadowOpacity,
+        date: latestDate,
+        color: latestMapSettings.shadowColor,
+        opacity: latestMapSettings.shadowOpacity,
         apiKey: mapboxgl.accessToken,
         terrainSource: {
           tileSize: 256,
@@ -406,9 +444,16 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         }
       }).addTo(mapRef.current);
 
+      // 🎯 记录这次计算，用于后续优化
+      shadowOptimizer.recordCalculation(mapRef.current, latestDate, validBuildings.length);
+
       setShadowLoaded(true);
       setStatusMessage(`阴影模拟器初始化成功，处理了 ${validBuildings.length} 个建筑物`);
       console.log('✅ 阴影模拟器初始化成功');
+      
+      // 📊 输出优化统计
+      const stats = shadowOptimizer.getStats();
+      console.log('📊 阴影优化统计:', stats);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setStatusMessage('阴影模拟器初始化失败: ' + errorMessage);
@@ -418,26 +463,69 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       setShadowLoaded(false);
       shadeMapRef.current = null;
     }
-  }, [buildingsLoaded, currentDate]);
+    // ✅ FIXED: Don't include currentDate in deps - time updates via setDate(), not re-init
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildingsLoaded]);
 
   // 更新阴影时间
   const updateShadowTime = useCallback((newTime: Date) => {
     const { setCurrentDate } = useShadowMapStore.getState();
-    if (shadeMapRef.current && typeof shadeMapRef.current.setDate === 'function') {
-      shadeMapRef.current.setDate(newTime);
-      setCurrentDate(newTime);
-      setStatusMessage('阴影时间已更新: ' + newTime.toLocaleString());
-    } else {
+    
+    // ✅ Add safety checks
+    if (!shadeMapRef.current) {
       setStatusMessage('阴影模拟器未初始化');
+      return;
+    }
+
+    if (!mapRef.current || !mapRef.current.loaded()) {
+      setStatusMessage('地图未完全加载');
+      return;
+    }
+
+    const buildingSource = mapRef.current.getSource('clean-buildings');
+    if (!buildingSource) {
+      setStatusMessage('建筑物数据未加载');
+      return;
+    }
+
+    try {
+      if (typeof shadeMapRef.current.setDate === 'function') {
+        shadeMapRef.current.setDate(newTime);
+        setCurrentDate(newTime);
+        setStatusMessage('阴影时间已更新: ' + newTime.toLocaleString());
+      }
+    } catch (error) {
+      console.error('❌ Error updating shadow time:', error);
+      setStatusMessage('更新阴影时间失败');
     }
   }, []);
 
   // Watch for setting changes and update shadow simulator
   useEffect(() => {
-    if (shadeMapRef.current) {
+    // ✅ Guard: Check if shadow simulator and map are fully ready
+    if (!shadeMapRef.current || !mapRef.current) {
+      console.log('⏸️ Shadow simulator or map not ready, skipping update');
+      return;
+    }
+
+    // ✅ Guard: Check if building source exists (shadow simulator needs this)
+    const buildingSource = mapRef.current.getSource('clean-buildings');
+    if (!buildingSource) {
+      console.log('⏸️ Building source not loaded yet, skipping shadow update');
+      return;
+    }
+
+    // ✅ Guard: Check if map is loaded
+    if (!mapRef.current.loaded()) {
+      console.log('⏸️ Map not fully loaded, skipping shadow update');
+      return;
+    }
+
+    try {
       console.log('🎨 Updating shadow settings:', {
         color: mapSettings.shadowColor,
-        opacity: mapSettings.shadowOpacity
+        opacity: mapSettings.shadowOpacity,
+        date: currentDate
       });
       
       // Update color
@@ -454,8 +542,51 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       if (typeof shadeMapRef.current.setDate === 'function') {
         shadeMapRef.current.setDate(currentDate);
       }
+    } catch (error) {
+      console.error('❌ Error updating shadow settings:', error);
+      // Don't crash the app, just log the error
     }
   }, [mapSettings.shadowColor, mapSettings.shadowOpacity, currentDate]);
+
+  // 🆕 Watch for layer visibility changes and update map layers
+  useEffect(() => {
+    if (!mapRef.current || !mapRef.current.loaded()) return;
+
+    const map = mapRef.current;
+    const buildingLayerId = 'clean-buildings-extrusion';
+
+    console.log('👁️ Updating layer visibility:', {
+      buildings: mapSettings.showBuildingLayer,
+      shadow: mapSettings.showShadowLayer
+    });
+
+    // Control building layer visibility
+    if (map.getLayer(buildingLayerId)) {
+      map.setLayoutProperty(
+        buildingLayerId,
+        'visibility',
+        mapSettings.showBuildingLayer ? 'visible' : 'none'
+      );
+      console.log(`🏢 Building layer: ${mapSettings.showBuildingLayer ? 'visible' : 'hidden'}`);
+    }
+
+    // Control shadow layer visibility (if shadow simulator exists)
+    if (shadeMapRef.current) {
+      try {
+        // Shadow simulator doesn't have a direct visibility method, 
+        // but we can control it via opacity
+        if (typeof shadeMapRef.current.setOpacity === 'function') {
+          const effectiveOpacity = mapSettings.showShadowLayer 
+            ? mapSettings.shadowOpacity 
+            : 0;
+          shadeMapRef.current.setOpacity(effectiveOpacity);
+          console.log(`🌑 Shadow layer: ${mapSettings.showShadowLayer ? 'visible' : 'hidden'}`);
+        }
+      } catch (error) {
+        console.error('❌ Error controlling shadow visibility:', error);
+      }
+    }
+  }, [mapSettings.showBuildingLayer, mapSettings.showShadowLayer, mapSettings.shadowOpacity]);
 
   // 清除建筑物和阴影
   const clearBuildings = useCallback(() => {
@@ -517,10 +648,49 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
 
     map.on('load', async () => {
       console.log('✅ 地图加载完成');
-      setStatusMessage('地图加载完成，请手动执行操作步骤');
       
-      // 只加载阴影模拟器库，不自动执行其他步骤
+      // 加载阴影模拟器库
       await loadShadowSimulator();
+      
+      // 🆕 自动加载初始区域的建筑物
+      console.log('🏗️ 自动加载初始区域建筑物...');
+      setStatusMessage('自动加载建筑物中...');
+      await loadBuildings();
+      
+      // 自动初始化阴影
+      console.log('🌅 自动初始化阴影模拟器...');
+      setStatusMessage('自动初始化阴影...');
+      // 给建筑物一点时间渲染
+      setTimeout(() => {
+        initShadowSimulator();
+      }, 500);
+      
+      // 🆕 地图加载完成后，绑定 moveend 监听器
+      console.log('🎯 地图完全加载，现在绑定moveend监听器...');
+      const handleMoveEnd = () => {
+        console.log('📍 moveend事件触发！');
+        
+        if (!loadBuildingsRef.current) {
+          console.warn('⚠️ loadBuildingsRef 为空');
+          return;
+        }
+        
+        // 清除之前的timer
+        if (moveEndTimeoutRef.current) {
+          window.clearTimeout(moveEndTimeoutRef.current);
+        }
+        
+        // 防抖：500ms后加载
+        moveEndTimeoutRef.current = window.setTimeout(() => {
+          console.log('🗺️ 地图移动结束（500ms防抖后），开始加载建筑物...');
+          if (loadBuildingsRef.current) {
+            loadBuildingsRef.current();
+          }
+        }, 500);
+      };
+      
+      map.on('moveend', handleMoveEnd);
+      console.log('✅ moveend监听器已绑定（在load事件中）');
     });
 
     return () => {
@@ -529,7 +699,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         mapRef.current = null;
       }
     };
-  }, [loadShadowSimulator, testTUMConnection, loadBuildings, initShadowSimulator]);
+  }, [loadShadowSimulator, testTUMConnection, initShadowSimulator]); // ✅ 移除 loadBuildings 依赖
 
   return (
     <div className={`relative w-full h-full ${className}`}>
@@ -542,6 +712,9 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       `}</style>
       {/* 地图容器 */}
       <div ref={mapContainerRef} className="w-full h-full" />
+      
+      {/* 🆕 左侧控制面板 (包含 Shadow Layer, Sun Exposure, Buildings, Dynamic Quality 按钮) */}
+      <CleanControlPanel />
       
       {/* 简洁的控制面板 - 修复定位问题 */}
       <div style={{ 
@@ -585,6 +758,41 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
           🔍 测试TUM连接
         </button>
 
+        {/* 🆕 调试按钮：测试moveend事件 */}
+        <button
+          onClick={() => {
+            if (mapRef.current) {
+              console.log('🧪 手动触发moveend事件测试');
+              console.log('地图对象:', mapRef.current);
+              console.log('自动加载状态:', autoLoadBuildings);
+              console.log('地图已加载:', mapRef.current.loaded());
+              
+              // 手动触发moveend
+              mapRef.current.fire('moveend');
+            }
+          }}
+          style={{
+            background: '#8b5cf6',
+            color: 'white',
+            fontWeight: 'bold',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '14px',
+            minWidth: '140px'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = '#7c3aed';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = '#8b5cf6';
+          }}
+        >
+          🧪 测试moveend
+        </button>
+
         {/* 加载建筑物按钮 */}
         <button
           onClick={loadBuildings}
@@ -622,6 +830,35 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
               🏢 {buildingsLoaded ? '重新加载建筑物' : '加载建筑物'}
             </>
           )}
+        </button>
+
+        {/* 🆕 自动加载建筑物开关 */}
+        <button
+          onClick={() => setAutoLoadBuildings(!autoLoadBuildings)}
+          style={{
+            background: autoLoadBuildings ? '#f59e0b' : '#6b7280',
+            color: 'white',
+            fontWeight: 'bold',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '14px',
+            minWidth: '140px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = autoLoadBuildings ? '#d97706' : '#4b5563';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = autoLoadBuildings ? '#f59e0b' : '#6b7280';
+          }}
+        >
+          {autoLoadBuildings ? '🟢 自动加载: 开' : '⚫ 自动加载: 关'}
         </button>
 
         {/* 初始化阴影模拟器按钮 */}

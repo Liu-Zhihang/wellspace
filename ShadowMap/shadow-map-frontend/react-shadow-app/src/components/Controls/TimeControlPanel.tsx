@@ -25,17 +25,36 @@ export const TimeControlPanel: React.FC = () => {
       setIsPlaying(false);
     } else {
       setIsPlaying(true);
-      intervalRef.current = window.setInterval(() => {
-        const newDate = dayjs(currentDate).add(playSpeed, 'hour');
-        setCurrentDate(newDate.toDate());
-      }, 1000);
+      startPlayback();
     }
   };
 
+  const startPlayback = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    intervalRef.current = window.setInterval(() => {
+      // ✅ Get fresh state from store each time
+      const latestDate = useShadowMapStore.getState().currentDate;
+      const newDate = dayjs(latestDate).add(playSpeed, 'hour');
+      setCurrentDate(newDate.toDate());
+    }, 1000);
+  };
+
+  // ✅ Restart playback when speed changes
+  React.useEffect(() => {
+    if (isPlaying && intervalRef.current) {
+      startPlayback();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playSpeed, isPlaying]);
+
+  // ✅ Cleanup on unmount
   React.useEffect(() => {
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
   }, []);

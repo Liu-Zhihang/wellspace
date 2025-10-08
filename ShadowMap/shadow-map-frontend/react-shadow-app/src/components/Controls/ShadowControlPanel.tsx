@@ -1,6 +1,7 @@
 import React from 'react';
 import { Slider, Switch, ColorPicker, Row, Col, Divider } from 'antd';
-import { EyeOutlined, SunOutlined, HomeOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { EyeOutlined, HomeOutlined } from '@ant-design/icons';
+// import { SunOutlined, ThunderboltOutlined } from '@ant-design/icons'; // TODO: 后期实现时取消注释
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import type { Color } from 'antd/es/color-picker';
 
@@ -73,6 +74,7 @@ export const ShadowControlPanel: React.FC = () => {
           </Col>
         </Row>
 
+        {/* TODO: 后期实现 Sun Exposure 功能
         <Row align="middle" justify="space-between">
           <Col>
             <div className="flex items-center gap-2">
@@ -88,6 +90,7 @@ export const ShadowControlPanel: React.FC = () => {
             />
           </Col>
         </Row>
+        */}
 
         <Row align="middle" justify="space-between">
           <Col>
@@ -105,6 +108,7 @@ export const ShadowControlPanel: React.FC = () => {
           </Col>
         </Row>
 
+        {/* TODO: 后期实现 Dynamic Quality 功能
         <Row align="middle" justify="space-between">
           <Col>
             <div className="flex items-center gap-2">
@@ -120,6 +124,7 @@ export const ShadowControlPanel: React.FC = () => {
             />
           </Col>
         </Row>
+        */}
       </div>
     </div>
   );

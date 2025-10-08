@@ -10,11 +10,21 @@ lerna-debug.log*
 .DS_Store
 Thumbs.db
 .idea/
+.vscode/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw*
+
+# MCP configuration (local only)
+.mcp.json
+
+# Temporary scripts
+word_vector.py
+
+# PDF exports (generated from markdown)
+*.pdf
 
 # Dependencies
 node_modules/
