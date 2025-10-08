@@ -1,0 +1,58 @@
+# Logs & diagnostics
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS / Editor noise
+.DS_Store
+Thumbs.db
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw*
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs & tooling caches
+dist/
+dist-ssr/
+build/
+coverage/
+tmp/
+temp/
+.temp/
+.cache/
+.vite/
+.vitest/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Local data / large assets (keep out of git history)
+data/
+storage/
+shadow-map-backend/data/
+shadow-map-backend/dist/
+shadow-map-backend/cache/
+shadow-map-backend/logs/
+shadow-map-backend/tmp/
+shadow-map-backend/downloads/
+
+shadow-map-frontend/react-shadow-app/public/Example/
+shadow-map-frontend/react-shadow-app/public/**/*.tif
+shadow-map-frontend/react-shadow-app/public/**/*.zip
+
+# Misc
+*.pid
+*.seed
+*.tgz
