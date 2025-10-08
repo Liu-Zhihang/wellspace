@@ -283,6 +283,16 @@
                     <label>👻 阴影透明度: <span id="opacityValue">0.7</span></label>
                     <input type="range" id="shadowOpacity" min="0" max="1" step="0.1" value="0.7">
                 </div>
+
+                <div class="control-group">
+                    <label>🏢 建筑物透明度: <span id="buildingOpacityValue">0.3</span></label>
+                    <input type="range" id="buildingOpacity" min="0" max="1" step="0.1" value="0.3">
+                </div>
+
+                <div class="control-group">
+                    <label>🗻 地形透明度: <span id="demOpacityValue">0.5</span></label>
+                    <input type="range" id="demOpacity" min="0" max="1" step="0.1" value="0.5">
+                </div>
             </div>
 
             <!-- 位置信息 -->
@@ -290,6 +300,7 @@
                 <h3>📍 位置信息</h3>
                 
                 <div class="button-group">
+                    <button onclick="goToMunich()">慕尼黑</button>
                     <button onclick="goToBeijing()">北京</button>
                     <button onclick="goToShanghai()">上海</button>
                     <button onclick="goToGuangzhou()">广州</button>
@@ -333,6 +344,13 @@
             <!-- 状态信息 -->
             <div class="control-panel">
                 <h3>📊 状态信息</h3>
+                
+                <div class="button-group">
+                    <button onclick="checkBackendStatus()">检查后端</button>
+                    <button onclick="checkMongoDBStatus()">检查数据库</button>
+                    <button onclick="testBuildingAPI()">测试建筑API</button>
+                </div>
+                
                 <div id="statusMessages">
                     <div class="status info">🔑 API密钥已配置</div>
                     <div class="status info">系统准备就绪</div>
@@ -384,13 +402,42 @@
 
         // 初始化地图
         function initMap() {
-            map = L.map('map').setView([39.9042, 116.4074], 15);
+            map = L.map('map').setView([48.1374, 11.5755], 15); // 默认设置为慕尼黑
             
-            // 添加基础地图
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            // 添加Mapbox底图 (需要配置Mapbox token)
+            const mapboxToken = 'pk.eyJ1IjoieW91cl91c2VybmFtZSIsImEiOiJjbHl3eHl6eTUwYWQzMmpzY2I4dXJsbnVzIn0.example'; // 请替换为您的Mapbox token
+            
+            // 创建图层组用于底图切换
+            const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap contributors',
                 maxZoom: 18
-            }).addTo(map);
+            });
+            
+            const mapboxSatelliteLayer = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=${mapboxToken}`, {
+                attribution: '© Mapbox © OpenStreetMap',
+                maxZoom: 18,
+                tileSize: 512,
+                zoomOffset: -1
+            });
+            
+            const mapboxStreetsLayer = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/{z}/{x}/{y}?access_token=${mapboxToken}`, {
+                attribution: '© Mapbox © OpenStreetMap',
+                maxZoom: 18,
+                tileSize: 512,
+                zoomOffset: -1
+            });
+            
+            // 默认添加OSM图层
+            osmLayer.addTo(map);
+            
+            // 创建图层控制
+            const baseLayers = {
+                "OpenStreetMap": osmLayer,
+                "Mapbox卫星": mapboxSatelliteLayer,
+                "Mapbox街道": mapboxStreetsLayer
+            };
+            
+            L.control.layers(baseLayers).addTo(map);
 
             // 添加建筑物图层组
             buildingLayers.addTo(map);
@@ -524,6 +571,7 @@
                 const buildings = await getCurrentViewBuildings();
                 
                 if (buildings.length > 0) {
+                    const buildingOpacity = parseFloat(document.getElementById('buildingOpacity').value);
                     const geoJsonLayer = L.geoJSON(buildings, {
                         style: function(feature) {
                             const height = feature.properties.height || 10;
@@ -532,7 +580,8 @@
                             return {
                                 color: isHighRise ? '#0064ff' : '#ff6b6b',
                                 weight: 1,
-                                fillOpacity: 0.3,
+                                fillOpacity: buildingOpacity,
+                                opacity: Math.min(1, buildingOpacity + 0.2),
                                 fillColor: isHighRise ? '#0064ff' : '#ff6b6b'
                             };
                         },
@@ -572,6 +621,8 @@
             document.getElementById('timeInput').addEventListener('change', updateDateTime);
             document.getElementById('shadowColor').addEventListener('change', updateShadowColor);
             document.getElementById('shadowOpacity').addEventListener('input', updateShadowOpacity);
+            document.getElementById('buildingOpacity').addEventListener('input', updateBuildingOpacity);
+            document.getElementById('demOpacity').addEventListener('input', updateDEMOpacity);
             document.getElementById('shadowLayer').addEventListener('change', toggleShadowLayer);
             document.getElementById('buildingLayer').addEventListener('change', toggleBuildingLayer);
             document.getElementById('demLayer').addEventListener('change', toggleDEMLayer);
@@ -668,7 +719,20 @@
         function updateShadowColor() {
             const color = document.getElementById('shadowColor').value;
             if (shadeMap) {
-                shadeMap.setColor(color);
+                try {
+                    // 尝试多种可能的API方法
+                    if (typeof shadeMap.setColor === 'function') {
+                        shadeMap.setColor(color);
+                    } else if (typeof shadeMap.options !== 'undefined') {
+                        shadeMap.options.color = color;
+                        shadeMap.redraw();
+                    }
+                    console.log(`阴影颜色已更新为: ${color}`);
+                    addStatus(`阴影颜色已更新`, 'info');
+                } catch (error) {
+                    console.warn('颜色更新失败:', error);
+                    addStatus('颜色调节暂不可用', 'warning');
+                }
             }
         }
 
@@ -677,7 +741,22 @@
             const opacity = document.getElementById('shadowOpacity').value;
             document.getElementById('opacityValue').textContent = opacity;
             if (shadeMap) {
-                shadeMap.setOpacity(parseFloat(opacity));
+                try {
+                    // 尝试多种可能的API方法
+                    if (typeof shadeMap.setOpacity === 'function') {
+                        shadeMap.setOpacity(parseFloat(opacity));
+                    } else if (typeof shadeMap.options !== 'undefined') {
+                        shadeMap.options.opacity = parseFloat(opacity);
+                        shadeMap.redraw();
+                    } else if (shadeMap._container) {
+                        shadeMap._container.style.opacity = opacity;
+                    }
+                    console.log(`阴影透明度已更新为: ${opacity}`);
+                    addStatus(`阴影透明度: ${(opacity * 100).toFixed(0)}%`, 'info');
+                } catch (error) {
+                    console.warn('透明度更新失败:', error);
+                    addStatus('透明度调节暂不可用', 'warning');
+                }
             }
         }
 
@@ -704,15 +783,47 @@
             }
         }
 
+        // 更新建筑物透明度
+        function updateBuildingOpacity() {
+            const opacity = document.getElementById('buildingOpacity').value;
+            document.getElementById('buildingOpacityValue').textContent = opacity;
+            
+            if (buildingLayers) {
+                buildingLayers.eachLayer(function(layer) {
+                    if (layer.setStyle) {
+                        const currentStyle = layer.options || {};
+                        layer.setStyle({
+                            ...currentStyle,
+                            fillOpacity: parseFloat(opacity),
+                            opacity: Math.min(1, parseFloat(opacity) + 0.2) // 边框稍微明显一些
+                        });
+                    }
+                });
+                addStatus(`建筑物透明度: ${(opacity * 100).toFixed(0)}%`, 'info');
+            }
+        }
+
+        // 更新DEM透明度
+        function updateDEMOpacity() {
+            const opacity = document.getElementById('demOpacity').value;
+            document.getElementById('demOpacityValue').textContent = opacity;
+            
+            if (demTileLayer) {
+                demTileLayer.setOpacity(parseFloat(opacity));
+                addStatus(`地形透明度: ${(opacity * 100).toFixed(0)}%`, 'info');
+            }
+        }
+
         // 切换DEM图层
         function toggleDEMLayer() {
             const enabled = document.getElementById('demLayer').checked;
+            const opacity = document.getElementById('demOpacity').value;
             
             if (enabled && !demTileLayer) {
                 demTileLayer = L.tileLayer('http://localhost:3001/api/dem/{z}/{x}/{y}.png', {
                     attribution: '© 自建DEM服务',
                     maxZoom: 15,
-                    opacity: 0.5
+                    opacity: parseFloat(opacity)
                 });
             }
             
@@ -740,6 +851,12 @@
         // 跳转到广州
         function goToGuangzhou() {
             map.setView([23.1291, 113.2644], 15);
+            setTimeout(loadCurrentViewBuildings, 1000);
+        }
+
+        // 跳转到慕尼黑
+        function goToMunich() {
+            map.setView([48.1374, 11.5755], 15);
             setTimeout(loadCurrentViewBuildings, 1000);
         }
 
@@ -1200,6 +1317,79 @@
             initMap();
             addStatus('完整阴影模拟器已启动', 'info');
         });
+
+        // 检查后端状态
+        async function checkBackendStatus() {
+            try {
+                const response = await fetch('http://localhost:3001/api/health');
+                const data = await response.json();
+                addStatus(`后端状态: ${data.status || 'OK'}`, 'info');
+                console.log('后端健康检查:', data);
+            } catch (error) {
+                addStatus('后端连接失败: ' + error.message, 'error');
+                console.error('后端连接错误:', error);
+            }
+        }
+
+        // 检查MongoDB状态
+        async function checkMongoDBStatus() {
+            try {
+                const response = await fetch('http://localhost:3001/api/buildings/info');
+                const data = await response.json();
+                addStatus(`数据库状态: ${data.database?.status || 'unknown'}`, 'info');
+                console.log('MongoDB状态:', data);
+                
+                if (data.statistics) {
+                    addStatus(`建筑物数据: ${data.statistics.totalBuildings}个建筑, ${data.statistics.totalTiles}个瓦片`, 'info');
+                }
+            } catch (error) {
+                addStatus('数据库检查失败: ' + error.message, 'error');
+                console.error('数据库检查错误:', error);
+            }
+        }
+
+        // 测试建筑物API
+        async function testBuildingAPI() {
+            const center = map.getCenter();
+            const zoom = Math.min(map.getZoom(), 17);
+            
+            // 计算当前中心点的瓦片坐标
+            const n = Math.pow(2, zoom);
+            const x = Math.floor((center.lng + 180) / 360 * n);
+            const y = Math.floor((1 - Math.asinh(Math.tan(center.lat * Math.PI / 180)) / Math.PI) / 2 * n);
+            
+            try {
+                addStatus(`测试瓦片: ${zoom}/${x}/${y}`, 'info');
+                const response = await fetch(`http://localhost:3001/api/buildings/${zoom}/${x}/${y}.json`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                const buildingCount = data.features ? data.features.length : 0;
+                const dataSource = response.headers.get('X-Data-Source') || 'unknown';
+                const cached = response.headers.get('X-Cached') || 'unknown';
+                
+                addStatus(`建筑API测试成功: ${buildingCount}个建筑 (来源:${dataSource}, 缓存:${cached})`, 'info');
+                console.log('建筑API测试结果:', {
+                    tile: `${zoom}/${x}/${y}`,
+                    buildingCount,
+                    dataSource,
+                    cached,
+                    data: data
+                });
+                
+                // 如果有建筑物数据，尝试加载到地图上
+                if (buildingCount > 0) {
+                    loadCurrentViewBuildings();
+                }
+                
+            } catch (error) {
+                addStatus('建筑API测试失败: ' + error.message, 'error');
+                console.error('建筑API测试错误:', error);
+            }
+        }
 
         // 页面卸载时清理
         window.addEventListener('beforeunload', function() {

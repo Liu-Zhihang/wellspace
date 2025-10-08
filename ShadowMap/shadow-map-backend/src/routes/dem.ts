@@ -29,8 +29,14 @@ router.get('/:z/:x/:y.png', async (req, res) => {
       return;
     }
 
-    // 生成DEM瓦片 (第一阶段使用模拟数据)
+    console.log(`🗻 DEM瓦片请求: ${z}/${x}/${y}`);
+    const startTime = Date.now();
+
+    // 获取真实DEM瓦片数据
     const tileBuffer = await getDEMTile(z, x, y);
+    const processingTime = Date.now() - startTime;
+
+    console.log(`✅ DEM瓦片响应: ${z}/${x}/${y} (${tileBuffer.length} bytes, ${processingTime}ms)`);
 
     // 设置响应头（CDN友好）
     res.set({
@@ -40,17 +46,39 @@ router.get('/:z/:x/:y.png', async (req, res) => {
       'Content-Length': tileBuffer.length.toString(),
       'ETag': `"dem-${z}-${x}-${y}"`, // 添加ETag支持
       'X-Tile-Coordinates': `${z}/${x}/${y}`,
-      'X-Content-Source': 'dem-service'
+      'X-Content-Source': 'real-dem-data', // 标识为真实数据
+      'X-Processing-Time': `${processingTime}ms`
     });
 
     res.send(tileBuffer);
+    
   } catch (error) {
-    console.error('❌ Error generating DEM tile:', error);
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    console.error('❌ DEM瓦片获取失败:', errorMsg);
+    
     if (!res.headersSent) {
-      res.status(500).json({ 
-        error: 'Internal server error', 
-        message: 'Failed to generate DEM tile' 
-      });
+      // 根据错误类型返回不同HTTP状态码
+      if (errorMsg.includes('无效DEM瓦片坐标')) {
+        res.status(400).json({ 
+          error: 'Invalid tile coordinates', 
+          message: errorMsg,
+          suggestion: '请检查瓦片坐标是否在有效范围内'
+        });
+      } else if (errorMsg.includes('所有数据源都失败')) {
+        res.status(503).json({ 
+          error: 'Service temporarily unavailable', 
+          message: '暂时无法获取DEM数据',
+          details: errorMsg,
+          suggestion: '请稍后重试，或联系管理员预处理该区域的DEM数据',
+          retryAfter: 30 // 建议30秒后重试
+        });
+      } else {
+        res.status(500).json({ 
+          error: 'Internal server error', 
+          message: '获取DEM数据时发生内部错误',
+          details: process.env.NODE_ENV === 'development' ? errorMsg : undefined
+        });
+      }
     }
   }
 });

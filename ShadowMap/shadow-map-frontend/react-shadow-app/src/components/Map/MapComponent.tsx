@@ -158,16 +158,20 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
       const buildings = await getCurrentViewBuildings(mapRef.current);
       
       if (buildings.length > 0) {
+        const buildingOpacity = mapSettings.dataLayers.buildings.opacity;
+        const buildingColor = mapSettings.dataLayers.buildings.color || '#ff6b6b';
+        
         const geoJsonLayer = L.geoJSON(buildings, {
           style: (feature) => {
             const height = feature?.properties?.height || 10;
             const isHighRise = height > 20;
             
             return {
-              color: isHighRise ? '#0064ff' : '#ff6b6b',
+              color: isHighRise ? '#0064ff' : buildingColor,
               weight: 1,
-              fillOpacity: 0.3,
-              fillColor: isHighRise ? '#0064ff' : '#ff6b6b',
+              fillOpacity: buildingOpacity,
+              opacity: Math.min(1, buildingOpacity + 0.2), // 边框稍微明显一些
+              fillColor: isHighRise ? '#0064ff' : buildingColor,
             };
           },
           onEachFeature: (feature, layer) => {
@@ -194,7 +198,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
     }
   };
 
-  // 切换建筑物图层
+  // 切换建筑物图层和响应透明度变化
   useEffect(() => {
     if (!mapRef.current || !buildingLayersRef.current) return;
 
@@ -204,28 +208,31 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
     } else {
       mapRef.current.removeLayer(buildingLayersRef.current);
     }
-  }, [mapSettings.showBuildingLayer]);
+  }, [mapSettings.showBuildingLayer, mapSettings.dataLayers.buildings.opacity, mapSettings.dataLayers.buildings.color]);
 
-  // 切换DEM图层
+  // 切换DEM图层和响应透明度变化
   useEffect(() => {
     if (!mapRef.current) return;
+
+    const demOpacity = mapSettings.dataLayers.terrain.opacity;
 
     if (mapSettings.showDEMLayer && !demTileLayerRef.current) {
       demTileLayerRef.current = L.tileLayer('http://localhost:3001/api/dem/{z}/{x}/{y}.png', {
         attribution: '© 自建DEM服务',
         maxZoom: 15,
-        opacity: 0.5,
+        opacity: demOpacity,
       });
     }
 
     if (mapSettings.showDEMLayer && demTileLayerRef.current) {
+      demTileLayerRef.current.setOpacity(demOpacity);
       demTileLayerRef.current.addTo(mapRef.current);
-      addStatusMessage('地形图层已开启', 'info');
+      addStatusMessage(`地形图层已开启 (透明度: ${Math.round(demOpacity * 100)}%)`, 'info');
     } else if (demTileLayerRef.current) {
       mapRef.current.removeLayer(demTileLayerRef.current);
       addStatusMessage('地形图层已关闭', 'info');
     }
-  }, [mapSettings.showDEMLayer]);
+  }, [mapSettings.showDEMLayer, mapSettings.dataLayers.terrain.opacity]);
 
   return (
     <div className={`relative w-full h-full ${className}`} style={{ minHeight: '400px' }}>

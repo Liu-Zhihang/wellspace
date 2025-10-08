@@ -7,21 +7,29 @@
     <title>阴影地图分析系统</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Mapbox GL CSS -->
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' />
   </head>
   <body>
     <div id="root"></div>
     <!-- 加载 Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- 加载 Mapbox GL JS -->
+    <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js'></script>
     <!-- 加载 SunCalc -->
     <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
+    <!-- 加载 mapbox-gl-shadow-simulator -->
+    <script src="https://unpkg.com/mapbox-gl-shadow-simulator/dist/mapbox-gl-shadow-simulator.umd.min.js"></script>
     <script>
       // 调试信息
       window.addEventListener('load', function() {
         setTimeout(() => {
           console.log('页面加载完成，检查插件状态:');
           console.log('Leaflet:', typeof L !== 'undefined' ? '已加载' : '未加载');
+          console.log('Mapbox GL:', typeof mapboxgl !== 'undefined' ? '已加载' : '未加载');
           console.log('SunCalc:', typeof SunCalc !== 'undefined' ? '已加载' : '未加载');
-          console.log('Shadow Simulator:', typeof L !== 'undefined' && L.shadeMap ? '已加载' : '未加载');
+          console.log('Leaflet Shadow Simulator:', typeof L !== 'undefined' && L.shadeMap ? '已加载' : '未加载');
+          console.log('Mapbox Shadow Simulator:', typeof ShadeMap !== 'undefined' ? '已加载' : '未加载');
           
           if (typeof L !== 'undefined') {
             console.log('L.shadeMap 函数:', L.shadeMap || '未定义');

@@ -68,9 +68,53 @@ router.get('/:z/:x/:y.json', async (req, res) => {
  */
 router.get('/info', async (req, res) => {
   try {
+    // 检查数据库连接状态
+    const connectionStatus = dbManager.getConnectionStatus();
+    
+    if (!connectionStatus.isConnected || connectionStatus.readyState !== 1) {
+      // 数据库未连接时返回基本信息
+      return res.json({
+        service: 'Building Service with MongoDB',
+        version: '2.0.0',
+        status: 'initializing',
+        database: {
+          status: 'connecting',
+          connection: connectionStatus,
+          message: 'Database is still connecting, please wait...'
+        },
+        statistics: {
+          status: 'unavailable',
+          reason: 'Database connection not ready'
+        },
+        features: [
+          'MongoDB integration',
+          'OSM Overpass API fallback',
+          'Intelligent caching',
+          'Building height estimation',
+          'Batch data preloading'
+        ],
+        endpoints: {
+          tile: '/api/buildings/{z}/{x}/{y}.json',
+          info: '/api/buildings/info',
+          preload: '/api/buildings/preload',
+          stats: '/api/buildings/stats',
+          cleanup: '/api/buildings/cleanup'
+        }
+      });
+    }
+
+    // 数据库已连接，获取完整信息
     const [dbStatus, stats] = await Promise.all([
-      dbManager.healthCheck(),
-      buildingServiceMongoDB.getStatistics()
+      dbManager.healthCheck().catch(err => ({ 
+        status: 'unhealthy', 
+        details: { error: err.message } 
+      })),
+      buildingServiceMongoDB.getStatistics().catch(err => ({
+        error: 'Statistics unavailable',
+        reason: err.message,
+        totalBuildings: 0,
+        totalTiles: 0
+      }))
     ]);
 
     res.json({
@@ -79,7 +123,7 @@ router.get('/info', async (req, res) => {
       status: 'operational',
       database: {
         status: dbStatus.status,
-        connection: dbManager.getConnectionStatus()
+        connection: connectionStatus
       },
       statistics: stats,
       features: [
@@ -103,7 +147,8 @@ router.get('/info', async (req, res) => {
     
     res.status(500).json({
       error: 'Internal Server Error',
-      message: 'Failed to get service information'
+      message: 'Failed to get service information',
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });

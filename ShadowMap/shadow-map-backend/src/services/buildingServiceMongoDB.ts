@@ -1,8 +1,11 @@
 import { Building, IBuilding } from '../models/Building';
 import { config } from '../config';
+import { redisCacheService } from './redisCacheService';
 import axios from 'axios';
 import fs from 'fs/promises';
 import path from 'path';
+import { smartBuildingQuery, getLocationOptimizedParams, selectOptimalEndpoints } from './enhancedBuildingService';
+import { endpointHealthMonitor } from './endpointHealthMonitor';
 
 // 瓦片信息接口
 export interface TileInfo {
@@ -54,37 +57,66 @@ export class BuildingServiceMongoDB {
   }
 
   /**
-   * 获取建筑物瓦片数据（优先从MongoDB，fallback到OSM API）
+   * 获取建筑物瓦片数据（Redis → MongoDB → OSM API 三级缓存）
    */
   public async getBuildingTile(z: number, x: number, y: number): Promise<BuildingTileData> {
     const tileInfo: TileInfo = { z, x, y };
+    const startTime = Date.now();
     
     try {
-      // 1. 首先尝试从MongoDB获取
-      const cachedData = await this.getBuildingsFromDatabase(z, x, y);
-      if (cachedData && cachedData.features.length > 0) {
-        console.log(`📊 从MongoDB获取建筑物数据: ${z}/${x}/${y} (${cachedData.features.length} buildings)`);
-        return cachedData;
+      // 1. 首先尝试从Redis缓存获取（最快）
+      const redisData = await redisCacheService.getBuildingTile(z, x, y);
+      if (redisData && redisData.features && redisData.features.length > 0) {
+        console.log(`⚡ Redis cache hit: ${z}/${x}/${y} (${redisData.features.length} buildings) - ${Date.now() - startTime}ms`);
+        return redisData;
       }
 
-      // 2. 如果MongoDB中没有数据，从OSM API获取
-      console.log(`🌐 从OSM API获取建筑物数据: ${z}/${x}/${y}`);
+      // 2. 然后尝试从MongoDB获取
+      const mongoData = await this.getBuildingsFromDatabase(z, x, y);
+      if (mongoData && mongoData.features.length > 0) {
+        console.log(`📊 MongoDB hit: ${z}/${x}/${y} (${mongoData.features.length} buildings) - ${Date.now() - startTime}ms`);
+        
+        // 异步缓存到Redis，不等待结果
+        redisCacheService.setBuildingTile(z, x, y, mongoData, 1800); // 30分钟TTL
+        
+        return mongoData;
+      }
+
+      // 3. 最后从OSM API获取
+      console.log(`🌐 Fetching from OSM API: ${z}/${x}/${y}`);
       const osmData = await this.fetchFromOSMApi(z, x, y);
       
-      // 3. 将获取的数据保存到MongoDB
+      // 4. 将获取的数据保存到MongoDB和Redis
       if (osmData.features.length > 0) {
-        await this.saveBuildingsToDatabase(osmData.features, tileInfo);
-        console.log(`💾 已保存 ${osmData.features.length} 个建筑物到MongoDB`);
+        // 并行保存到MongoDB和Redis
+        const savePromises = [
+          this.saveBuildingsToDatabase(osmData.features, tileInfo),
+          redisCacheService.setBuildingTile(z, x, y, osmData, 3600) // 1小时TTL
+        ];
+        
+        await Promise.allSettled(savePromises);
+        console.log(`💾 Saved ${osmData.features.length} buildings to MongoDB+Redis - ${Date.now() - startTime}ms`);
+      } else {
+        // 即使是空结果也缓存一小段时间，避免重复API调用
+        await redisCacheService.setBuildingTile(z, x, y, osmData, 300); // 5分钟TTL
       }
 
       return osmData;
 
     } catch (error) {
-      console.error(`❌ 获取建筑物数据失败 ${z}/${x}/${y}:`, error);
+      console.error(`❌ Failed to get building data ${z}/${x}/${y}:`, error);
       
       // 返回空的瓦片数据
       return this.createEmptyTileData(tileInfo);
     }
+  }
+
+  /**
+   * 保存建筑物瓦片数据到数据库
+   */
+  public async saveBuildingTile(z: number, x: number, y: number, data: any): Promise<void> {
+    const tileInfo: TileInfo = { z, x, y };
+    await this.saveBuildingsToDatabase(data.features, tileInfo);
   }
 
   /**
@@ -175,34 +207,64 @@ export class BuildingServiceMongoDB {
   }
 
   /**
-   * 从OSM API获取建筑物数据
+   * 从OSM API获取建筑物数据（增强版本 - 智能分级查询和地域优化）
    */
   private async fetchFromOSMApi(z: number, x: number, y: number): Promise<BuildingTileData> {
-    const bbox = this.tileToBoundingBox(x, y, z);
-    const overpassQuery = this.buildOverpassQuery(bbox);
+    // 限制最小缩放级别，避免请求过大区域
+    if (z < 15) {
+      console.log(`⚠️ 缩放级别 ${z} 太低，不请求OSM数据（建议15+级别）`);
+      return this.createEmptyTileData({ z, x, y });
+    }
 
     try {
-      const response = await axios.post(this.overpassUrl, overpassQuery, {
-        headers: { 'Content-Type': 'text/plain' },
-        timeout: 30000
-      });
-
-      const osmData = response.data;
-      const features = this.convertOSMToGeoJSON(osmData);
-
-      return {
-        type: 'FeatureCollection',
-        features,
-        bbox: [bbox.west, bbox.south, bbox.east, bbox.north],
-        tileInfo: { z, x, y },
-        cached: false,
-        fromDatabase: false
-      };
+      const bbox = this.tileToBoundingBox(x, y, z);
+      const centerLat = (bbox.north + bbox.south) / 2;
+      const centerLng = (bbox.east + bbox.west) / 2;
+      
+      console.log(`🏗️ 启动智能建筑物查询: ${z}/${x}/${y} (${centerLat.toFixed(4)}, ${centerLng.toFixed(4)})`);
+      
+      // 🔧 使用增强的智能查询系统
+      const result = await smartBuildingQuery(bbox, centerLat, centerLng);
+      
+      if (result.success) {
+        console.log(`✅ 智能查询成功: ${result.buildings.length} 个建筑物 (${result.strategy}策略, ${result.totalRetries}次重试, ${result.processingTime}ms)`);
+        
+        return {
+          type: 'FeatureCollection',
+          features: result.buildings,
+          bbox: [bbox.west, bbox.south, bbox.east, bbox.north],
+          tileInfo: { z, x, y },
+          cached: false,
+          fromDatabase: false
+        };
+      } else {
+        console.warn(`⚠️ 智能查询失败: ${z}/${x}/${y} (${result.totalRetries}次重试, ${result.processingTime}ms)`);
+        
+        // 📊 记录失败统计，用于后续优化
+        this.recordQueryFailure(z, x, y, centerLat, centerLng, result);
+        
+        return this.createEmptyTileData({ z, x, y });
+      }
 
     } catch (error) {
-      console.error('❌ OSM API请求失败:', error);
-      throw error;
+      console.error(`❌ OSM智能查询系统错误:`, error);
+      return this.createEmptyTileData({ z, x, y });
     }
+  }
+
+  /**
+   * 记录查询失败统计
+   */
+  private recordQueryFailure(
+    z: number, x: number, y: number, 
+    lat: number, lng: number, 
+    result: any
+  ): void {
+    // 这里可以实现失败统计记录，用于优化查询策略
+    console.log(`📊 记录查询失败: ${z}/${x}/${y} (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+    console.log(`   总重试次数: ${result.totalRetries}`);
+    console.log(`   处理时间: ${result.processingTime}ms`);
+    console.log(`   💡 建议: 考虑预处理该区域的建筑物数据`);
   }
 
   /**
@@ -319,23 +381,64 @@ export class BuildingServiceMongoDB {
 
   private tileToBoundingBox(x: number, y: number, z: number) {
     const n = Math.pow(2, z);
+    
+    // 验证瓦片坐标有效性
+    if (x < 0 || x >= n || y < 0 || y >= n) {
+      console.error(`❌ 无效瓦片坐标: ${z}/${x}/${y} (最大: ${n-1}/${n-1})`);
+      throw new Error(`Invalid tile coordinates: ${z}/${x}/${y}`);
+    }
+    
+    // Web Mercator 投影的标准坐标转换
     const west = (x / n) * 360 - 180;
     const east = ((x + 1) / n) * 360 - 180;
+    
+    // 纬度计算使用标准Web Mercator公式
     const north = Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * (180 / Math.PI);
     const south = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 1)) / n))) * (180 / Math.PI);
+    
+    // 验证边界框合理性
+    if (Math.abs(west) > 180 || Math.abs(east) > 180 || 
+        Math.abs(north) > 85.0511 || Math.abs(south) > 85.0511) {
+      console.error(`❌ 计算的边界框超出有效范围: [${west}, ${south}, ${east}, ${north}]`);
+      throw new Error(`Invalid bounding box calculated for tile ${z}/${x}/${y}`);
+    }
+    
+    console.log(`🗺️ 瓦片 ${z}/${x}/${y} -> 边界框: [${west.toFixed(6)}, ${south.toFixed(6)}, ${east.toFixed(6)}, ${north.toFixed(6)}]`);
     
     return { west, south, east, north };
   }
 
-  private buildOverpassQuery(bbox: { west: number; south: number; east: number; north: number }): string {
-    return `
-      [out:json][timeout:25];
-      (
-        way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
-        relation["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
-      );
-      out geom;
-    `;
+  /**
+   * 检查端点健康状态
+   */
+  private async checkEndpointHealth(endpoint: string): Promise<{ healthy: boolean; responseTime: number }> {
+    const startTime = Date.now();
+    
+    try {
+      // 简单的健康检查查询
+      const healthQuery = '[out:json][timeout:5]; way["building"="yes"](bbox:39.9,116.4,39.901,116.401); out count;';
+      
+      const response = await axios.post(endpoint, healthQuery, {
+        headers: { 'Content-Type': 'text/plain', 'User-Agent': 'ShadowMap-HealthCheck/1.0' },
+        timeout: 5000,
+        validateStatus: (status) => status === 200
+      });
+      
+      const responseTime = Date.now() - startTime;
+      
+      if (response.data && typeof response.data === 'object') {
+        console.log(`✅ 端点健康: ${endpoint} (${responseTime}ms)`);
+        return { healthy: true, responseTime };
+      } else {
+        console.warn(`⚠️ 端点响应异常: ${endpoint}`);
+        return { healthy: false, responseTime };
+      }
+      
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      console.warn(`❌ 端点不健康: ${endpoint} (${responseTime}ms)`);
+      return { healthy: false, responseTime };
+    }
   }
 
   private convertOSMToGeoJSON(osmData: any): any[] {
@@ -450,6 +553,50 @@ export class BuildingServiceMongoDB {
       cached: false,
       fromDatabase: false
     };
+  }
+
+  /**
+   * 数组随机化 - 实现负载均衡
+   */
+  private shuffleArray<T>(array: T[]): T[] {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
+
+  /**
+   * 计算动态超时时间
+   */
+  private calculateTimeout(attemptIndex: number, retryIndex: number, zoom: number): number {
+    // 基础超时时间
+    let baseTimeout = 10000; // 10秒
+    
+    // 根据缩放级别调整 - 高缩放级别数据更多，需要更长时间
+    if (zoom >= 17) {
+      baseTimeout = 15000;
+    } else if (zoom >= 16) {
+      baseTimeout = 12000;
+    }
+    
+    // 根据尝试次数增加超时时间
+    const attemptMultiplier = 1 + (attemptIndex * 0.2);
+    const retryMultiplier = 1 + (retryIndex * 0.5);
+    
+    return Math.min(baseTimeout * attemptMultiplier * retryMultiplier, 30000); // 最大30秒
+  }
+
+  /**
+   * 计算退避延迟
+   */
+  private calculateBackoffDelay(retryIndex: number, baseDelay: number): number {
+    // 指数退避 + 随机抖动
+    const exponentialDelay = baseDelay * Math.pow(2, retryIndex);
+    const jitter = Math.random() * 0.1 * exponentialDelay; // 10%随机抖动
+    
+    return Math.min(exponentialDelay + jitter, 10000); // 最大10秒
   }
 }
 

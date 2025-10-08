@@ -165,3 +165,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
     </div>
   );
 };
+
+// 导出新的UI组件
+export { FloatingControls } from './FloatingControls';
+export { TimelineControl } from './TimelineControl';

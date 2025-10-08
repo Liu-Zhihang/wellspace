@@ -64,7 +64,7 @@ const defaultConfig: Config = {
   
   cache: {
     ttl: parseInt(process.env['CACHE_TTL'] || '604800', 10), // 7天
-    maxSize: parseInt(process.env['CACHE_MAX_SIZE'] || '1000', 10),
+    maxSize: parseInt(process.env['CACHE_MAX_SIZE'] || '5000', 10), // 调整为5000
   },
   
   data: {

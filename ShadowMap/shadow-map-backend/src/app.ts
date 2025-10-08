@@ -7,6 +7,13 @@ import path from 'path';
 import demRoutes from './routes/dem';
 import healthRoutes from './routes/health';
 import buildingRoutes from './routes/buildings'; // 重新启用
+import dataPreloadRoutes from './routes/dataPreload';
+import tileDebugRoutes from './routes/tileDebug';
+import buildingOptRoutes from './routes/buildingOptimization';
+import coordValidateRoutes from './routes/coordinateValidation';
+import tumBuildingRoutes from './routes/tumBuildings'; // TUM建筑数据路由
+import localTUMDataRoutes from './routes/localTUMData'; // 本地TUM数据路由
+import localBuildingDataRoutes from './routes/localBuildingData'; // 本地建筑数据处理路由
 
 const app = express();
 
@@ -49,6 +56,13 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/health', healthRoutes);
 app.use('/api/dem', demRoutes);
 app.use('/api/buildings', buildingRoutes); // 重新启用
+app.use('/api/preload', dataPreloadRoutes);
+app.use('/api/debug', tileDebugRoutes);
+app.use('/api/building-opt', buildingOptRoutes);
+app.use('/api/coord-validate', coordValidateRoutes);
+app.use('/api/tum-buildings', tumBuildingRoutes); // TUM建筑数据API
+app.use('/api/local-tum', localTUMDataRoutes); // 本地TUM数据API
+app.use('/api/local-buildings', localBuildingDataRoutes); // 本地建筑数据处理API
 
 // 静态文件服务 - 提供前端文件
 const frontendPath = path.join(__dirname, '../../shadow-map-frontend');
@@ -65,6 +79,27 @@ app.get('/', (req, res) => {
       health: '/api/health',
       dem: '/api/dem/:z/:x/:y.png',
       buildings: '/api/buildings/:z/:x/:y.json',
+      preload: {
+        cities: 'POST /api/preload/cities - 预处理热门城市',
+        location: 'POST /api/preload/location - 预处理指定位置',
+        status: 'GET /api/preload/status - 获取预处理状态',
+        cleanup: 'POST /api/preload/cleanup - 清理过期数据',
+        cityList: 'GET /api/preload/cities - 支持的城市列表'
+      },
+      tumCache: {
+        stats: 'GET /api/tum-cache/stats - TUM缓存统计',
+        preload: 'POST /api/tum-cache/preload - 预加载区域',
+        check: 'GET /api/tum-cache/check - 检查缓存状态',
+        cleanup: 'DELETE /api/tum-cache/cleanup - 清理过期缓存',
+        config: 'GET /api/tum-cache/config - 缓存配置信息'
+      },
+      localTUM: {
+        status: 'GET /api/local-tum/status - 本地数据状态',
+        load: 'POST /api/local-tum/load - 加载数据到内存',
+        query: 'POST /api/local-tum/query - 查询建筑数据',
+        stats: 'GET /api/local-tum/stats - 统计信息',
+        info: 'GET /api/local-tum/info - 服务信息'
+      },
       docs: '/api/docs'
     }
   });

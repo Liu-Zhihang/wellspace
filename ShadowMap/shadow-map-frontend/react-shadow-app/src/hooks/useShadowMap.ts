@@ -504,31 +504,21 @@ export const useShadowMap = () => {
 
   // 当地图设置改变时更新阴影地图
   useEffect(() => {
-    if (shadeMapRef.current && mapRef.current) {
-      try {
-        // 安全地更新阴影模拟器设置
-        if (typeof shadeMapRef.current.setColor === 'function') {
-          shadeMapRef.current.setColor(mapSettings.shadowColor);
+    if (mapRef.current) {
+      // 销毁旧的模拟器实例
+      if (shadeMapRef.current) {
+        try {
+          shadeMapRef.current.remove();
+          console.log('♻️ 旧的阴影模拟器已移除');
+        } catch (e) {
+          console.error('移除旧模拟器失败:', e);
         }
-        if (typeof shadeMapRef.current.setOpacity === 'function') {
-          shadeMapRef.current.setOpacity(mapSettings.shadowOpacity);
-        }
-
-        // 控制阴影图层显示（使用透明度）
-        if (mapSettings.showShadowLayer) {
-          // 显示阴影：恢复设定的透明度
-          shadeMapRef.current.setOpacity(mapSettings.shadowOpacity);
-          console.log(`✅ 阴影图层已显示 (透明度: ${mapSettings.shadowOpacity})`);
-        } else {
-          // 隐藏阴影：设置完全透明
-          shadeMapRef.current.setOpacity(0);
-          console.log('✅ 阴影图层已隐藏 (透明度: 0)');
-        }
-      } catch (error) {
-        console.error('❌ 更新阴影图层失败:', error);
       }
+      // 重新初始化模拟器以应用新的透明度、颜色等设置
+      console.log('🔄 地图设置变更，重新初始化阴影模拟器...');
+      initShadowSimulator(mapRef.current);
     }
-  }, [mapSettings.shadowColor, mapSettings.shadowOpacity, mapSettings.showShadowLayer]);
+  }, [mapSettings.shadowColor, mapSettings.shadowOpacity, mapSettings.showShadowLayer, currentDate]); // 增加currentDate到依赖项
 
   // 当太阳曝光设置改变时切换模拟器模式
   useEffect(() => {

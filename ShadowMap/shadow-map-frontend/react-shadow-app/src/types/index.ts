@@ -82,6 +82,10 @@ export interface MapSettings {
   showDEMLayer: boolean;
   showCacheStats: boolean;
   showSunExposure: boolean;
+  // 🔧 新增：建筑物筛选控制
+  enableBuildingFilter: boolean;
+  // 🔧 新增：动态质量控制
+  enableDynamicQuality: boolean;
   
   // 新的数据层系统
   dataLayers: {

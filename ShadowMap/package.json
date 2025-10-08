@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "antd": "^5.27.4",
+    "rc-slider": "^11.1.9"
+  }
+}

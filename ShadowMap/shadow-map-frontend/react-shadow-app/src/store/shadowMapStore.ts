@@ -57,7 +57,7 @@ interface ShadowMapState {
 }
 
 export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
-  currentDate: new Date(),
+  currentDate: new Date(2024, 0, 1, 12, 0, 0), // 🔧 默认中午12点，避免自动跳转到当前时间
   setCurrentDate: (date: Date) => set({ currentDate: date }),
   
   mapSettings: {
@@ -69,6 +69,10 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     showDEMLayer: false,
     showCacheStats: false,
     showSunExposure: false,
+    // 🔧 新增：建筑物筛选控制
+    enableBuildingFilter: false, // 默认关闭筛选，显示所有建筑
+    // 🔧 新增：动态质量控制
+    enableDynamicQuality: true, // 默认开启动态质量调整
     
     // 新的数据层系统
     dataLayers: {

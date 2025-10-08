@@ -21,26 +21,42 @@ async function initializeDatabase(): Promise<void> {
 
 // 尝试启动服务器，如果端口被占用则尝试其他端口
 async function startServer(port: number): Promise<void> {
-  // 先启动服务器，后初始化数据库（避免阻塞）
-  console.log('🚀 Starting server first, database will connect in background...');
-  const server = app.listen(port, async () => {
-    console.log(`🚀 Shadow Map Backend Server is running on port ${port}`);
-    console.log(`📍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
-    console.log(`🌐 API Base URL: http://localhost:${port}`);
-    console.log(`🗺️  DEM Tiles: http://localhost:${port}/api/dem/{z}/{x}/{y}.png`);
-    console.log(`❤️  Health Check: http://localhost:${port}/api/health`);
-    console.log(`🔄 Server ready - nodemon is watching for changes...`);
+  try {
+    // 先初始化数据库，确保连接就绪
+    console.log('🔄 Initializing database connection...');
+    await initializeDatabase();
+    console.log('✅ Database connection ready');
     
-    // 在后台初始化数据库
-    initializeDatabase()
-      .then(() => {
-        console.log('📊 MongoDB connection completed in background');
-      })
-      .catch((error) => {
-        console.error('⚠️  MongoDB connection failed, but server is still running:', error.message);
-        console.log('💡 Building API will fallback to OSM API only');
-      });
-  });
+    // 数据库就绪后再启动服务器
+    const server = app.listen(port, () => {
+      console.log(`🚀 Shadow Map Backend Server is running on port ${port}`);
+      console.log(`📍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
+      console.log(`🌐 API Base URL: http://localhost:${port}`);
+      console.log(`🗺️  DEM Tiles: http://localhost:${port}/api/dem/{z}/{x}/{y}.png`);
+      console.log(`❤️  Health Check: http://localhost:${port}/api/health`);
+      console.log(`🚀 Server ready and accepting requests!`);
+    });
+    
+    // 设置全局服务器引用以便优雅关闭
+    (global as any).server = server;
+    
+  } catch (error) {
+    console.error('⚠️  Database connection failed, starting server anyway:', error);
+    console.log('💡 Building API will fallback to OSM API only');
+    
+    // 即使数据库连接失败，也启动服务器（仅使用OSM API）
+    const server = app.listen(port, () => {
+      console.log(`🚀 Shadow Map Backend Server is running on port ${port} (OSM-only mode)`);
+      console.log(`📍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
+      console.log(`🌐 API Base URL: http://localhost:${port}`);
+      console.log(`🗺️  DEM Tiles: http://localhost:${port}/api/dem/{z}/{x}/{y}.png`);
+      console.log(`❤️  Health Check: http://localhost:${port}/api/health`);
+      console.log(`⚠️  Server ready (MongoDB unavailable)`);
+    });
+    
+    // 设置全局服务器引用以便优雅关闭
+    (global as any).server = server;
+  }
 
   // 端口被占用时自动尝试下一个端口
   server.on('error', (error: any) => {

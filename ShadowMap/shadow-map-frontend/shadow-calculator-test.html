@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>阴影计算测试页面</title>
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            width: 100vw;
+            height: 100vh;
+        }
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        .status {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+            max-width: 300px;
+        }
+        button {
+            margin: 5px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 3px;
+            background: #007cba;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #005a87;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+        .warning {
+            color: orange;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <h3>阴影计算测试</h3>
+        <button onclick="testTUMConnection()">测试TUM连接</button>
+        <button onclick="loadBuildings()">加载建筑物</button>
+        <button onclick="initShadowSimulator()">初始化阴影模拟器</button>
+        <button onclick="updateShadowTime()">更新时间</button>
+        <div>
+            <label>时间: </label>
+            <input type="datetime-local" id="shadowTime" value="2024-01-01T12:00">
+        </div>
+    </div>
+
+    <div class="status" id="status">
+        <div>状态: 准备中...</div>
+        <div>建筑物: 未加载</div>
+        <div>阴影: 未初始化</div>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        // Mapbox配置
+        mapboxgl.accessToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
+        
+        let map;
+        let shadeMap = null;
+        let buildingsLoaded = false;
+
+        // 初始化地图
+        function initMap() {
+            map = new mapboxgl.Map({
+                container: 'map',
+                style: 'mapbox://styles/mapbox/streets-v11',
+                center: [116.4074, 39.9042], // 北京
+                zoom: 15,
+                pitch: 60,
+                bearing: -17.6
+            });
+
+            map.on('load', () => {
+                updateStatus('地图加载完成', 'success');
+                loadShadowSimulator();
+            });
+        }
+
+        // 加载阴影模拟器库
+        function loadShadowSimulator() {
+            return new Promise((resolve, reject) => {
+                if (window.ShadeMap) {
+                    resolve(window.ShadeMap);
+                    return;
+                }
+
+                const script = document.createElement('script');
+                script.src = 'https://unpkg.com/mapbox-gl-shadow-simulator/dist/mapbox-gl-shadow-simulator.umd.min.js';
+                script.onload = () => {
+                    if (window.ShadeMap) {
+                        updateStatus('阴影模拟器库加载成功', 'success');
+                        resolve(window.ShadeMap);
+                    } else {
+                        updateStatus('阴影模拟器库加载失败', 'error');
+                        reject(new Error('ShadeMap not loaded'));
+                    }
+                };
+                script.onerror = () => {
+                    updateStatus('阴影模拟器库加载失败', 'error');
+                    reject(new Error('Failed to load ShadeMap'));
+                };
+                document.head.appendChild(script);
+            });
+        }
+
+        // 测试TUM连接
+        async function testTUMConnection() {
+            try {
+                updateStatus('测试TUM连接...', 'warning');
+                const response = await fetch('http://localhost:3001/api/tum-buildings/test');
+                const result = await response.json();
+                
+                if (result.success) {
+                    updateStatus('TUM连接测试成功', 'success');
+                } else {
+                    updateStatus('TUM连接测试失败: ' + result.message, 'error');
+                }
+            } catch (error) {
+                updateStatus('TUM连接测试失败: ' + error.message, 'error');
+            }
+        }
+
+        // 加载建筑物数据
+        async function loadBuildings() {
+            try {
+                updateStatus('加载建筑物数据...', 'warning');
+                
+                const bounds = map.getBounds();
+                const response = await fetch('http://localhost:3001/api/tum-buildings/bounds', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        north: bounds.getNorth(),
+                        south: bounds.getSouth(),
+                        east: bounds.getEast(),
+                        west: bounds.getWest(),
+                        maxFeatures: 1000
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success && result.data.features.length > 0) {
+                    addBuildingsToMap(result.data);
+                    buildingsLoaded = true;
+                    updateStatus(`加载了 ${result.data.features.length} 个建筑物`, 'success');
+                } else {
+                    updateStatus('未找到建筑物数据', 'error');
+                }
+            } catch (error) {
+                updateStatus('加载建筑物失败: ' + error.message, 'error');
+            }
+        }
+
+        // 添加建筑物到地图
+        function addBuildingsToMap(buildingData) {
+            const sourceId = 'test-buildings';
+            const layerId = 'test-buildings-extrusion';
+
+            // 移除现有图层
+            if (map.getLayer(layerId)) map.removeLayer(layerId);
+            if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+            // 处理建筑物数据
+            const processedFeatures = buildingData.features.map(feature => {
+                if (!feature.properties) feature.properties = {};
+                
+                if (!feature.properties.height) {
+                    feature.properties.height = feature.properties.levels ? 
+                        feature.properties.levels * 3.5 : 20;
+                }
+                
+                return feature;
+            });
+
+            // 添加数据源
+            map.addSource(sourceId, {
+                type: 'geojson',
+                data: {
+                    type: 'FeatureCollection',
+                    features: processedFeatures
+                }
+            });
+
+            // 添加3D挤出图层
+            map.addLayer({
+                id: layerId,
+                type: 'fill-extrusion',
+                source: sourceId,
+                paint: {
+                    'fill-extrusion-color': '#D3D3D3',
+                    'fill-extrusion-height': [
+                        'interpolate',
+                        ['linear'],
+                        ['get', 'height'],
+                        0, 0,
+                        100, ['get', 'height']
+                    ],
+                    'fill-extrusion-base': 0,
+                    'fill-extrusion-opacity': 0.8
+                }
+            });
+
+            updateStatus('建筑物图层添加完成', 'success');
+        }
+
+        // 初始化阴影模拟器
+        function initShadowSimulator() {
+            if (!map || !window.ShadeMap) {
+                updateStatus('地图或阴影模拟器未就绪', 'error');
+                return;
+            }
+
+            if (!buildingsLoaded) {
+                updateStatus('请先加载建筑物数据', 'error');
+                return;
+            }
+
+            try {
+                // 移除现有阴影模拟器
+                if (shadeMap) {
+                    shadeMap.remove();
+                    shadeMap = null;
+                }
+
+                // 创建新的阴影模拟器
+                shadeMap = new window.ShadeMap({
+                    date: new Date(document.getElementById('shadowTime').value),
+                    color: '#404040', // 深灰色阴影
+                    opacity: 0.6,
+                    apiKey: mapboxgl.accessToken, // 使用Mapbox的access token
+                    getFeatures: () => {
+                        const buildingSource = map.getSource('test-buildings');
+                        if (buildingSource && buildingSource._data) {
+                            const buildings = buildingSource._data.features;
+                            console.log(`为阴影模拟器提供 ${buildings.length} 个建筑物`);
+                            return buildings;
+                        }
+                        return [];
+                    },
+                    debug: (msg) => {
+                        console.log('ShadeMap:', msg);
+                    }
+                }).addTo(map);
+
+                updateStatus('阴影模拟器初始化成功', 'success');
+            } catch (error) {
+                updateStatus('阴影模拟器初始化失败: ' + error.message, 'error');
+                console.error('阴影模拟器初始化失败:', error);
+            }
+        }
+
+        // 更新阴影时间
+        function updateShadowTime() {
+            if (shadeMap && typeof shadeMap.setDate === 'function') {
+                const newDate = new Date(document.getElementById('shadowTime').value);
+                shadeMap.setDate(newDate);
+                updateStatus('阴影时间已更新: ' + newDate.toLocaleString(), 'success');
+            } else {
+                updateStatus('阴影模拟器未初始化', 'error');
+            }
+        }
+
+        // 更新状态显示
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            const lines = statusDiv.innerHTML.split('<br>');
+            
+            // 添加新消息到第一行
+            const newLine = `<span class="${type}">${new Date().toLocaleTimeString()}: ${message}</span>`;
+            lines[0] = newLine;
+            
+            // 保持最多5行消息
+            if (lines.length > 5) {
+                lines.pop();
+            }
+            
+            statusDiv.innerHTML = lines.join('<br>');
+        }
+
+        // 页面加载完成后初始化地图
+        window.addEventListener('load', initMap);
+    </script>
+</body>
+</html>

@@ -73,6 +73,7 @@
             <button onclick="testBuildingInfo()">测试建筑物信息API</button>
             <button onclick="testBuildingTile()">测试建筑物瓦片API</button>
             <button onclick="testBuildingPreload()">测试建筑物预加载API</button>
+            <button onclick="testTumWFS()">测试TUM WFS服务</button>
             <button onclick="clearResults()">清除结果</button>
         </div>
         
@@ -247,6 +248,72 @@
                 showResult('❌ 建筑物预加载API测试失败', {
                     error: error.message,
                     type: error.constructor.name
+                }, true);
+            }
+        }
+
+        // 测试TUM WFS服务 - 更新为使用后端代理
+        async function testTumWFS() {
+            try {
+                console.log('testTumWFS() 被调用');
+                showResult('🔄 正在通过后端代理测试TUM WFS服务...', '发送请求中...');
+                
+                // 后端代理地址
+                const proxyUrl = 'http://localhost:3001/api/tum-buildings/bounds';
+
+                // 慕尼黑市中心区域的BBOX
+                const munichBounds = {
+                    north: 48.14,
+                    south: 48.13,
+                    east: 11.58,
+                    west: 11.57,
+                    maxFeatures: 50
+                };
+                
+                console.log('请求后端代理URL:', proxyUrl);
+                console.log('请求体:', munichBounds);
+                
+                const response = await fetch(proxyUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(munichBounds)
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ message: response.statusText }));
+                    throw new Error(`HTTP ${response.status}: ${errorData.message || response.statusText}`);
+                }
+                
+                const result = await response.json();
+                console.log('后端代理响应:', result);
+
+                if (!result.success) {
+                    throw new Error(result.message || '后端返回操作失败');
+                }
+                
+                const summary = {
+                    请求URL: proxyUrl,
+                    数据来源: result.metadata.source,
+                    建筑物数量: result.data.features ? result.data.features.length : 0,
+                    返回特征总数: result.metadata.numberReturned,
+                    匹配特征总数: result.metadata.numberMatched,
+                    坐标范围: result.metadata.bounds,
+                    示例建筑: result.data.features && result.data.features[0] ? {
+                        ID: result.data.features[0].properties?.id,
+                        高度: result.data.features[0].properties?.height,
+                        类型: result.data.features[0].properties?.buildingType
+                    } : '无建筑物数据'
+                };
+                
+                showResult(`✅ TUM WFS代理测试成功`, summary);
+            } catch (error) {
+                console.error('TUM WFS代理测试失败:', error);
+                showResult('❌ TUM WFS代理测试失败', {
+                    error: error.message,
+                    type: error.constructor.name,
+                    suggestion: '请确保后端服务已启动，并检查浏览器和后端控制台的日志。'
                 }, true);
             }
         }

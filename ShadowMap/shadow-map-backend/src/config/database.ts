@@ -47,14 +47,15 @@ export class DatabaseManager {
         tls: true,
         tlsAllowInvalidCertificates: false,
         
-        // 开发环境配置
-        ...(config.env === 'development' && {
-          bufferCommands: false
-        })
+        // 开发环境配置 - 禁用命令缓冲以避免时序问题
+        bufferCommands: false
       };
 
       console.log('🔄 Connecting to MongoDB...');
       console.log(`📍 URI: ${mongoUri.replace(/\/\/.*@/, '//***:***@')}`);
+      
+      // 配置mongoose全局设置
+      mongoose.set('bufferCommands', false);
       
       await mongoose.connect(mongoUri, options);
       
@@ -187,6 +188,22 @@ export class DatabaseManager {
       console.error('❌ Error creating indexes:', error);
       throw error;
     }
+  }
+
+  /**
+   * 获取数据库实例
+   */
+  public getDatabase() {
+    if (!this.isConnected) {
+      throw new Error('Database not connected');
+    }
+    
+    const db = mongoose.connection.db;
+    if (!db) {
+      throw new Error('Database connection not available');
+    }
+    
+    return db;
   }
 
   /**
