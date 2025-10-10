@@ -73,6 +73,11 @@ mcp安装的坑以及wsl配置codex的坑.md
 scripts/
 $null
 
+# 外部项目（不应该提交）
+GlobalBuildingAtlas-main/
+leaflet-shadow-simulator-main/
+mapbox-gl-shadow-simulator/
+
 # Local data / large assets (keep out of git history)
 data/
 storage/
@@ -91,4 +96,4 @@ shadow-map-frontend/react-shadow-app/public/**/*.zip
 *.pid
 *.seed
 *.tgz
-"�ռ����ݷ�����.md" 
+"�ռ����ݷ�����.md" 
