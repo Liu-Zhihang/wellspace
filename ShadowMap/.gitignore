@@ -91,3 +91,4 @@ shadow-map-frontend/react-shadow-app/public/**/*.zip
 *.pid
 *.seed
 *.tgz
+"空间数据服务部署.md" 
