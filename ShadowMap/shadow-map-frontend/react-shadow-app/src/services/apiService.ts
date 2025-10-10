@@ -1,7 +1,7 @@
 import type { BuildingTileData } from '../types';
 import { advancedCacheManager } from './advancedCacheManager';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'http://localhost:3500/api';
 
 export class ApiService {
   // 正在进行的请求缓存，避免重复请求

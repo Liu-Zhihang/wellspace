@@ -67,7 +67,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
   const testTUMConnection = useCallback(async () => {
     try {
       setStatusMessage('测试TUM连接...');
-      const response = await fetch('http://localhost:3001/api/tum-buildings/test');
+      const response = await fetch('http://localhost:3500/api/tum-buildings/test');
       const result = await response.json();
       
       if (result.success) {

@@ -20,14 +20,14 @@ export const BackendStatusChecker: React.FC = () => {
     
     try {
       // Check basic connection
-      const response = await fetch('http://localhost:3001/api/health', {
+      const response = await fetch('http://localhost:3500/api/health', {
         method: 'GET',
         timeout: 5000,
       });
       
       if (response.ok) {
         // Test building API
-        const buildingResponse = await fetch('http://localhost:3001/api/buildings/info');
+        const buildingResponse = await fetch('http://localhost:3500/api/buildings/info');
         
         setStatus({
           connected: true,
@@ -109,7 +109,7 @@ export const BackendStatusChecker: React.FC = () => {
               {checking ? 'Checking...' : 'Retry'}
             </button>
             <button
-              onClick={() => window.open('http://localhost:3001/api/health', '_blank')}
+              onClick={() => window.open('http://localhost:3500/api/health', '_blank')}
               className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
             >
               Test Direct

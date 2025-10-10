@@ -209,7 +209,7 @@ export const OptimizedMapboxComponent: React.FC<OptimizedMapboxComponentProps> =
             apikey: mapboxgl.accessToken,
             terrainSource: {
               tileSize: 256,
-              url: 'http://localhost:3001/api/dem/{z}/{x}/{y}.png'
+              url: 'http://localhost:3500/api/dem/{z}/{x}/{y}.png'
             },
             getBuildingData: async function () {
               const bounds = map.getBounds();

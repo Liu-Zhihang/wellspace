@@ -1,6 +1,6 @@
 import type { BuildingTileData } from '../types';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'http://localhost:3500/api';
 
 // 缓存配置
 interface CacheConfig {

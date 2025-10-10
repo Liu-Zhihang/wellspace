@@ -7,10 +7,114 @@ import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs/promises';
 import https from 'https';
+import http from 'http';
 
 // DEM数据目录
 const DEM_DATA_DIR = path.join(__dirname, '../../data/dem');
 const TERRARIUM_BASE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
+
+// GeoServer配置
+const GEOSERVER_BASE_URL = process.env['GEOSERVER_BASE_URL'] || 'http://10.13.12.164:8080/geoserver/shadowmap';
+const GEOSERVER_LAYER = process.env['GEOSERVER_DEM_LAYER'] || 'shadowmap:dem_munich';
+const GEOSERVER_BBOX = {
+    minLng: 11.4,
+    minLat: 48.0,
+    maxLng: 11.6,
+    maxLat: 48.2
+};
+
+/**
+ * 将瓦片坐标转换为地理坐标（Web Mercator）
+ */
+function tile2bbox(z: number, x: number, y: number): { minLng: number; minLat: number; maxLng: number; maxLat: number } {
+    const n = Math.pow(2, z);
+    const minLng = (x / n) * 360 - 180;
+    const maxLng = ((x + 1) / n) * 360 - 180;
+    
+    function tile2lat(y: number, z: number): number {
+        const n = Math.PI - (2 * Math.PI * y) / Math.pow(2, z);
+        return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+    }
+    
+    const minLat = tile2lat(y + 1, z);
+    const maxLat = tile2lat(y, z);
+    
+    return { minLng, minLat, maxLng, maxLat };
+}
+
+/**
+ * 从GeoServer WMS获取DEM瓦片
+ */
+async function downloadFromGeoServer(z: number, x: number, y: number): Promise<Buffer | null> {
+    try {
+        // 将瓦片坐标转换为地理坐标
+        const bbox = tile2bbox(z, x, y);
+        
+        // 检查瓦片是否在GeoServer数据范围内
+        if (bbox.maxLng < GEOSERVER_BBOX.minLng || bbox.minLng > GEOSERVER_BBOX.maxLng ||
+            bbox.maxLat < GEOSERVER_BBOX.minLat || bbox.minLat > GEOSERVER_BBOX.maxLat) {
+            console.log(`⏭️ 瓦片 ${z}/${x}/${y} 不在GeoServer数据范围内`);
+            return null;
+        }
+        
+        // 构建WMS GetMap请求URL
+        const params = new URLSearchParams({
+            service: 'WMS',
+            version: '1.1.0',
+            request: 'GetMap',
+            layers: GEOSERVER_LAYER,
+            bbox: `${bbox.minLng},${bbox.minLat},${bbox.maxLng},${bbox.maxLat}`,
+            width: '256',
+            height: '256',
+            srs: 'EPSG:4326',
+            format: 'image/png'
+        });
+        
+        const url = `${GEOSERVER_BASE_URL}/wms?${params.toString()}`;
+        console.log(`🗺️ 从GeoServer获取DEM: ${z}/${x}/${y}`);
+        
+        return await new Promise((resolve, reject) => {
+            const client = url.startsWith('https') ? https : http;
+            const request = client.get(url, { timeout: 10000 }, (response) => {
+                if (response.statusCode !== 200) {
+                    reject(new Error(`GeoServer返回HTTP ${response.statusCode}`));
+                    return;
+                }
+                
+                const chunks: Buffer[] = [];
+                
+                response.on('data', (chunk: Buffer) => {
+                    chunks.push(chunk);
+                });
+                
+                response.on('end', () => {
+                    const buffer = Buffer.concat(chunks);
+                    
+                    // 检查是否是PNG图像
+                    if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) {
+                        console.log(`✅ GeoServer返回有效PNG: ${buffer.length} bytes`);
+                        resolve(buffer);
+                    } else {
+                        // 可能是XML错误信息
+                        console.warn(`⚠️ GeoServer返回非PNG数据: ${buffer.toString('utf8', 0, 200)}`);
+                        reject(new Error('GeoServer返回非PNG数据'));
+                    }
+                });
+            });
+            
+            request.on('error', reject);
+            request.on('timeout', () => {
+                request.destroy();
+                reject(new Error('GeoServer请求超时'));
+            });
+        });
+        
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`❌ GeoServer获取失败: ${errorMsg}`);
+        return null;
+    }
+}
 
 /**
  * 检查本地DEM瓦片是否存在
@@ -329,10 +433,10 @@ async function saveDEMTile(z: number, x: number, y: number, buffer: Buffer): Pro
 
 /**
  * 获取DEM瓦片
- * 优先使用本地数据，多源下载真实数据，拒绝模拟数据
+ * 当前配置：仅使用GeoServer数据源（测试模式）
  */
 export async function getDEMTile(z: number, x: number, y: number): Promise<Buffer> {
-    // 🔧 验证瓦片坐标有效性
+    // 验证瓦片坐标有效性
     const n = Math.pow(2, z);
     if (x < 0 || x >= n || y < 0 || y >= n) {
         const errorMsg = `无效DEM瓦片坐标: ${z}/${x}/${y} (最大: ${n-1})`;
@@ -340,35 +444,52 @@ export async function getDEMTile(z: number, x: number, y: number): Promise<Buffe
         throw new Error(errorMsg);
     }
     
-    // 1. 首先尝试读取本地真实DEM数据
+    // 🎯 仅从GeoServer获取（慕尼黑区域的真实DEM数据）
+    console.log(`🔍 尝试从GeoServer获取DEM: ${z}/${x}/${y}`);
+    const geoserverTile = await downloadFromGeoServer(z, x, y);
+    if (geoserverTile) {
+        console.log(`🗺️ 返回GeoServer DEM数据: ${z}/${x}/${y} (${geoserverTile.length} bytes)`);
+        return geoserverTile;
+    }
+    
+    // GeoServer获取失败，抛出错误
+    const errorMsg = `GeoServer无法提供瓦片 ${z}/${x}/${y} - 可能超出数据范围或服务不可用`;
+    console.error(`❌ ${errorMsg}`);
+    throw new Error(errorMsg);
+    
+    /* 
+    // ========== 以下Fallback机制已注释（测试期间） ==========
+    
+    // 2. 尝试读取本地缓存的DEM数据
     const localTile = await readLocalTile(z, x, y);
     if (localTile) {
-        console.log(`📍 返回本地DEM数据: ${z}/${x}/${y} (${localTile.length} bytes)`);
+        console.log(`📍 返回本地缓存DEM数据: ${z}/${x}/${y} (${localTile.length} bytes)`);
         return localTile;
     }
     
-    // 2. 🔧 多源、多重试下载真实DEM数据
-    console.log(`📭 本地DEM数据不存在，启动多源下载: ${z}/${x}/${y}`);
+    // 3. 多源、多重试下载在线DEM数据（备用）
+    console.log(`📭 本地缓存不存在，尝试在线下载: ${z}/${x}/${y}`);
     const downloadedTile = await downloadDEMTile(z, x, y, 3); // 最多重试3次
     
     if (downloadedTile) {
-        // 异步保存到本地，提升后续访问速度
+        // 异步保存到本地缓存
         saveDEMTile(z, x, y, downloadedTile).catch(error => {
-            console.warn(`⚠️ DEM瓦片保存失败 ${z}/${x}/${y}:`, error);
+            console.warn(`⚠️ 在线DEM瓦片缓存失败 ${z}/${x}/${y}:`, error);
         });
-        console.log(`🌍 返回多源下载的DEM数据: ${z}/${x}/${y} (${downloadedTile.length} bytes)`);
+        console.log(`🌍 返回在线下载的DEM数据: ${z}/${x}/${y} (${downloadedTile.length} bytes)`);
         return downloadedTile;
     }
     
-    // 3. 🔧 紧急处理：为避免阴影错位，提供基础地形数据
-    console.warn(`⚠️ 无法获取真实DEM数据: ${z}/${x}/${y} - 所有数据源都失败`);
-    console.log(`🔧 紧急处理: 生成基础地形数据避免阴影错位 (非模拟数据)`);
+    // 4. 紧急处理：生成基础地形数据（避免阴影错位）
+    console.warn(`⚠️ 所有DEM数据源都失败: ${z}/${x}/${y}`);
+    console.log(`🔧 紧急处理: 生成基础地形数据 (海平面基准)`);
     
-    // 生成基础平坦地形 (海平面高度)，避免完全无数据导致错位
     const basicTerrain = await generateBasicTerrain(z, x, y);
-    
-    console.log(`🗻 返回基础地形数据: ${z}/${x}/${y} (${basicTerrain.length} bytes, 海平面基准)`);
+    console.log(`🗻 返回基础地形数据: ${z}/${x}/${y} (${basicTerrain.length} bytes)`);
     return basicTerrain;
+    
+    // ========== Fallback机制结束 ==========
+    */
 }
 
 /**
@@ -379,10 +500,25 @@ export function getDEMInfo() {
         service: 'DEM Tile Service',
         description: 'Digital Elevation Model tiles for shadow simulation',
         format: 'PNG (RGB)',
-        encoding: 'Terrarium (height = (R * 256 + G + B / 256) - 32768)',
+        encoding: 'GeoServer WMS PNG format',
         tileSize: 256,
-        dataSource: 'AWS Open Data (real data) + Mock generation (fallback)',
-        coverage: 'Beijing area (zoom 10-15) + Global mock data',
+        mode: 'GeoServer Only (Testing Mode)',
+        dataSources: [
+            {
+                name: 'GeoServer',
+                coverage: 'Munich area (E11.4-11.6, N48.0-48.2)',
+                status: 'Active',
+                description: 'Local GeoServer with real TIF data from workstation'
+            }
+        ],
+        fallbackDisabled: true,
+        fallbackNote: 'Local cache, online sources, and basic terrain fallbacks are disabled for testing',
+        geoserverConfig: {
+            baseUrl: GEOSERVER_BASE_URL,
+            layer: GEOSERVER_LAYER,
+            bbox: GEOSERVER_BBOX,
+            format: 'WMS GetMap PNG'
+        },
         lastUpdated: new Date().toISOString()
     };
 }

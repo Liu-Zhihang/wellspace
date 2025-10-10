@@ -5,7 +5,7 @@ import { dbManager } from './config/database';
 // 加载环境变量
 dotenv.config();
 
-const PORT = process.env['PORT'] || 3001;
+const PORT = process.env['PORT'] || 3500;
 
 // 初始化数据库连接
 async function initializeDatabase(): Promise<void> {
@@ -37,6 +37,17 @@ async function startServer(port: number): Promise<void> {
       console.log(`🚀 Server ready and accepting requests!`);
     });
     
+    // 端口被占用时自动尝试下一个端口
+    server.on('error', (error: any) => {
+      if (error.code === 'EADDRINUSE') {
+        console.warn(`⚠️  Port ${port} is already in use, trying port ${port + 1}...`);
+        startServer(port + 1);
+      } else {
+        console.error('❌ Server error:', error);
+        process.exit(1);
+      }
+    });
+    
     // 设置全局服务器引用以便优雅关闭
     (global as any).server = server;
     
@@ -54,23 +65,20 @@ async function startServer(port: number): Promise<void> {
       console.log(`⚠️  Server ready (MongoDB unavailable)`);
     });
     
+    // 端口被占用时自动尝试下一个端口
+    server.on('error', (error: any) => {
+      if (error.code === 'EADDRINUSE') {
+        console.warn(`⚠️  Port ${port} is already in use, trying port ${port + 1}...`);
+        startServer(port + 1);
+      } else {
+        console.error('❌ Server error:', error);
+        process.exit(1);
+      }
+    });
+    
     // 设置全局服务器引用以便优雅关闭
     (global as any).server = server;
   }
-
-  // 端口被占用时自动尝试下一个端口
-  server.on('error', (error: any) => {
-    if (error.code === 'EADDRINUSE') {
-      console.warn(`⚠️  Port ${port} is already in use, trying port ${port + 1}...`);
-      startServer(port + 1);
-    } else {
-      console.error('❌ Server error:', error);
-      process.exit(1);
-    }
-  });
-
-  // 设置全局服务器引用以便优雅关闭
-  (global as any).server = server;
 }
 
 // 启动服务器

@@ -52,7 +52,7 @@ export const TUMCacheManager: React.FC<TUMCacheManagerProps> = ({
   const [preloadZoom, setPreloadZoom] = useState('15');
 
   // API调用基础URL
-  const API_BASE = 'http://localhost:3001/api/tum-cache';
+  const API_BASE = 'http://localhost:3500/api/tum-cache';
 
   // 获取缓存统计
   const fetchStats = useCallback(async () => {

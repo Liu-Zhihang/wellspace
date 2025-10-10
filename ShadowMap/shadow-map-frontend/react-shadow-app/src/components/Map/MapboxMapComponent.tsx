@@ -207,7 +207,7 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
             
             // 🔧 优先使用后端的多源DEM服务
             console.log(`🗻 请求多源DEM瓦片: ${safeZ}/${safeX}/${safeY}`);
-            return `http://localhost:3001/api/dem/${safeZ}/${safeX}/${safeY}.png`;
+            return `http://localhost:3500/api/dem/${safeZ}/${safeX}/${safeY}.png`;
           },
           // 🔧 通用高程解码 - 支持多种DEM格式
           getElevation: ({ r, g, b }: { r: number; g: number; b: number }) => {
@@ -654,7 +654,7 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
             const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
             
             const response = await fetch(
-              `http://localhost:3001/api/buildings/${Math.floor(tile.z)}/${tile.x}/${tile.y}.json`,
+              `http://localhost:3500/api/buildings/${Math.floor(tile.z)}/${tile.x}/${tile.y}.json`,
               { 
                 signal: controller.signal,
                 headers: {

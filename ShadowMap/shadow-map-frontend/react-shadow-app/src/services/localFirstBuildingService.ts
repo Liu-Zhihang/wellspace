@@ -200,7 +200,7 @@ export class LocalFirstBuildingService {
    */
   private async fetchTileFromBackend(z: number, x: number, y: number): Promise<any[] | null> {
     try {
-      const response = await fetch(`http://localhost:3001/api/buildings/${Math.floor(z)}/${x}/${y}.json`);
+      const response = await fetch(`http://localhost:3500/api/buildings/${Math.floor(z)}/${x}/${y}.json`);
       if (response.ok) {
         const data = await response.json();
         return data.features || [];

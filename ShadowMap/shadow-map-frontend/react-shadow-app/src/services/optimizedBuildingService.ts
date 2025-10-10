@@ -159,7 +159,7 @@ export class OptimizedBuildingService {
 
     try {
       const response = await fetch(
-        `http://localhost:3001/api/buildings/${Math.floor(tile.z)}/${tile.x}/${tile.y}.json`,
+        `http://localhost:3500/api/buildings/${Math.floor(tile.z)}/${tile.x}/${tile.y}.json`,
         {
           signal: controller.signal,
           headers: {

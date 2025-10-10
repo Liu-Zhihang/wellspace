@@ -3,7 +3,7 @@
  * 调用后端TUM API获取建筑数据
  */
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = 'http://localhost:3500/api';
 
 export interface BoundingBox {
   north: number;

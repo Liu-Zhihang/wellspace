@@ -5,7 +5,7 @@
 
 import { BoundingBox, TUMBuildingResponse, getTUMBuildings } from './tumBuildingService';
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = 'http://localhost:3500/api';
 
 export interface HybridBuildingResponse {
   success: boolean;
