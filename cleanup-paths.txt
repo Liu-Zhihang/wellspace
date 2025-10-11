@@ -1,0 +1,11 @@
+ShadowMap/Example/
+ShadowMap/shadow-map-frontend/react-shadow-app/public/Example/
+ShadowMap.zip
+ShadowMap/GlobalBuildingAtlas-main/
+ShadowMap/leaflet-shadow-simulator-main/
+ShadowMap/mapbox-gl-shadow-simulator/
+ShadowMap/node_modules/
+ShadowMap/shadow-map-backend/node_modules/
+ShadowMap/shadow-map-frontend/node_modules/
+ShadowMap/shadow-map-backend/data/
+ShadowMap/shadow-map-backend/dist/
