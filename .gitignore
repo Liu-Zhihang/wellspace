@@ -49,7 +49,7 @@ temp/
 !.env.sample
 
 # 中文文档和临时脚本（本地开发文档，不上传）
-# 忽略所有包含中文字符的Markdown和PDF文件
+# 忽略所有包含中文字符的 Markdown 和 PDF 文件
 **/*数据*.md
 **/*文档*.md
 **/*指南*.md
@@ -66,34 +66,38 @@ MongoDB数据访问完整指南.md
 开发文档.md
 mcp安装的坑以及wsl配置codex的坑.md
 
-# PowerShell脚本（临时工具）
+# PowerShell 脚本（临时工具）
 *.ps1
 
 # 临时目录
-scripts/
-$null
+ShadowMap/scripts/
+ShadowMap/$null
 
 # 外部项目（不应该提交）
-GlobalBuildingAtlas-main/
-leaflet-shadow-simulator-main/
-mapbox-gl-shadow-simulator/
+ShadowMap/GlobalBuildingAtlas-main/
+ShadowMap/leaflet-shadow-simulator-main/
+ShadowMap/mapbox-gl-shadow-simulator/
 
 # Local data / large assets (keep out of git history)
-data/
-storage/
-shadow-map-backend/data/
-shadow-map-backend/dist/
-shadow-map-backend/cache/
-shadow-map-backend/logs/
-shadow-map-backend/tmp/
-shadow-map-backend/downloads/
+ShadowMap/data/
+ShadowMap/storage/
+ShadowMap/shadow-map-backend/data/
+ShadowMap/shadow-map-backend/dist/
+ShadowMap/shadow-map-backend/cache/
+ShadowMap/shadow-map-backend/logs/
+ShadowMap/shadow-map-backend/tmp/
+ShadowMap/shadow-map-backend/downloads/
+ShadowMap/Example/
+ShadowMap/Example/**/*.tif
+ShadowMap/Example/**/*.zip
+ShadowMap/shadow-map-frontend/react-shadow-app/public/Example/
+ShadowMap/shadow-map-frontend/react-shadow-app/public/**/*.tif
+ShadowMap/shadow-map-frontend/react-shadow-app/public/**/*.zip
 
-shadow-map-frontend/react-shadow-app/public/Example/
-shadow-map-frontend/react-shadow-app/public/**/*.tif
-shadow-map-frontend/react-shadow-app/public/**/*.zip
+# 压缩归档（根目录文件）
+ShadowMap.zip
 
 # Misc
 *.pid
 *.seed
 *.tgz
-"�ռ����ݷ�����.md" 
