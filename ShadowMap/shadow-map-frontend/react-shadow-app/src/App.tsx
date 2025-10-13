@@ -31,7 +31,7 @@ function App() {
         {/* Top header */}
         <header className="shadow-map-header pointer-events-none fixed top-6 left-1/2 z-50 -translate-x-1/2">
           <div
-            className="pointer-events-auto items-center gap-4 rounded-2xl border border-white/30 bg-white/90 px-6 py-3 shadow-xl backdrop-blur-md"
+            className="pointer-events-auto items-center gap-4 rounded-2xl border border-gray-200 bg-white px-6 py-3 shadow-xl"
             style={{ display: 'inline-flex', width: 'auto' }}
           >
             <h1 className="text-lg font-bold text-gray-800 whitespace-nowrap">

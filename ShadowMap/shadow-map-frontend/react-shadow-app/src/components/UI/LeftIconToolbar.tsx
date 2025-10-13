@@ -1,14 +1,14 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Button, Popover, Slider, Switch, Tooltip } from 'antd';
+import React, { useMemo, useRef, useState } from 'react'
+import { Button, Popover, Slider, Switch, Tooltip } from 'antd'
 import {
-  ClockCircleOutlined,
-  BgColorsOutlined,
-  GlobalOutlined,
-  CloudUploadOutlined,
-  PauseCircleOutlined,
-  PlayCircleOutlined,
-} from '@ant-design/icons';
-import { useShadowMapStore } from '../../store/shadowMapStore';
+  ClockIcon,
+  SwatchIcon,
+  GlobeAltIcon,
+  ArrowUpTrayIcon,
+  PlayCircleIcon,
+  PauseCircleIcon,
+} from '@heroicons/react/24/outline'
+import { useShadowMapStore } from '../../store/shadowMapStore'
 
 type PanelId = 'time' | 'shadow' | 'style' | 'upload' | null;
 
@@ -107,7 +107,13 @@ export const LeftIconToolbar: React.FC = () => {
           <div className="flex items-center justify-between">
             <Button
               type={isAnimating ? 'default' : 'primary'}
-              icon={isAnimating ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+              icon={
+                isAnimating ? (
+                  <PauseCircleIcon className="h-4 w-4" />
+                ) : (
+                  <PlayCircleIcon className="h-4 w-4" />
+                )
+              }
               onClick={toggleAnimation}
             >
               {isAnimating ? 'Pause' : 'Animate'}
@@ -193,7 +199,12 @@ export const LeftIconToolbar: React.FC = () => {
           <span className="text-sm font-semibold text-gray-800">Add file to map</span>
           <p className="text-xs text-gray-500">Supported: .tif .tiff .gpx .kml .json .geojson</p>
         </div>
-        <Button type="primary" icon={<CloudUploadOutlined />} onClick={handleUploadClick} className="w-full">
+        <Button
+          type="primary"
+          icon={<ArrowUpTrayIcon className="h-4 w-4" />}
+          onClick={handleUploadClick}
+          className="w-full"
+        >
           Choose files
         </Button>
         <div className="rounded-lg bg-slate-50 p-3 text-[11px] text-gray-500">
@@ -208,19 +219,19 @@ export const LeftIconToolbar: React.FC = () => {
     label: string;
     icon: React.ReactNode;
   }> = [
-    { id: 'time', label: 'Time controls', icon: <ClockCircleOutlined /> },
-    { id: 'shadow', label: 'Shadow settings', icon: <BgColorsOutlined /> },
-    { id: 'style', label: 'Map style', icon: <GlobalOutlined /> },
-    { id: 'upload', label: 'Add file to map', icon: <CloudUploadOutlined /> },
+    { id: 'time', label: 'Time controls', icon: <ClockIcon className="h-5 w-5" /> },
+    { id: 'shadow', label: 'Shadow settings', icon: <SwatchIcon className="h-5 w-5" /> },
+    { id: 'style', label: 'Map style', icon: <GlobeAltIcon className="h-5 w-5" /> },
+    { id: 'upload', label: 'Add file to map', icon: <ArrowUpTrayIcon className="h-5 w-5" /> },
   ];
 
   return (
     <div
-      className="fixed z-50"
-      style={{ left: '1.5rem', bottom: '6rem' }}
+      className="fixed z-50 inline-flex flex-col gap-4"
+      style={{ left: '1.5rem', bottom: '6rem', width: 'fit-content' }}
     >
-      <div className="rounded-2xl border border-white/50 bg-white/90 p-3 shadow-2xl backdrop-blur-md">
-        <div className="flex flex-col gap-3">
+      <div className="rounded-2xl border border-white/40 bg-white/95 p-3 shadow-2xl">
+        <div className="flex flex-col gap-4">
           {toolbarItems.map((item) => (
             <Popover
               key={item.id}
@@ -235,13 +246,15 @@ export const LeftIconToolbar: React.FC = () => {
               <Tooltip title={item.label} placement="right">
                 <button
                   type="button"
+                  onClick={() => handleOpenChange(item.id, openPanel !== item.id)}
                   className={`flex h-12 w-12 items-center justify-center rounded-xl border transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-white ${
                     openPanel === item.id
-                      ? 'border-blue-400 bg-blue-600 text-white shadow-xl'
-                      : 'border-transparent bg-white text-slate-600 shadow-lg hover:bg-slate-100'
+                      ? 'border-blue-400 bg-blue-600 text-white shadow-xl focus:ring-blue-300'
+                      : 'border-transparent bg-white text-slate-600 shadow-lg hover:bg-slate-100 focus:ring-blue-200'
                   }`}
+                  aria-pressed={openPanel === item.id}
                 >
-                  <span className="text-lg">{item.icon}</span>
+                  {item.icon}
                 </button>
               </Tooltip>
             </Popover>
