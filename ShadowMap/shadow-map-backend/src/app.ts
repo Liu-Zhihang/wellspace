@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import path from 'path';
+import fs from 'fs';
 
 import demRoutes from './routes/dem';
 import healthRoutes from './routes/health';
@@ -64,11 +65,13 @@ app.use('/api/tum-buildings', tumBuildingRoutes); // TUM建筑数据API
 app.use('/api/local-tum', localTUMDataRoutes); // 本地TUM数据API
 app.use('/api/local-buildings', localBuildingDataRoutes); // 本地建筑数据处理API
 
-// 静态文件服务 - 提供前端文件
-const frontendPath = path.join(__dirname, '../../shadow-map-frontend');
-app.use(express.static(frontendPath));
+// 静态文件服务 - 优先提供React构建产物，其次提供原型目录
+const reactDistPath = path.join(__dirname, '../../shadow-map-frontend/react-shadow-app/dist');
+const fallbackPublic = path.join(__dirname, '../../shadow-map-frontend');
+const publicRoot = fs.existsSync(reactDistPath) ? reactDistPath : fallbackPublic;
 
-console.log(`📁 静态文件服务: ${frontendPath}`);
+app.use(express.static(publicRoot));
+console.log(`📁 静态文件服务: ${publicRoot}`);
 
 // 根路由
 app.get('/', (req, res) => {

@@ -101,3 +101,5 @@ ShadowMap.zip
 *.pid
 *.seed
 *.tgz
+**/tsconfig.tsbuildinfo
+**/*.tsbuildinfo

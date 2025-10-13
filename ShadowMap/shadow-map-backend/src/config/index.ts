@@ -49,7 +49,7 @@ const defaultConfig: Config = {
   port: parseInt(process.env['PORT'] || '3001', 10),
   
   mongodb: {
-    uri: process.env['MONGODB_URI'] || 'mongodb+srv://wujlin5_db_user:ECo9QuRvre5wiZ2T@cluster0.1qxqrnr.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
+    uri: process.env['MONGODB_URI'] || 'mongodb://localhost:27017',
     database: process.env['MONGODB_DATABASE'] || 'shadowmap',
     maxPoolSize: parseInt(process.env['MONGODB_MAX_POOL_SIZE'] || '10', 10),
     minPoolSize: parseInt(process.env['MONGODB_MIN_POOL_SIZE'] || '2', 10),

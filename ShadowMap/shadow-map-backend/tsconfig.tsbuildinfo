@@ -1,1 +1,0 @@
-{"root":["./src/app.ts","./src/server.ts","./src/routes/buildings.ts","./src/routes/dem.ts","./src/routes/health.ts","./src/scripts/downloaddem.ts","./src/services/buildingservice.ts","./src/services/demservice.ts","./src/types/building.ts"],"version":"5.9.2"}
