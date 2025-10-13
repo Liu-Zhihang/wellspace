@@ -35,99 +35,101 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
   
   // Connect to Zustand store
   const { currentDate, mapSettings } = useShadowMapStore();
+  const actionButtonBase =
+    'flex w-full h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60';
 
-  // 组件加载完成
-  console.log('✅ CleanShadowMap组件已加载');
+  // Component initialisation lifecycle
+  console.log('✅ CleanShadowMap mounted')
 
-  // 加载阴影模拟器库
+  // Load the shadow simulator script on demand
   const loadShadowSimulator = useCallback(() => {
     return new Promise((resolve, reject) => {
       if (window.ShadeMap) {
-        resolve(window.ShadeMap);
-        return;
+        resolve(window.ShadeMap)
+        return
       }
 
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/mapbox-gl-shadow-simulator/dist/mapbox-gl-shadow-simulator.umd.min.js';
+      const script = document.createElement('script')
+      script.src = 'https://unpkg.com/mapbox-gl-shadow-simulator/dist/mapbox-gl-shadow-simulator.umd.min.js'
       script.onload = () => {
         if (window.ShadeMap) {
-          console.log('✅ 阴影模拟器库加载成功');
-          setStatusMessage('阴影模拟器库加载成功');
-          resolve(window.ShadeMap);
+          console.log('✅ Shadow simulator library loaded')
+          setStatusMessage('Shadow simulator ready')
+          resolve(window.ShadeMap)
         } else {
-          reject(new Error('ShadeMap not loaded'));
+          reject(new Error('ShadeMap not loaded'))
         }
-      };
-      script.onerror = () => reject(new Error('Failed to load ShadeMap'));
-      document.head.appendChild(script);
-    });
-  }, []);
+      }
+      script.onerror = () => reject(new Error('Failed to load ShadeMap'))
+      document.head.appendChild(script)
+    })
+  }, [])
 
-  // 测试TUM连接
+  // Back-end connectivity quick check
   const testTUMConnection = useCallback(async () => {
     try {
-      setStatusMessage('测试TUM连接...');
-      const response = await fetch('http://localhost:3500/api/tum-buildings/test');
-      const result = await response.json();
+      setStatusMessage('Testing TUM connection...')
+      const response = await fetch('http://localhost:3500/api/tum-buildings/test')
+      const result = await response.json()
       
       if (result.success) {
-        setStatusMessage('TUM连接测试成功');
-        return true;
+        setStatusMessage('TUM connection successful')
+        return true
       } else {
-        setStatusMessage('TUM连接测试失败: ' + result.message);
-        return false;
+        setStatusMessage('TUM connection failed: ' + result.message)
+        return false
       }
     } catch (error) {
-      setStatusMessage('TUM连接测试失败: ' + (error as Error).message);
-      return false;
+      setStatusMessage('TUM connection failed: ' + (error as Error).message)
+      return false
     }
-  }, []);
+  }, [])
 
-  // 加载建筑物数据（使用后端流式处理）
+  // Load buildings from the back-end stream
   const loadBuildings = useCallback(async () => {
     if (!mapRef.current) {
-      setStatusMessage('地图未初始化');
-      return;
+      setStatusMessage('Map is not ready')
+      return
     }
 
     try {
-      setIsLoading(true);
-      setStatusMessage('正在加载当前视野范围的建筑物...');
-      console.log('🏢 开始加载当前视野范围的建筑物数据');
+      setIsLoading(true)
+      setStatusMessage('Loading buildings for the current view...')
+      console.log('🏢 Begin loading buildings for current viewport')
       
-      const bounds = mapRef.current.getBounds();
+      const bounds = mapRef.current.getBounds()
       const boundingBox = {
         north: bounds.getNorth(),
         south: bounds.getSouth(),
         east: bounds.getEast(),
-        west: bounds.getWest()
-      };
+        west: bounds.getWest(),
+      }
 
-      console.log('📍 当前视野边界:', boundingBox);
+      console.log('📍 Viewport bounds:', boundingBox)
 
       // Use the service with caching
-      const result = await getTUMBuildings(boundingBox, 10000); // Increase maxFeatures
+      const result = await getTUMBuildings(boundingBox, 10000) // Increase maxFeatures
       
       if (result.success && result.data) {
-        addBuildingsToMap(result.data);
-        setBuildingsLoaded(true);
-        setStatusMessage(`加载了 ${result.data.features.length} 个建筑物 (累计)`);
+        addBuildingsToMap(result.data)
+        setBuildingsLoaded(true)
+        setStatusMessage(`Loaded ${result.data.features.length} buildings in this session`)
       } else {
-        throw new Error(result.metadata?.message || 'Failed to load buildings');
+        throw new Error(result.metadata?.message || 'Failed to load buildings')
       }
     } catch (error) {
-      console.error('❌ 加载建筑物失败:', error);
-      setStatusMessage('加载建筑物失败: ' + (error as Error).message);
-      setBuildingsLoaded(false);
+      console.error('❌ Failed to load buildings:', error)
+      setStatusMessage('Building load failed: ' + (error as Error).message)
+      setBuildingsLoaded(false)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  }, []);
+  }, [])
 
-  // 🆕 将最新的 loadBuildings 存入 ref
+  // Keep the latest load handler accessible for debounced callbacks
   useEffect(() => {
-    loadBuildingsRef.current = loadBuildings;
-  }, [loadBuildings]);
+    loadBuildingsRef.current = loadBuildings
+  }, [loadBuildings])
 
   // 添加建筑物到地图 - 完整调试版本
   const addBuildingsToMap = useCallback((buildingData: any) => {
@@ -716,275 +718,118 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       {/* 🆕 左侧控制面板 (包含 Shadow Layer, Sun Exposure, Buildings, Dynamic Quality 按钮) */}
       <CleanControlPanel />
       
-      {/* 简洁的控制面板 - 修复定位问题 */}
-      <div style={{ 
-        position: 'absolute', 
-        top: '16px', 
-        right: '16px', 
-        zIndex: 9999,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px'
-      }}>
-        {/* 控制面板 */}
-        {/* TUM连接测试按钮 */}
-        <button
-          onClick={testTUMConnection}
-          disabled={isLoading}
-          style={{
-            background: '#2563eb',
-            color: 'white',
-            fontWeight: 'bold',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-            border: 'none',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-            opacity: isLoading ? 0.6 : 1,
-            fontSize: '14px',
-            minWidth: '140px'
-          }}
-          onMouseEnter={(e) => {
-            if (!isLoading) {
-              e.currentTarget.style.background = '#1d4ed8';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isLoading) {
-              e.currentTarget.style.background = '#2563eb';
-            }
-          }}
-        >
-          🔍 测试TUM连接
-        </button>
+      {/* 实用控制面板 */}
+      <div className="absolute top-6 right-6 z-40 flex w-72 max-w-[90vw] flex-col gap-4">
+        <div className="space-y-3 rounded-2xl border border-white/40 bg-white/95 p-4 shadow-2xl backdrop-blur-xl">
+          <button
+            onClick={testTUMConnection}
+            disabled={isLoading}
+            className={`${actionButtonBase} bg-blue-600 hover:bg-blue-700 focus:ring-blue-300`}
+          >
+            <span className="text-lg">🔍</span>
+            <span className="leading-tight">测试TUM连接</span>
+          </button>
 
-        {/* 🆕 调试按钮：测试moveend事件 */}
-        <button
-          onClick={() => {
-            if (mapRef.current) {
-              console.log('🧪 手动触发moveend事件测试');
-              console.log('地图对象:', mapRef.current);
-              console.log('自动加载状态:', autoLoadBuildings);
-              console.log('地图已加载:', mapRef.current.loaded());
-              
-              // 手动触发moveend
-              mapRef.current.fire('moveend');
-            }
-          }}
-          style={{
-            background: '#8b5cf6',
-            color: 'white',
-            fontWeight: 'bold',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '14px',
-            minWidth: '140px'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = '#7c3aed';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = '#8b5cf6';
-          }}
-        >
-          🧪 测试moveend
-        </button>
+          <button
+            onClick={() => {
+              if (mapRef.current) {
+                console.log('🧪 手动触发moveend事件测试');
+                console.log('地图对象:', mapRef.current);
+                console.log('自动加载状态:', autoLoadBuildings);
+                console.log('地图已加载:', mapRef.current.loaded());
+                mapRef.current.fire('moveend');
+              }
+            }}
+            className={`${actionButtonBase} bg-violet-500 hover:bg-violet-600 focus:ring-violet-300`}
+          >
+            <span className="text-lg">🧪</span>
+            <span className="leading-tight">测试moveend</span>
+          </button>
 
-        {/* 加载建筑物按钮 */}
-        <button
-          onClick={loadBuildings}
-          disabled={isLoading}
-          style={{
-            background: buildingsLoaded ? '#059669' : '#16a34a',
-            color: 'white',
-            fontWeight: 'bold',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-            border: 'none',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-            opacity: isLoading ? 0.6 : 1,
-            fontSize: '14px',
-            minWidth: '140px'
-          }}
-          onMouseEnter={(e) => {
-            if (!isLoading) {
-              e.currentTarget.style.background = buildingsLoaded ? '#047857' : '#15803d';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isLoading) {
-              e.currentTarget.style.background = buildingsLoaded ? '#059669' : '#16a34a';
-            }
-          }}
-        >
-          {isLoading ? (
-            <>
-              <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⏳</span> 加载中...
-            </>
-          ) : (
-            <>
-              🏢 {buildingsLoaded ? '重新加载建筑物' : '加载建筑物'}
-            </>
-          )}
-        </button>
+          <button
+            onClick={loadBuildings}
+            disabled={isLoading}
+            className={`${actionButtonBase} ${
+              buildingsLoaded
+                ? 'bg-emerald-600 hover:bg-emerald-700'
+                : 'bg-emerald-500 hover:bg-emerald-600'
+            } focus:ring-emerald-300`}
+          >
+            {isLoading ? (
+              <>
+                <span className="animate-spin text-lg">⏳</span>
+                <span className="leading-tight">加载中...</span>
+              </>
+            ) : (
+              <>
+                <span className="text-lg">🏢</span>
+                <span className="leading-tight">
+                  {buildingsLoaded ? '重新加载建筑物' : '加载建筑物'}
+                </span>
+              </>
+            )}
+          </button>
 
-        {/* 🆕 自动加载建筑物开关 */}
-        <button
-          onClick={() => setAutoLoadBuildings(!autoLoadBuildings)}
-          style={{
-            background: autoLoadBuildings ? '#f59e0b' : '#6b7280',
-            color: 'white',
-            fontWeight: 'bold',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '14px',
-            minWidth: '140px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = autoLoadBuildings ? '#d97706' : '#4b5563';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = autoLoadBuildings ? '#f59e0b' : '#6b7280';
-          }}
-        >
-          {autoLoadBuildings ? '🟢 自动加载: 开' : '⚫ 自动加载: 关'}
-        </button>
+          <button
+            onClick={() => setAutoLoadBuildings(!autoLoadBuildings)}
+            className={`${actionButtonBase} ${
+              autoLoadBuildings
+                ? 'bg-amber-500 hover:bg-amber-600 focus:ring-amber-300'
+                : 'bg-slate-500 hover:bg-slate-600 focus:ring-slate-300'
+            }`}
+          >
+            <span className="text-lg">{autoLoadBuildings ? '🟢' : '⚫'}</span>
+            <span className="leading-tight">
+              自动加载: {autoLoadBuildings ? '开' : '关'}
+            </span>
+          </button>
 
-        {/* 初始化阴影模拟器按钮 */}
-        <button
-          onClick={initShadowSimulator}
-          disabled={isLoading || !buildingsLoaded}
-          style={{
-            background: shadowLoaded ? '#6d28d9' : '#7c3aed',
-            color: 'white',
-            fontWeight: 'bold',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-            border: 'none',
-            cursor: (isLoading || !buildingsLoaded) ? 'not-allowed' : 'pointer',
-            opacity: (isLoading || !buildingsLoaded) ? 0.6 : 1,
-            fontSize: '14px',
-            minWidth: '140px'
-          }}
-          onMouseEnter={(e) => {
-            if (!isLoading && buildingsLoaded) {
-              e.currentTarget.style.background = '#5b21b6';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isLoading && buildingsLoaded) {
-              e.currentTarget.style.background = shadowLoaded ? '#6d28d9' : '#7c3aed';
-            }
-          }}
-        >
-          🌅 {shadowLoaded ? '重新计算阴影' : '初始化阴影模拟器'}
-        </button>
+          <button
+            onClick={initShadowSimulator}
+            disabled={isLoading || !buildingsLoaded}
+            className={`${actionButtonBase} ${
+              shadowLoaded
+                ? 'bg-indigo-600 hover:bg-indigo-700'
+                : 'bg-violet-600 hover:bg-violet-700'
+            } focus:ring-violet-300`}
+          >
+            <span className="text-lg">🌅</span>
+            <span className="leading-tight">
+              {shadowLoaded ? '重新计算阴影' : '初始化阴影模拟器'}
+            </span>
+          </button>
 
-        {/* 清除按钮 */}
-        <button
-          onClick={clearBuildings}
-          disabled={isLoading || (!buildingsLoaded && !shadowLoaded)}
-          style={{
-            background: '#dc2626',
-            color: 'white',
-            fontWeight: 'bold',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-            border: 'none',
-            cursor: (isLoading || (!buildingsLoaded && !shadowLoaded)) ? 'not-allowed' : 'pointer',
-            opacity: (isLoading || (!buildingsLoaded && !shadowLoaded)) ? 0.6 : 1,
-            fontSize: '14px',
-            minWidth: '140px'
-          }}
-          onMouseEnter={(e) => {
-            if (!isLoading && (buildingsLoaded || shadowLoaded)) {
-              e.currentTarget.style.background = '#b91c1c';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isLoading && (buildingsLoaded || shadowLoaded)) {
-              e.currentTarget.style.background = '#dc2626';
-            }
-          }}
-        >
-          🗑️ 清除所有数据
-        </button>
-        
-        <button
-          onClick={() => setShowCacheManager(true)}
-          style={{
-            padding: '10px 16px',
-            background: '#8B5CF6',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontSize: '14px',
-            fontWeight: '500',
-            boxShadow: '0 2px 8px rgba(139, 92, 246, 0.3)',
-            transition: 'all 0.2s ease'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = '#7C3AED';
-            e.currentTarget.style.transform = 'translateY(-1px)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = '#8B5CF6';
-            e.currentTarget.style.transform = 'translateY(0)';
-          }}
-        >
-          🗺️ 缓存管理器
-        </button>
+          <button
+            onClick={clearBuildings}
+            disabled={isLoading || (!buildingsLoaded && !shadowLoaded)}
+            className={`${actionButtonBase} bg-red-500 hover:bg-red-600 focus:ring-red-300`}
+          >
+            <span className="text-lg">🗑️</span>
+            <span className="leading-tight">清除所有数据</span>
+          </button>
 
-        {/* 时间控制 */}
-        <div style={{
-          background: 'rgba(255, 255, 255, 0.9)',
-          backdropFilter: 'blur(12px)',
-          borderRadius: '8px',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          padding: '12px',
-          minWidth: '200px'
-        }}>
-          <label style={{
-            display: 'block',
-            fontSize: '14px',
-            fontWeight: '500',
-            color: '#374151',
-            marginBottom: '8px'
-          }}>
-            阴影时间
-          </label>
+          <button
+            onClick={() => setShowCacheManager(true)}
+            className={`${actionButtonBase} bg-indigo-500 hover:bg-indigo-600 focus:ring-indigo-300`}
+          >
+            <span className="text-lg">🗺️</span>
+            <span className="leading-tight">缓存管理器</span>
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-white/40 bg-white/95 p-4 shadow-2xl backdrop-blur-xl">
+          <label className="mb-2 block text-sm font-medium text-gray-700">阴影时间</label>
           <input
             type="datetime-local"
             value={currentDate.toISOString().slice(0, 16)}
             onChange={(e) => updateShadowTime(new Date(e.target.value))}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid #d1d5db',
-              borderRadius: '6px',
-              fontSize: '14px'
-            }}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 shadow-inner focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
           />
         </div>
       </div>
 
       {/* 状态信息和操作指南 */}
-      <div className="absolute bottom-4 left-4 z-[9999] space-y-3">
+      <div className="absolute bottom-4 left-6 z-30 space-y-3">
         {/* 状态信息 */}
         <div className="bg-white/90 backdrop-blur-md rounded-lg shadow-lg border border-white/20 px-4 py-3">
           <div className="text-sm text-gray-700 space-y-1">

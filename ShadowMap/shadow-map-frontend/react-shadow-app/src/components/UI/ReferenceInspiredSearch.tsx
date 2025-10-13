@@ -1,67 +1,60 @@
-/**
- * 参考专业网站的顶部搜索栏设计
- * 学习参考网站的简洁搜索布局
- */
-
-import React, { useState } from 'react';
+import React, { useState } from 'react'
 
 export const ReferenceInspiredSearch: React.FC = () => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('')
+  const [isSearching, setIsSearching] = useState(false)
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
-    
-    setIsSearching(true);
-    console.log(`🔍 搜索: ${searchQuery}`);
-    
-    // 模拟搜索延迟
-    setTimeout(() => {
-      setIsSearching(false);
-      console.log(`✅ 搜索完成: ${searchQuery}`);
-    }, 1000);
-  };
+    if (!searchQuery.trim()) return
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSearch();
+    setIsSearching(true)
+    console.log(`Searching for: ${searchQuery}`)
+
+    // Simulate async search
+    setTimeout(() => {
+      setIsSearching(false)
+      console.log(`Search completed: ${searchQuery}`)
+    }, 1000)
+  }
+
+  const handleKeyPress = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      handleSearch()
     }
-  };
+  }
 
   return (
-    <div className="fixed top-4 left-4 z-30 flex items-center space-x-3">
-      {/* 汉堡菜单 */}
+    <div className="fixed top-8 left-6 z-40 flex items-center gap-4">
       <button
-        className="w-10 h-10 rounded-lg bg-white/95 backdrop-blur-sm shadow-lg border border-gray-200 flex items-center justify-center text-gray-600 hover:text-gray-800 transition-colors"
-        title="菜单"
+        className="w-11 h-11 rounded-xl bg-white/95 backdrop-blur-md shadow-xl border border-white/40 flex items-center justify-center text-gray-600 hover:text-gray-900 transition-colors"
+        title="Open navigation"
       >
         ☰
       </button>
 
-      {/* 搜索栏 */}
-      <div className="flex items-center bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-gray-200 overflow-hidden">
+      <div className="flex items-center bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-white/40 overflow-hidden">
         <input
           type="text"
-          placeholder="搜索地点..."
+          placeholder="Search places..."
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(event) => setSearchQuery(event.target.value)}
           onKeyPress={handleKeyPress}
-          className="px-4 py-2 w-64 text-sm focus:outline-none bg-transparent placeholder-gray-500"
+          className="px-4 py-2.5 w-72 text-sm focus:outline-none bg-transparent placeholder-gray-500"
         />
         
         <button
           onClick={handleSearch}
           disabled={isSearching || !searchQuery.trim()}
-          className={`px-3 py-2 text-sm font-medium transition-colors ${
+          className={`px-4 py-2.5 text-sm font-medium transition-colors ${
             isSearching || !searchQuery.trim()
               ? 'text-gray-400 cursor-not-allowed'
               : 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
           }`}
-          title="搜索"
+          title="Search"
         >
           {isSearching ? '⏳' : '📤'}
         </button>
       </div>
     </div>
-  );
-};
+  )
+}

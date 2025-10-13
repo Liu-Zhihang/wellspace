@@ -243,7 +243,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
       />
       
       {/* 底图选择器 */}
-      <div className="absolute top-4 left-4 z-[1000]">
+      <div className="absolute left-6 bottom-28 z-[1000]">
         <BaseMapSelector 
           mapInstance={mapRef.current}
           onBaseMapChange={(baseMapId) => {

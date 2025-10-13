@@ -108,59 +108,54 @@ export const TimeControlPanel: React.FC = () => {
       </Row>
 
       <div className="bg-gray-50/80 rounded-md p-2">
-        <Row align="middle" justify="center" gutter={6}>
-          <Col>
-            <Tooltip title="Back 6h">
-              <Button
-                size="small"
-                icon={<FastBackwardOutlined />}
-                onClick={() => adjustTime(-6)}
-              />
-            </Tooltip>
-          </Col>
-          <Col>
-            <Tooltip title="Back 1h">
-              <Button
-                size="small"
-                icon={<BackwardOutlined />}
-                onClick={() => adjustTime(-1)}
-              />
-            </Tooltip>
-          </Col>
-          <Col>
-            <Tooltip title={isPlaying ? 'Pause' : 'Play'}>
-              <Button
-                type="primary"
-                shape="circle"
-                icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
-                onClick={togglePlayback}
-              />
-            </Tooltip>
-          </Col>
-          <Col>
-            <Tooltip title="Forward 1h">
-              <Button
-                size="small"
-                icon={<ForwardOutlined />}
-                onClick={() => adjustTime(1)}
-              />
-            </Tooltip>
-          </Col>
-          <Col>
-            <Tooltip title="Forward 6h">
-              <Button
-                size="small"
-                icon={<FastForwardOutlined />}
-                onClick={() => adjustTime(6)}
-              />
-            </Tooltip>
-          </Col>
-        </Row>
+        <div className="flex items-center justify-center gap-3">
+          <Tooltip title="Back 6h">
+            <Button
+              size="small"
+              className="!flex !h-10 !w-10 items-center justify-center rounded-lg shadow-sm"
+              icon={<FastBackwardOutlined />}
+              onClick={() => adjustTime(-6)}
+            />
+          </Tooltip>
+          <Tooltip title="Back 1h">
+            <Button
+              size="small"
+              className="!flex !h-10 !w-10 items-center justify-center rounded-lg shadow-sm"
+              icon={<BackwardOutlined />}
+              onClick={() => adjustTime(-1)}
+            />
+          </Tooltip>
+          <Tooltip title={isPlaying ? 'Pause' : 'Play'}>
+            <Button
+              type="primary"
+              shape="circle"
+              className="!flex !h-12 !w-12 items-center justify-center shadow-md"
+              icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+              onClick={togglePlayback}
+            />
+          </Tooltip>
+          <Tooltip title="Forward 1h">
+            <Button
+              size="small"
+              className="!flex !h-10 !w-10 items-center justify-center rounded-lg shadow-sm"
+              icon={<ForwardOutlined />}
+              onClick={() => adjustTime(1)}
+            />
+          </Tooltip>
+          <Tooltip title="Forward 6h">
+            <Button
+              size="small"
+              className="!flex !h-10 !w-10 items-center justify-center rounded-lg shadow-sm"
+              icon={<FastForwardOutlined />}
+              onClick={() => adjustTime(6)}
+            />
+          </Tooltip>
+        </div>
       </div>
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-gray-600">Speed:</span>
-        <Space size="small">
+        <Space size="middle">
           {[1, 2, 4, 6, 12, 24].map((speed) => (
             <Button
               key={speed}

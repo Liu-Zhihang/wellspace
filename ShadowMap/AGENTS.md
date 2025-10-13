@@ -40,3 +40,12 @@ This document provides guidelines for AI coding agents contributing to this proj
 - **Title Format**: Commit messages and PR titles must follow this format: `[<pkg>] <Title>`.
     - Example: `[shadow-map-frontend] Refactor shadow calculation logic`
 - **Pre-commit Verification**: **Always** run `pnpm lint && pnpm test` before committing to ensure the code is clean and all tests pass. Any commit that fails these checks will be rejected.
+
+## Agent Interaction & Resource Management
+
+- **Be Mindful of Context Window**: The model has a limited context window. Avoid actions that generate excessively large outputs.
+- **Efficient Tool Usage**:
+    - When analyzing a UI with browser tools, avoid capturing full-page snapshots or screenshots unless absolutely necessary.
+    - Prefer to inspect smaller, specific components of the UI to get targeted information.
+    - When possible, use tool parameters to limit the scope of the output. For example, instead of a full DOM snapshot, query for specific elements.
+- **Iterative Refinement**: Instead of asking for a broad analysis ("improve the UI"), break down the task. For example: "First, analyze the header component, then the map controls." This keeps the context for each step smaller and more focused.

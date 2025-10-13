@@ -3,67 +3,65 @@
  * 解决用户找不到按钮的问题
  */
 
-import React, { useState } from 'react';
-import { useShadowMapStore } from '../../store/shadowMapStore';
+import React, { useState } from 'react'
+import { useShadowMapStore } from '../../store/shadowMapStore'
 
 export const SimpleControlPanel: React.FC = () => {
-  const { mapSettings, updateMapSettings } = useShadowMapStore();
-  const [isOpen, setIsOpen] = useState(false);
+  const { mapSettings, updateMapSettings } = useShadowMapStore()
+  const [isOpen, setIsOpen] = useState(false)
 
   const toggleBuildings = () => {
-    updateMapSettings({ 
+    updateMapSettings({
       showBuildingLayer: !mapSettings.showBuildingLayer,
       dataLayers: {
         ...mapSettings.dataLayers,
         buildings: {
           ...mapSettings.dataLayers.buildings,
-          enabled: !mapSettings.showBuildingLayer
-        }
-      }
-    });
-  };
+          enabled: !mapSettings.showBuildingLayer,
+        },
+      },
+    })
+  }
 
   const toggleShadows = () => {
-    updateMapSettings({ 
+    updateMapSettings({
       showShadowLayer: !mapSettings.showShadowLayer,
       dataLayers: {
         ...mapSettings.dataLayers,
         shadows: {
           ...mapSettings.dataLayers.shadows,
-          enabled: !mapSettings.showShadowLayer
-        }
-      }
-    });
-  };
+          enabled: !mapSettings.showShadowLayer,
+        },
+      },
+    })
+  }
 
   return (
-    <div className="fixed top-4 right-4 z-50">
-      {/* 主控制按钮 - 大而明显 */}
+    <div className="fixed top-24 right-6 z-40">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-16 h-16 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-2xl flex items-center justify-center text-2xl font-bold transition-all duration-200 hover:scale-110"
-        title="打开控制面板"
+        title="Toggle control panel"
       >
         ⚙️
       </button>
 
-      {/* 控制面板 */}
       {isOpen && (
-        <div className="absolute top-20 right-0 bg-white rounded-xl shadow-2xl border-2 border-gray-200 p-6 min-w-[300px]">
+        <div className="absolute top-24 right-0 bg-white rounded-2xl shadow-2xl border border-gray-200/80 p-6 min-w-[300px]">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-gray-800">地图控制</h3>
+            <h3 className="text-lg font-bold text-gray-800">Map controls</h3>
             <button
               onClick={() => setIsOpen(false)}
               className="text-gray-500 hover:text-gray-700 text-xl"
+              aria-label="Close panel"
             >
               ✕
             </button>
           </div>
 
-          {/* 建筑物控制 */}
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-gray-700">🏢 建筑物图层</span>
+              <span className="text-sm font-medium text-gray-700">🏢 Building layer</span>
               <button
                 onClick={toggleBuildings}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -72,21 +70,19 @@ export const SimpleControlPanel: React.FC = () => {
                     : 'bg-gray-100 text-gray-600 border-2 border-gray-300'
                 }`}
               >
-                {mapSettings.showBuildingLayer ? '已开启' : '已关闭'}
+                {mapSettings.showBuildingLayer ? 'Enabled' : 'Disabled'}
               </button>
             </div>
             <div className="text-xs text-gray-500 mb-2">
-              {mapSettings.showBuildingLayer 
-                ? '✅ 显示建筑物轮廓和高度信息' 
-                : '❌ 隐藏建筑物图层'
-              }
+              {mapSettings.showBuildingLayer
+                ? '✅ Display outlines and height data for loaded buildings.'
+                : '❌ Hide the building extrusion layer.'}
             </div>
           </div>
 
-          {/* 阴影控制 */}
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-gray-700">🌑 阴影图层</span>
+              <span className="text-sm font-medium text-gray-700">🌑 Shadow layer</span>
               <button
                 onClick={toggleShadows}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -95,61 +91,71 @@ export const SimpleControlPanel: React.FC = () => {
                     : 'bg-gray-100 text-gray-600 border-2 border-gray-300'
                 }`}
               >
-                {mapSettings.showShadowLayer ? '已开启' : '已关闭'}
+                {mapSettings.showShadowLayer ? 'Enabled' : 'Disabled'}
               </button>
             </div>
             <div className="text-xs text-gray-500 mb-2">
-              {mapSettings.showShadowLayer 
-                ? '✅ 显示实时阴影效果' 
-                : '❌ 隐藏阴影图层'
-              }
+              {mapSettings.showShadowLayer
+                ? '✅ Render realtime shadow overlays on the map.'
+                : '❌ Hide the shadow overlay layer.'}
             </div>
           </div>
 
-          {/* 建筑物筛选控制 */}
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-medium text-gray-700">🔍 建筑筛选</span>
+              <span className="text-sm font-medium text-gray-700">🔍 Building filter</span>
               <button
-                onClick={() => updateMapSettings({ enableBuildingFilter: !mapSettings.enableBuildingFilter })}
+                onClick={() =>
+                  updateMapSettings({ enableBuildingFilter: !mapSettings.enableBuildingFilter })
+                }
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   mapSettings.enableBuildingFilter
                     ? 'bg-orange-100 text-orange-800 border-2 border-orange-300'
                     : 'bg-gray-100 text-gray-600 border-2 border-gray-300'
                 }`}
               >
-                {mapSettings.enableBuildingFilter ? '已开启' : '已关闭'}
+                {mapSettings.enableBuildingFilter ? 'Enabled' : 'Disabled'}
               </button>
             </div>
             <div className="text-xs text-gray-500 mb-2">
-              {mapSettings.enableBuildingFilter 
-                ? '🔧 只显示重要建筑，减少阴影密度' 
-                : '🏗️ 显示所有建筑物，完整阴影效果'
-              }
+              {mapSettings.enableBuildingFilter
+                ? '🔧 Highlight key buildings to keep the shadow view lightweight.'
+                : '🏗️ Show the complete building dataset for full detail.'}
             </div>
           </div>
 
-          {/* 状态信息 */}
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-xs text-gray-600">
-              <div className="flex items-center mb-1">
-                <div className={`w-2 h-2 rounded-full mr-2 ${mapSettings.showBuildingLayer ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-                建筑物: {mapSettings.showBuildingLayer ? '显示中' : '已隐藏'}
-              </div>
-              <div className="flex items-center mb-1">
-                <div className={`w-2 h-2 rounded-full mr-2 ${mapSettings.showShadowLayer ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-                阴影: {mapSettings.showShadowLayer ? '显示中' : '已隐藏'}
+            <div className="text-xs text-gray-600 space-y-1">
+              <div className="flex items-center">
+                <div
+                  className={`w-2 h-2 rounded-full mr-2 ${
+                    mapSettings.showBuildingLayer ? 'bg-green-500' : 'bg-gray-400'
+                  }`}
+                ></div>
+                Buildings: {mapSettings.showBuildingLayer ? 'Visible' : 'Hidden'}
               </div>
               <div className="flex items-center">
-                <div className={`w-2 h-2 rounded-full mr-2 ${mapSettings.enableBuildingFilter ? 'bg-orange-500' : 'bg-gray-400'}`}></div>
-                筛选: {mapSettings.enableBuildingFilter ? '已启用' : '已禁用'}
+                <div
+                  className={`w-2 h-2 rounded-full mr-2 ${
+                    mapSettings.showShadowLayer ? 'bg-green-500' : 'bg-gray-400'
+                  }`}
+                ></div>
+                Shadows: {mapSettings.showShadowLayer ? 'Visible' : 'Hidden'}
+              </div>
+              <div className="flex items-center">
+                <div
+                  className={`w-2 h-2 rounded-full mr-2 ${
+                    mapSettings.enableBuildingFilter ? 'bg-orange-500' : 'bg-gray-400'
+                  }`}
+                ></div>
+                Filter: {mapSettings.enableBuildingFilter ? 'Active' : 'Inactive'}
               </div>
             </div>
           </div>
         </div>
       )}
     </div>
-  );
-};
+  )
+}
 
-export default SimpleControlPanel;
+export default SimpleControlPanel

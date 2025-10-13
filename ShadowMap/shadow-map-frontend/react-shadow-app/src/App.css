@@ -7,7 +7,7 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
 }
 
-/* 自定义滑块样式 */
+/* Custom slider styling */
 .slider {
   -webkit-appearance: none;
   appearance: none;
@@ -51,7 +51,7 @@
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
 
-/* 悬浮动画 */
+/* Floating animation */
 .fade-in {
   animation: fadeIn 0.3s ease-in-out;
 }
@@ -67,13 +67,13 @@
   }
 }
 
-/* 毛玻璃效果增强 */
+/* Frosted glass effect boost */
 .backdrop-blur-md {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
 
-/* 悬浮按钮阴影 */
+/* Elevated floating button shadow */
 .floating-shadow {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   transition: all 0.2s ease;
@@ -84,12 +84,12 @@
   transform: translateY(-2px);
 }
 
-/* 时间轴特殊效果 */
+/* Timeline glow effect */
 .timeline-glow {
   box-shadow: 0 0 20px rgba(255, 165, 0, 0.5);
 }
 
-/* 响应式设计 */
+/* Responsive adjustments */
 @media (max-width: 768px) {
   .floating-controls {
     right: 1rem;
@@ -104,9 +104,11 @@
     min-width: unset;
   }
   
-  header {
-    left: 1rem !important;
-    top: 1rem !important;
+  .shadow-map-header {
+    left: 50% !important;
+    top: 1.5rem !important;
+    transform: translateX(-50%) !important;
+    width: calc(100% - 2.5rem);
   }
 }
 
