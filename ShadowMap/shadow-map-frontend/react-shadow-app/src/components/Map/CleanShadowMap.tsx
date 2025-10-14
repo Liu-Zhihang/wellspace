@@ -32,9 +32,18 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
   const [autoLoadBuildings, setAutoLoadBuildings] = useState(true); // 🆕 默认开启自动加载
   const loadBuildingsRef = useRef<(() => Promise<void>) | undefined>(undefined); // 🆕 用于打破循环依赖
   const moveEndTimeoutRef = useRef<number | null>(null); // 🆕 防抖timer（在load事件中使用）
+  const tracePlaybackRef = useRef<number | null>(null);
   
   // Connect to Zustand store
-  const { currentDate, mapSettings } = useShadowMapStore();
+  const {
+    currentDate,
+    mapSettings,
+    mobilityTrace,
+    currentTraceIndex,
+    isTracePlaying,
+    setTracePlaying,
+    advanceTraceIndex,
+  } = useShadowMapStore();
   const actionButtonBase =
     'flex w-full h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60';
 
@@ -502,6 +511,224 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
     }
   }, []);
 
+  // Sync uploaded mobility trace onto the map
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const lineSourceId = 'mobility-trace-line';
+    const pointsSourceId = 'mobility-trace-points';
+    const currentPointSourceId = 'mobility-trace-current';
+
+    const removeTraceLayers = () => {
+      if (!map) return;
+      const removeLayerAndSource = (layerId: string, sourceId: string) => {
+        if (map.getLayer(layerId)) {
+          map.removeLayer(layerId);
+        }
+        if (map.getSource(sourceId)) {
+          map.removeSource(sourceId);
+        }
+      };
+
+      removeLayerAndSource('mobility-trace-line-layer', lineSourceId);
+      removeLayerAndSource('mobility-trace-point-layer', pointsSourceId);
+      removeLayerAndSource('mobility-trace-current-layer', currentPointSourceId);
+    };
+
+    const applyTraceLayers = () => {
+      if (!map || !map.isStyleLoaded()) {
+        return;
+      }
+
+      if (!mobilityTrace.length) {
+        removeTraceLayers();
+        return;
+      }
+
+      const lineFeature: Feature = {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: mobilityTrace.map((point) => point.coordinates),
+        },
+        properties: {},
+      };
+
+      const pointsCollection = {
+        type: 'FeatureCollection' as const,
+        features: mobilityTrace.map((point, index) => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: point.coordinates },
+          properties: { index, timestamp: point.timestampLabel },
+        })),
+      };
+
+      const updateSource = (sourceId: string, data: any) => {
+        const existing = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+        if (existing) {
+          existing.setData(data);
+        } else {
+          map.addSource(sourceId, { type: 'geojson', data });
+        }
+      };
+
+      updateSource(lineSourceId, lineFeature);
+      updateSource(pointsSourceId, pointsCollection);
+
+      if (!map.getLayer('mobility-trace-line-layer')) {
+        map.addLayer({
+          id: 'mobility-trace-line-layer',
+          type: 'line',
+          source: lineSourceId,
+          paint: {
+            'line-width': 3,
+            'line-color': '#ef4444',
+            'line-opacity': 0.7,
+          },
+        });
+      }
+
+      if (!map.getLayer('mobility-trace-point-layer')) {
+        map.addLayer({
+          id: 'mobility-trace-point-layer',
+          type: 'circle',
+          source: pointsSourceId,
+          paint: {
+            'circle-radius': 5,
+            'circle-color': '#f97316',
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 0.9,
+          },
+        });
+      }
+
+      if (!map.getSource(currentPointSourceId)) {
+        map.addSource(currentPointSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [],
+          },
+        });
+      }
+
+      if (!map.getLayer('mobility-trace-current-layer')) {
+        map.addLayer({
+          id: 'mobility-trace-current-layer',
+          type: 'circle',
+          source: currentPointSourceId,
+          paint: {
+            'circle-radius': 7,
+            'circle-color': '#2563eb',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+          },
+        });
+      }
+    };
+
+    if (!mobilityTrace.length) {
+      applyTraceLayers();
+      return;
+    }
+
+    let styleHandler: (() => void) | undefined;
+    if (!map.isStyleLoaded()) {
+      styleHandler = () => {
+        applyTraceLayers();
+        if (styleHandler) {
+          map.off('styledata', styleHandler);
+        }
+      };
+      map.on('styledata', styleHandler);
+    } else {
+      applyTraceLayers();
+    }
+
+    return () => {
+      if (styleHandler) {
+        map.off('styledata', styleHandler);
+      }
+    };
+  }, [mobilityTrace]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    const currentPoint = mobilityTrace[currentTraceIndex];
+    const currentSource = map.getSource('mobility-trace-current') as mapboxgl.GeoJSONSource | undefined;
+    if (!currentSource) return;
+
+    if (!currentPoint) {
+      currentSource.setData({
+        type: 'FeatureCollection',
+        features: [],
+      });
+      return;
+    }
+
+    currentSource.setData({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: currentPoint.coordinates },
+      properties: { timestamp: currentPoint.timestampLabel },
+    });
+  }, [mobilityTrace, currentTraceIndex]);
+
+  useEffect(() => {
+    if (!mobilityTrace.length) {
+      setTracePlaying(false);
+      return;
+    }
+
+    const point = mobilityTrace[currentTraceIndex];
+    if (!point) return;
+
+    if (mapRef.current) {
+      mapRef.current.easeTo({
+        center: point.coordinates,
+        duration: 1200,
+      });
+    }
+
+    updateShadowTime(point.time);
+  }, [mobilityTrace, currentTraceIndex, updateShadowTime, setTracePlaying]);
+
+  useEffect(() => {
+    if (tracePlaybackRef.current) {
+      window.clearInterval(tracePlaybackRef.current);
+      tracePlaybackRef.current = null;
+    }
+
+    if (!isTracePlaying || mobilityTrace.length <= 1) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      advanceTraceIndex();
+    }, 2000);
+
+    tracePlaybackRef.current = interval;
+
+    return () => {
+      if (tracePlaybackRef.current) {
+        window.clearInterval(tracePlaybackRef.current);
+        tracePlaybackRef.current = null;
+      }
+    };
+  }, [isTracePlaying, mobilityTrace.length, advanceTraceIndex]);
+
+  useEffect(() => {
+    return () => {
+      if (tracePlaybackRef.current) {
+        window.clearInterval(tracePlaybackRef.current);
+        tracePlaybackRef.current = null;
+      }
+    };
+  }, []);
+
   // Watch for setting changes and update shadow simulator
   useEffect(() => {
     // ✅ Guard: Check if shadow simulator and map are fully ready
@@ -643,7 +870,8 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       center: [11.5755, 48.1374], // 慕尼黑
       zoom: 16,
       pitch: 45,
-      bearing: 0
+      bearing: 0,
+      attributionControl: false,
     });
 
     mapRef.current = map;
@@ -710,6 +938,12 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+
+        .mapboxgl-ctrl-logo,
+        .mapboxgl-ctrl-bottom-right,
+        .mapboxgl-ctrl-attrib {
+          display: none !important;
         }
       `}</style>
       {/* 地图容器 */}

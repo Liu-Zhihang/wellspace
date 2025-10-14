@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import type { MapSettings, ShadowAnalysisResult, SunPosition, ShadowSettings, DataLayer, DataLayerType } from '../types';
 
+export interface MobilityTracePoint {
+  coordinates: [number, number];
+  time: Date;
+  timestampLabel: string;
+}
+
 interface ShadowMapState {
   // 当前日期时间
   currentDate: Date;
@@ -48,6 +54,17 @@ interface ShadowMapState {
   addStatusMessage: (message: string, type?: 'info' | 'warning' | 'error') => void;
   removeStatusMessage: (id: string) => void;
   clearStatusMessages: () => void;
+
+  // Mobility trace
+  mobilityTrace: MobilityTracePoint[];
+  currentTraceIndex: number;
+  isTracePlaying: boolean;
+  setMobilityTrace: (points: MobilityTracePoint[]) => void;
+  clearMobilityTrace: () => void;
+  setCurrentTraceIndex: (index: number) => void;
+  setTracePlaying: (playing: boolean) => void;
+  advanceTraceIndex: () => void;
+  advanceTraceIndex: () => void;
   
   // 数据层管理方法
   toggleDataLayer: (layerId: DataLayerType) => void;
@@ -198,6 +215,33 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   mapCenter: [39.9042, 116.4074], // 北京
   mapZoom: 15,
   setMapView: (center: [number, number], zoom: number) => set({ mapCenter: center, mapZoom: zoom }),
+
+  mobilityTrace: [],
+  currentTraceIndex: 0,
+  isTracePlaying: false,
+  setMobilityTrace: (points: MobilityTracePoint[]) => {
+    set({
+      mobilityTrace: points,
+      currentTraceIndex: 0,
+      isTracePlaying: points.length > 1,
+    });
+    if (points.length > 0) {
+      const firstTimestamp = points[0].timestampLabel;
+      get().addStatusMessage?.(
+        `Loaded mobility trace with ${points.length} waypoints (start ${firstTimestamp})`,
+        'info',
+      );
+    }
+  },
+  clearMobilityTrace: () => set({ mobilityTrace: [], currentTraceIndex: 0, isTracePlaying: false }),
+  setCurrentTraceIndex: (index: number) => set({ currentTraceIndex: index }),
+  setTracePlaying: (playing: boolean) => set({ isTracePlaying: playing }),
+  advanceTraceIndex: () => {
+    const state = get();
+    if (!state.mobilityTrace.length) return;
+    const nextIndex = (state.currentTraceIndex + 1) % state.mobilityTrace.length;
+    set({ currentTraceIndex: nextIndex });
+  },
   
   statusMessages: [],
   addStatusMessage: (message: string, type: 'info' | 'warning' | 'error' = 'info') => {

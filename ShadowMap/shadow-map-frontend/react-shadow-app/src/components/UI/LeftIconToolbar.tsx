@@ -8,7 +8,7 @@ import {
   PlayCircleIcon,
   PauseCircleIcon,
 } from '@heroicons/react/24/outline'
-import { useShadowMapStore } from '../../store/shadowMapStore'
+import { useShadowMapStore, MobilityTracePoint } from '../../store/shadowMapStore'
 
 type PanelId = 'time' | 'shadow' | 'style' | 'upload' | null;
 
@@ -34,6 +34,9 @@ export const LeftIconToolbar: React.FC = () => {
     mapSettings,
     updateMapSettings,
     addStatusMessage,
+    setMobilityTrace,
+    clearMobilityTrace,
+    setTracePlaying,
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
@@ -73,14 +76,124 @@ export const LeftIconToolbar: React.FC = () => {
     fileInputRef.current?.click();
   };
 
-  const handleFilesSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const readFileAsText = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+      reader.readAsText(file);
+    });
+
+  const parseMobilityTraceGeoJson = (raw: string): MobilityTracePoint[] => {
+    const json = JSON.parse(raw);
+    const points: MobilityTracePoint[] = [];
+
+    const pushPoint = (coordinates: unknown, timestampValue: unknown) => {
+      if (
+        !Array.isArray(coordinates) ||
+        coordinates.length < 2 ||
+        typeof coordinates[0] !== 'number' ||
+        typeof coordinates[1] !== 'number'
+      ) {
+        throw new Error('Invalid coordinate pair detected in trace file');
+      }
+
+      const candidate = typeof timestampValue === 'number' ? new Date(timestampValue) : new Date(String(timestampValue));
+      if (!timestampValue || Number.isNaN(candidate.getTime())) {
+        throw new Error('Trace point is missing a valid timestamp');
+      }
+
+      points.push({
+        coordinates: [coordinates[0], coordinates[1]],
+        time: candidate,
+        timestampLabel: candidate.toISOString(),
+      });
+    };
+
+    const extractTimestamp = (properties: Record<string, unknown> | undefined, index: number): unknown => {
+      if (!properties) return undefined;
+      if (properties.timestamp) return properties.timestamp;
+      if (properties.time) return properties.time;
+      if (properties.datetime) return properties.datetime;
+      if (Array.isArray(properties.timestamps) || Array.isArray((properties as Record<string, unknown>).times)) {
+        const arr = (properties.timestamps ?? (properties as Record<string, unknown>).times) as unknown[];
+        return arr[index];
+      }
+      return undefined;
+    };
+
+    const processFeature = (feature: any) => {
+      if (!feature || typeof feature !== 'object') return;
+      const { geometry, properties } = feature;
+      if (!geometry || typeof geometry !== 'object') return;
+
+      if (geometry.type === 'Point') {
+        pushPoint(geometry.coordinates, extractTimestamp(properties, 0));
+      } else if (geometry.type === 'MultiPoint') {
+        geometry.coordinates.forEach((coords: unknown, idx: number) => {
+          pushPoint(coords, extractTimestamp(properties, idx));
+        });
+      } else if (geometry.type === 'LineString') {
+        if (!Array.isArray(geometry.coordinates)) return;
+        geometry.coordinates.forEach((coords: unknown, idx: number) => {
+          pushPoint(coords, extractTimestamp(properties, idx));
+        });
+      }
+    };
+
+    if (json.type === 'FeatureCollection' && Array.isArray(json.features)) {
+      json.features.forEach(processFeature);
+    } else if (json.type === 'Feature') {
+      processFeature(json);
+    } else if (json.type === 'LineString') {
+      json.coordinates?.forEach((coords: unknown, idx: number) => {
+        pushPoint(coords, json.timestamps ? json.timestamps[idx] : undefined);
+      });
+    } else if (json.type === 'Point') {
+      pushPoint(json.coordinates, json.timestamp ?? json.time ?? json.datetime);
+    }
+
+    if (!points.length) {
+      throw new Error('Trace file did not contain any timestamped positions');
+    }
+
+    points.sort((a, b) => a.time.getTime() - b.time.getTime());
+    points.forEach((point) => {
+      point.timestampLabel = point.time.toLocaleString();
+    });
+
+    return points;
+  };
+
+  const handleFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
 
-    const readableNames = files.map((file) => file.name).join(', ');
-    addStatusMessage?.(`Files queued for import: ${readableNames}`);
-    console.log('Selected overlay files', files);
-    setOpenPanel(null);
+    const geoJsonFile = files.find((file) => {
+      const name = file.name.toLowerCase();
+      return name.endsWith('.geojson') || name.endsWith('.json') || file.type.includes('geo+json');
+    });
+
+    if (!geoJsonFile) {
+      addStatusMessage?.('Please select a GeoJSON trace file.', 'warning');
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      setTracePlaying(false);
+      const raw = await readFileAsText(geoJsonFile);
+      const tracePoints = parseMobilityTraceGeoJson(raw);
+      setMobilityTrace(tracePoints);
+      addStatusMessage?.(`Mobility trace ready (${tracePoints.length} points)`, 'info');
+      setOpenPanel(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to parse mobility trace';
+      clearMobilityTrace();
+      addStatusMessage?.(message, 'error');
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const renderPanelContent = (panelId: Exclude<PanelId, null>): React.ReactNode => {
@@ -269,6 +382,7 @@ export const LeftIconToolbar: React.FC = () => {
         accept=".tif,.tiff,.gpx,.kml,.json,.geojson"
         multiple
         className="hidden"
+        data-role="trace-upload-input"
         onChange={handleFilesSelected}
       />
     </div>
