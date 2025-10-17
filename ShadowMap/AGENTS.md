@@ -1,51 +1,39 @@
-# Development Guidelines for Coding Agents
+# Repository Guidelines
 
-This document provides guidelines for AI coding agents contributing to this project. Following these standards is mandatory to maintain code quality, consistency, and a clear architecture.
+## Project Structure & Module Organization
+- `shadow-map-backend/`: TypeScript Express API. Source code lives in `src/`, compiled output in `dist/`, smoke scripts in `test-*.sh`.
+- `shadow-map-frontend/react-shadow-app/`: Vite + React + TypeScript client. UI logic in `src/`, static examples under `public/Example`.
+- `Chinese documents/`: operational guides (e.g., tile import, deployment). Update when workflows change.
+- External simulators (`mapbox-gl-shadow-simulator/`, `leaflet-shadow-simulator-main/`) and large data caches remain local-only.
 
-## Core Principles
+## Build, Test, and Development Commands
+- Backend:
+  - `cd shadow-map-backend && cp .env.example .env && npm install` — install dependencies and prepare config.
+  - `npm run dev` — nodemon hot-reload server (port from `.env`, default 3500).
+  - `npm run build && npm start` — compile with `tsc` then run `dist/server.js`.
+- Frontend:
+  - `cd shadow-map-frontend/react-shadow-app && npm install`
+  - `npm run dev` — Vite dev server (`http://localhost:5173`).
+  - `npm run lint && npm run build` — ensure lint passes and emit production bundle.
+- Smoke tests: execute scripts like `bash test-both-endpoints.sh` after major data loads.
 
-1.  **Language**: All code, comments, documentation, and commit messages **must** be in **English**.
-2.  **Clarity and Simplicity**: The code architecture must be kept clean and modular. Avoid overly complex solutions or "spaghetti code." Prioritize readability and maintainability.
-3.  **Consistency**: Adhere strictly to the naming conventions and code style defined below. Consistency is key to a predictable and understandable codebase.
+## Coding Style & Naming Conventions
+- Language: all code, comments, docs, and commits must be in English.
+- TypeScript strict mode is enforced; resolve every `tsc` warning.
+- Formatting: follow ESLint/Prettier defaults; prefer single quotes and omit semicolons per legacy agent guide. Run `npm run lint` before commits.
+- Naming: camelCase for variables/functions/files, PascalCase for React components and types. Keep terminology consistent (`buildingData`, `tileId`).
+- Architecture: maintain modular separation (UI vs services vs data access); avoid “magic” values—document domain constants.
 
-## Setup
+## Testing Guidelines
+- No global unit suite yet; rely on targeted scripts and ad-hoc checks.
+- Add `*.test.ts` near complex logic when introducing new algorithms; exclude tests from production builds.
+- Validate data imports via GeoServer/PostGIS steps outlined in `Chinese documents/瓦片数据导入与统一流程.md`.
 
-- Install dependencies using the command: `pnpm install`
+## Commit & Pull Request Guidelines
+- Commit titles follow `[scope] message` (`scope` ∈ {`backend`,`frontend`,`docs`}): e.g., `[frontend] Center map on Hong Kong`.
+- Pre-commit checklist: backend `npm run build`; frontend `npm run lint && npm run build`.
+- PRs must include a concise summary, affected paths, run steps, smoke-test evidence, and UI screenshots/GIFs for visual changes. Reference related issues and flag data migrations.
 
-## Code Style
-
-- **TypeScript**: Strict mode is enforced (`"strict": true` in `tsconfig.json`). All new code must be type-safe.
-- **Formatting**:
-    - Use **single quotes** (`'`) for all strings.
-    - **Do not use semicolons** (`;`) at the end of statements.
-    - Always run `pnpm lint` to format the code before committing.
-- **Naming Conventions**:
-    - **Use consistent terminology.** Avoid using synonyms for the same concept across different files. For example, if a variable is named `buildingData` in one file, do not name it `structureInfo` or `propertyData` in another file if it represents the same data structure.
-    - Follow standard `camelCase` for variables and functions, and `PascalCase` for classes, types, and interfaces.
-
-## Architecture
-
-- **Modularity**: Encapsulate logic into reusable modules or functions.
-- **Separation of Concerns**: Ensure a clear distinction between different parts of the application (e.g., UI, business logic, data access).
-- **Avoid "Magic"**: Code should be explicit and easy to follow. Avoid clever tricks that obscure the intent of the code.
-
-## Testing
-
-- CI (Continuous Integration) plans are defined in the `.github/workflows/` directory.
-- To run tests for a specific package, use the command: `pnpm turbo run test --filter <pkg>`
-- **All tests must pass** before any code is committed. Run `pnpm test` locally to verify.
-
-## Pull Request (PR) / Commit Rules
-
-- **Title Format**: Commit messages and PR titles must follow this format: `[<pkg>] <Title>`.
-    - Example: `[shadow-map-frontend] Refactor shadow calculation logic`
-- **Pre-commit Verification**: **Always** run `pnpm lint && pnpm test` before committing to ensure the code is clean and all tests pass. Any commit that fails these checks will be rejected.
-
-## Agent Interaction & Resource Management
-
-- **Be Mindful of Context Window**: The model has a limited context window. Avoid actions that generate excessively large outputs.
-- **Efficient Tool Usage**:
-    - When analyzing a UI with browser tools, avoid capturing full-page snapshots or screenshots unless absolutely necessary.
-    - Prefer to inspect smaller, specific components of the UI to get targeted information.
-    - When possible, use tool parameters to limit the scope of the output. For example, instead of a full DOM snapshot, query for specific elements.
-- **Iterative Refinement**: Instead of asking for a broad analysis ("improve the UI"), break down the task. For example: "First, analyze the header component, then the map controls." This keeps the context for each step smaller and more focused.
+## Security & Configuration Tips
+- Never commit `.env` or credentials. Backend requires `MONGODB_URI`, `PORT`, etc.—copy `.env.example` locally.
+- Large datasets (`data/`, `cache/`, `storage/`) stay out of Git; document changes in the Chinese guides.

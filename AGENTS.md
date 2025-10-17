@@ -1,42 +1,19 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `ShadowMap/` is the main workspace.
-  - `shadow-map-backend/`: TypeScript Express API (`src/`, `dist/`, `.env*`, shell test scripts `test-*.sh`).
-  - `shadow-map-frontend/react-shadow-app/`: Vite + React + TypeScript client (`src/`, `public/`).
-  - `shadow-map-frontend/*.html`: Standalone prototypes/manual tests.
-  - External libs (`mapbox-gl-shadow-simulator/`, `leaflet-shadow-simulator-main/`) are local and ignored by Git.
-  - Data/cache directories (e.g., `ShadowMap/**/data`, `cache`, `storage`) are gitignored.
+ShadowMap/ is the workspace root. `shadow-map-backend/` houses the Express + TypeScript API; put source in `src/`, generated JS in `dist/`, and keep local environment files as `.env*`. The React client lives in `shadow-map-frontend/react-shadow-app/` with code under `src/` and static assets in `public/`. Standalone HTML prototypes sit beside the React app in `shadow-map-frontend/`. Data, cache, and third-party simulator directories remain local only; do not commit them. Place any new scripts in `ShadowMap/scripts` with executable permissions.
 
 ## Build, Test, and Development Commands
-- Backend
-  - `cd ShadowMap/shadow-map-backend && cp .env.example .env && npm install`
-  - `npm run dev` — start with Nodemon (port from `.env`, fallback 3001/3500).
-  - `npm run build && npm start` — compile (`tsc`) then run `dist/server.js`.
-- Frontend (React)
-  - `cd ShadowMap/shadow-map-frontend/react-shadow-app && npm install`
-  - `npm run dev` — Vite dev server (e.g., `http://localhost:5173`).
-  - `npm run build` — production build.
-- Prototypes: open `ShadowMap/shadow-map-frontend/*.html` directly or serve via a static server.
+Bootstrap once with `cd ShadowMap/shadow-map-backend && cp .env.example .env && npm install`. Run the backend in watch mode via `npm run dev`; compile and serve production code with `npm run build && npm start`. For the frontend, run `cd ShadowMap/shadow-map-frontend/react-shadow-app && npm install` followed by `npm run dev` for the Vite server or `npm run build` for production assets. Manual prototypes can be opened directly in a browser or served through any static file server.
 
 ## Coding Style & Naming Conventions
-- English only for code, comments, and commits.
-- TypeScript strict mode is enabled across backend and frontend.
-- Frontend lint: `npm run lint` (ESLint). Keep 0 errors before commit.
-- Naming: camelCase for variables/functions/files; PascalCase for React components and types.
-- Consistent terminology: do not rename the same concept across modules (e.g., keep `buildingData` consistent).
-- Modular design and separation of concerns (UI, business logic, data access). Avoid “magic”.
+Follow TypeScript strict mode across backend and frontend. Keep files, variables, and functions camelCase; reserve PascalCase for React components, classes, and types. Prefer descriptive names like `buildingDataService`. Use ESLint via `npm run lint` in the React project and respect all warnings before commit. Write concise comments only when the intent is unclear; default to self-explanatory code.
 
 ## Testing Guidelines
-- No formal test suite yet. Use backend shell scripts for smoke tests:
-  - Examples: `bash test-hongkong-data.sh`, `bash test-tum-wfs.sh`, `bash test-both-endpoints.sh`.
-- Add unit tests for new complex logic; co-locate as `*.test.ts` and exclude from build.
+Smoke-test API endpoints with the provided shell scripts (for example, `bash test-hongkong-data.sh` and `bash test-both-endpoints.sh`). Co-locate any new unit tests as `*.test.ts` files near their subjects and exclude them from runtime builds. Document manual test steps in pull requests when automation is not available.
 
 ## Commit & Pull Request Guidelines
-- Format: `[scope] title` where `scope` is `backend`/`frontend`/`docs`.
-- PRs include: summary, affected paths, run steps, and screenshots/GIFs for UI.
-- Pre-commit verification: frontend `npm run lint && npm run build`; backend `npm run build`. Do not commit `.env` or large data.
+Commit messages follow `[scope] title`, using scopes such as `backend`, `frontend`, or `docs`. Keep titles under ~60 characters and describe the change in the present tense. Pull requests should summarize intent, list touched paths, note verification steps (`npm run lint && npm run build`, `npm run build`), and include UI screenshots or GIFs when relevant. Link issues and call out follow-up work explicitly.
 
-## Security & Configuration
-- Backend requires `.env` (e.g., `MONGODB_URI`, `PORT`). Never commit secrets.
-- Large data/cache and external libraries are ignored per `.gitignore`; keep them local.
+## Security & Configuration Tips
+Never commit populated `.env` files; reference variable names only. Treat dataset exports and cache folders as disposable and keep them gitignored. When working on new integrations, review the existing `.env.example`, extend it if required, and document any sensitive setup steps in a secure channel rather than in this repository.

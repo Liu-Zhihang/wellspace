@@ -1,0 +1,214 @@
+import { buildingCache } from '../cache/buildingCache';
+
+const API_BASE = 'http://localhost:3500/api';
+
+export interface BoundingBox {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+}
+
+export interface BuildingServiceResponse {
+  success: boolean;
+  data: {
+    type: 'FeatureCollection';
+    features: any[];
+    metadata: {
+      source: string;
+      bounds?: BoundingBox;
+      totalFeatures: number;
+      numberMatched: number;
+      numberReturned: number;
+      timestamp: string;
+      [key: string]: unknown;
+    };
+  };
+  metadata?: unknown;
+}
+
+export async function testWfsConnection(): Promise<boolean> {
+  try {
+    console.log('[WFS] Testing connectivity');
+    const response = await fetch(`${API_BASE}/wfs-buildings/test`);
+    const result = await response.json();
+
+    if (result.success) {
+      console.log('[WFS] Connectivity verified');
+      return true;
+    }
+
+    console.warn('[WFS] Service reachable but returned no data', result.message);
+    return false;
+  } catch (error) {
+    console.error('[WFS] Connectivity test failed', error);
+    return false;
+  }
+}
+
+export async function getWfsBuildings(
+  bounds: BoundingBox,
+  maxFeatures?: number
+): Promise<BuildingServiceResponse> {
+  try {
+    const payload = {
+      north: bounds.north,
+      south: bounds.south,
+      east: bounds.east,
+      west: bounds.west,
+      maxFeatures: maxFeatures ?? 5000
+    };
+
+    console.log('[WFS] Requesting buildings by bounds', payload);
+
+    const response = await fetch(`${API_BASE}/wfs-buildings/bounds`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const result: BuildingServiceResponse = await response.json();
+
+    if (!result.success) {
+      throw new Error(result?.message ?? 'WFS bounds request failed');
+    }
+
+    buildingCache.add(result.data);
+    const aggregated = buildingCache.getAllAsFeatureCollection();
+
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        features: aggregated.features,
+        totalFeatures: aggregated.features.length,
+        numberReturned: aggregated.features.length,
+      }
+    };
+  } catch (error) {
+    console.error('[WFS] Failed to fetch buildings by bounds', error);
+    throw error;
+  }
+}
+
+export async function getBeijingSampleBuildings(): Promise<BuildingServiceResponse> {
+  try {
+    console.log('[WFS] Requesting Beijing sample dataset');
+
+    const response = await fetch(`${API_BASE}/wfs-buildings/sample/beijing`);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const result: BuildingServiceResponse = await response.json();
+
+    if (!result.success) {
+      throw new Error(result?.message ?? 'WFS sample request failed');
+    }
+
+    return result;
+  } catch (error) {
+    console.error('[WFS] Failed to fetch Beijing sample', error);
+    throw error;
+  }
+}
+
+export async function getWfsBuildingsByTile(
+  z: number,
+  x: number,
+  y: number,
+  maxFeatures?: number
+): Promise<BuildingServiceResponse> {
+  try {
+    const payload = {
+      z,
+      x,
+      y,
+      maxFeatures: maxFeatures ?? 5000
+    };
+
+    console.log('[WFS] Requesting buildings by tile', payload);
+
+    const response = await fetch(`${API_BASE}/wfs-buildings/tile`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const result: BuildingServiceResponse = await response.json();
+
+    if (!result.success) {
+      throw new Error(result?.message ?? 'WFS tile request failed');
+    }
+
+    return result;
+  } catch (error) {
+    console.error('[WFS] Failed to fetch buildings by tile', error);
+    throw error;
+  }
+}
+
+export async function compareBuildingCoverage(
+  bounds: BoundingBox
+): Promise<{
+  wfs: { count: number; success: boolean; error?: string };
+  osm: { count: number; success: boolean; error?: string };
+}> {
+  console.log('[WFS] Comparing coverage between WFS and OSM');
+
+  const result = {
+    wfs: { count: 0, success: false, error: undefined as string | undefined },
+    osm: { count: 0, success: false, error: undefined as string | undefined }
+  };
+
+  try {
+    const wfsResponse = await getWfsBuildings(bounds, 1000);
+    result.wfs.count = wfsResponse.data.features.length;
+    result.wfs.success = true;
+    console.log('[WFS] Coverage result', result.wfs.count);
+  } catch (error) {
+    result.wfs.error = error instanceof Error ? error.message : 'Unknown error';
+    console.warn('[WFS] Coverage query failed', result.wfs.error);
+  }
+
+  try {
+    const osmResponse = await fetch(
+      `${API_BASE}/buildings/${Math.floor(bounds.north * 1000)}/${Math.floor(bounds.west * 1000)}.json`
+    );
+
+    if (osmResponse.ok) {
+      const osmData = await osmResponse.json();
+      result.osm.count = osmData.features?.length ?? 0;
+      result.osm.success = true;
+    } else {
+      result.osm.error = `HTTP ${osmResponse.status}`;
+    }
+  } catch (error) {
+    result.osm.error = error instanceof Error ? error.message : 'Unknown error';
+  }
+
+  return result;
+}
+
+export const wfsBuildingService = {
+  testWfsConnection,
+  getWfsBuildings,
+  getBeijingSampleBuildings,
+  getWfsBuildingsByTile,
+  compareBuildingCoverage
+};
+
+export default wfsBuildingService;

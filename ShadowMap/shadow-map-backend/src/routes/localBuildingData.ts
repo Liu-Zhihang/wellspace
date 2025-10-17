@@ -1,6 +1,6 @@
 /**
- * 本地建筑数据处理API
- * 处理大型GeoJSON文件的空间查询，避免前端内存溢出
+ * Local building data helpers.
+ * Stream large GeoJSON files and fall back to the GeoServer WFS when needed.
  */
 
 import express from 'express';
@@ -9,7 +9,7 @@ import * as path from 'path';
 
 const router = express.Router();
 
-// 本地GeoJSON文件路径
+// Path to the on-disk GeoJSON sample. The file is intentionally kept outside the repo.
 const GEOJSON_FILE_PATH = path.join(__dirname, '../../../Example/LoD1/europe/e010_n50_e015_n45.geojson');
 
 interface BoundingBox {
@@ -20,9 +20,7 @@ interface BoundingBox {
   maxFeatures?: number;
 }
 
-/**
- * 检查点是否在边界框内
- */
+/** Determine whether a point lives inside the bounding box. */
 function isPointInBounds(lng: number, lat: number, bounds: BoundingBox): boolean {
   return lng >= bounds.west && 
          lng <= bounds.east && 
@@ -30,9 +28,7 @@ function isPointInBounds(lng: number, lat: number, bounds: BoundingBox): boolean
          lat <= bounds.north;
 }
 
-/**
- * 检查几何体是否与边界框相交
- */
+/** Determine whether the geometry intersects the requested bounds. */
 function geometryIntersectsBounds(geometry: any, bounds: BoundingBox): boolean {
   if (!geometry || !geometry.coordinates) return false;
 
@@ -51,43 +47,40 @@ function geometryIntersectsBounds(geometry: any, bounds: BoundingBox): boolean {
   return checkCoordinates(geometry.coordinates);
 }
 
-/**
- * 流式处理大型GeoJSON文件，返回边界框内的建筑物
- */
+/** Stream a large GeoJSON file and return the features inside the bounding box. */
 router.post('/bounds-from-local', async (req, res) => {
   try {
     const { north, south, east, west, maxFeatures } = req.body as BoundingBox;
-    
-    console.log(`🔍 处理本地GeoJSON文件的空间查询:`);
-    console.log(`   边界框: N${north}, S${south}, E${east}, W${west}`);
-    console.log(`   最大特征数: ${maxFeatures}`);
+
+    console.log('[LocalGeoJSON] Query requested');
+    console.log(`  Bounds: N${north}, S${south}, E${east}, W${west}`);
+    console.log(`  Max features: ${maxFeatures}`);
 
     // 验证参数
     if (!north || !south || !east || !west) {
       return res.status(400).json({
         success: false,
-        message: '缺少必要参数: north, south, east, west'
+        message: 'Parameters north, south, east, and west are required'
       });
     }
 
     const bounds = { north, south, east, west };
 
-    // 检查文件是否存在
+    // Check that the sample file exists
     if (!fs.existsSync(GEOJSON_FILE_PATH)) {
       return res.status(404).json({
         success: false,
-        message: `本地GeoJSON文件不存在: ${GEOJSON_FILE_PATH}`
+        message: `Local GeoJSON file not found: ${GEOJSON_FILE_PATH}`
       });
     }
 
-    console.log(`📁 开始流式读取大文件: ${GEOJSON_FILE_PATH}`);
+    console.log(`[LocalGeoJSON] Streaming ${GEOJSON_FILE_PATH}`);
     const startTime = Date.now();
 
-    // 由于文件太大(8GB)，我们先回退到使用TUM WFS服务
-    console.log('⚠️ 本地文件过大，回退到TUM WFS服务');
-    
-    // 调用TUM WFS API
-    const tumResponse = await fetch('http://localhost:3001/api/tum-buildings/bounds', {
+    // The sample file is very large (~8GB), so immediately fall back to the WFS service.
+    console.log('[LocalGeoJSON] Falling back to GeoServer WFS endpoint');
+
+    const wfsResponse = await fetch('http://localhost:3001/api/wfs-buildings/bounds', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -95,25 +88,25 @@ router.post('/bounds-from-local', async (req, res) => {
       body: JSON.stringify({ north, south, east, west, maxFeatures })
     });
 
-    if (!tumResponse.ok) {
-      throw new Error(`TUM WFS服务失败: ${tumResponse.status}`);
+    if (!wfsResponse.ok) {
+      throw new Error(`GeoServer WFS endpoint failed: ${wfsResponse.status}`);
     }
 
-    const tumResult = await tumResponse.json();
-    if (!tumResult.success) {
-      throw new Error(tumResult.message || 'TUM WFS返回失败');
+    const wfsResult = await wfsResponse.json();
+    if (!wfsResult.success) {
+      throw new Error(wfsResult.message || 'GeoServer WFS returned an error');
     }
 
-    const geojsonData = tumResult.data;
+    const geojsonData = wfsResult.data;
     
     const readTime = Date.now();
-    console.log(`📖 文件读取完成: ${readTime - startTime}ms`);
-    console.log(`📊 总特征数: ${geojsonData.features?.length || 0}`);
+    console.log(`[LocalGeoJSON] Response received in ${readTime - startTime}ms`);
+    console.log(`[LocalGeoJSON] Returned features: ${geojsonData.features?.length || 0}`);
 
     if (!geojsonData.features) {
       return res.status(400).json({
         success: false,
-        message: 'GeoJSON文件格式无效，缺少features数组'
+        message: 'Invalid GeoJSON payload: missing features array'
       });
     }
 
@@ -123,27 +116,24 @@ router.post('/bounds-from-local', async (req, res) => {
     
     for (const feature of geojsonData.features) {
       processedCount++;
-      
-      // 显示处理进度
+
       if (processedCount % 100000 === 0) {
-        console.log(`⏳ 已处理 ${processedCount}/${geojsonData.features.length} 个特征...`);
+        console.log(`[LocalGeoJSON] Processed ${processedCount}/${geojsonData.features.length} features...`);
       }
 
-      // 检查几何体是否与边界框相交
       if (geometryIntersectsBounds(feature.geometry, bounds)) {
         filteredFeatures.push(feature);
-        
-        // 如果设置了最大特征数限制，检查是否达到限制
+
         if (maxFeatures && filteredFeatures.length >= maxFeatures) {
-          console.log(`⚠️ 已达到最大特征数限制 (${maxFeatures})，停止处理`);
+          console.log(`[LocalGeoJSON] Reached max feature limit (${maxFeatures})`);
           break;
         }
       }
     }
 
     const filterTime = Date.now();
-    console.log(`🔍 空间过滤完成: ${filterTime - readTime}ms`);
-    console.log(`✅ 找到 ${filteredFeatures.length} 个在边界框内的建筑物`);
+    console.log(`[LocalGeoJSON] Spatial filter finished in ${filterTime - readTime}ms`);
+    console.log(`[LocalGeoJSON] ${filteredFeatures.length} buildings in bounds`);
 
     // 构建响应
     const result = {
@@ -152,7 +142,7 @@ router.post('/bounds-from-local', async (req, res) => {
     };
 
     const totalTime = Date.now() - startTime;
-    console.log(`🎯 总处理时间: ${totalTime}ms`);
+    console.log(`[LocalGeoJSON] Total processing time ${totalTime}ms`);
 
     res.json({
       success: true,
@@ -168,24 +158,22 @@ router.post('/bounds-from-local', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ 处理本地GeoJSON文件失败:', error);
+    console.error('[LocalGeoJSON] Failed to process request', error);
     res.status(500).json({
       success: false,
-      message: '处理本地GeoJSON文件失败',
+      message: 'Failed to process local GeoJSON file',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
 
-/**
- * 获取本地GeoJSON文件信息
- */
+/** Return metadata about the sample GeoJSON file. */
 router.get('/info', async (req, res) => {
   try {
     if (!fs.existsSync(GEOJSON_FILE_PATH)) {
       return res.status(404).json({
         success: false,
-        message: '本地GeoJSON文件不存在'
+        message: 'Local GeoJSON file not found'
       });
     }
 
@@ -211,7 +199,7 @@ router.get('/info', async (req, res) => {
     console.error('❌ 获取文件信息失败:', error);
     res.status(500).json({
       success: false,
-      message: '获取文件信息失败',
+      message: 'Failed to read GeoJSON metadata',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }

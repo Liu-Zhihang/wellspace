@@ -1,37 +1,28 @@
 /**
- * 混合建筑数据服务
- * 结合OSM和TUM GlobalBuildingAtlas数据源，提供更完整的建筑数据
+ * Hybrid building data service.
+ * Combines MongoDB cache, WFS (GeoServer) data, and OSM fallbacks.
  */
 
 import { buildingServiceMongoDB } from './buildingServiceMongoDB';
-import { fetchTUMBuildings, testTUMConnection, convertTUMToStandardGeoJSON } from './tumBuildingService';
-import { tumLongTermCacheService } from './tumLongTermCacheService';
+import { fetchWfsBuildings, testWfsConnection, convertWfsToStandardGeoJSON } from './buildingWfsService';
+import { buildingLongTermCacheService } from './buildingLongTermCacheService';
 
-// 数据源优先级配置
+// Data source priority configuration
 const DATA_SOURCE_PRIORITY = {
-  // 优先使用本地MongoDB缓存
   mongodb: 1,
-  // 其次使用TUM数据（质量更高）
-  tum: 2,
-  // 最后使用OSM数据（覆盖更全）
+  wfs: 2,
   osm: 3
 };
 
-// 混合数据源配置
 const HYBRID_CONFIG = {
-  // 暂时禁用TUM数据源（502 Bad Gateway）
-  enableTUM: false, // 🔧 临时禁用TUM，因为服务器返回502错误
-  // TUM数据超时时间
-  tumTimeout: 15000,
-  // OSM数据超时时间  
-  osmTimeout: 30000,
-  // 数据合并策略
-  mergeStrategy: 'osm_priority' // 🔧 改为OSM优先
+  enableWfs: false,
+  wfsTimeout: 15_000,
+  osmTimeout: 30_000,
+  mergeStrategy: 'osm_priority'
 };
 
 /**
- * 获取混合建筑数据
- * 按优先级尝试不同数据源
+ * Retrieve building data by combining multiple data sources following a priority order.
  */
 export async function getHybridBuildingTile(
   z: number,
@@ -54,28 +45,28 @@ export async function getHybridBuildingTile(
   let cached = false;
   let primarySource = 'unknown';
 
-  console.log(`🏗️ 获取混合建筑数据: ${z}/${x}/${y}`);
+  console.log(`[Hybrid] Fetching tile ${z}/${x}/${y}`);
 
   try {
-    // 1. 首先尝试TUM长期缓存（最优先）
-    console.log('  🎯 检查TUM长期缓存...');
+    // 1. First try the long-term cache (best latency)
+    console.log('  🎯 Checking long-term building cache...');
     try {
       // 计算瓦片中心点坐标
       const tileSize = 360 / Math.pow(2, z);
       const centerLng = (x + 0.5) * tileSize - 180;
       const centerLat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / Math.pow(2, z)))) * 180 / Math.PI;
       
-      const longTermCacheData = await tumLongTermCacheService.getCachedData(centerLat, centerLng, z);
+      const longTermCacheData = await buildingLongTermCacheService.getCachedData(centerLat, centerLng, z);
       if (longTermCacheData && longTermCacheData.features && longTermCacheData.features.length > 0) {
-        console.log(`  🚀 TUM长期缓存命中: ${longTermCacheData.features.length} 个建筑物`);
+        console.log(`  🚀 Long-term cache hit: ${longTermCacheData.features.length} buildings`);
         allFeatures = longTermCacheData.features;
         cached = true;
         primarySource = 'tum-long-term-cache';
         sources.push('tum-long-term-cache');
         
         // 异步预加载相邻网格
-        tumLongTermCacheService.preloadAdjacentGrids(centerLat, centerLng, z).catch(error => {
-          console.warn('⚠️ 预加载相邻网格失败:', error);
+        buildingLongTermCacheService.preloadAdjacentGrids(centerLat, centerLng, z).catch(error => {
+          console.warn('⚠️ Failed to preload adjacent grids', error);
         });
         
         return {
@@ -91,29 +82,28 @@ export async function getHybridBuildingTile(
         };
       }
     } catch (error) {
-      console.log('  ⚠️ TUM长期缓存未命中或出错:', error);
+      console.log('  ⚠️ Long-term cache miss or error', error);
     }
 
-    // 2. 然后尝试MongoDB缓存
-    console.log('  📦 检查MongoDB缓存...');
+    // 2. Then try MongoDB cache
+    console.log('  📦 Checking MongoDB cache...');
     try {
       const mongoData = await buildingServiceMongoDB.getBuildingTile(z, x, y);
       if (mongoData.features.length > 0) {
-        console.log(`  ✅ MongoDB缓存命中: ${mongoData.features.length} 个建筑物`);
+        console.log(`  ✅ MongoDB cache hit: ${mongoData.features.length} buildings`);
         allFeatures = mongoData.features;
         cached = true;
         primarySource = 'mongodb';
         sources.push('mongodb');
       }
     } catch (error) {
-      console.log('  ⚠️ MongoDB缓存未命中或出错');
+      console.log('  ⚠️ MongoDB cache miss or error');
     }
 
-    // 3. 如果MongoDB没有数据且启用TUM，尝试TUM数据源
-    if (allFeatures.length === 0 && HYBRID_CONFIG.enableTUM) {
-      console.log('  🌍 尝试TUM GlobalBuildingAtlas...');
+    // 3. If MongoDB misses and WFS is enabled, query the WFS endpoint
+    if (allFeatures.length === 0 && HYBRID_CONFIG.enableWfs) {
+      console.log('  🌍 Falling back to GeoServer WFS...');
       try {
-        // 将瓦片坐标转换为地理边界
         const tileSize = 360 / Math.pow(2, z);
         const west = x * tileSize - 180;
         const east = (x + 1) * tileSize - 180;
@@ -121,41 +111,38 @@ export async function getHybridBuildingTile(
         const south = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / Math.pow(2, z)))) * 180 / Math.PI;
         
         const bounds = { north, south, east, west };
-        const tumResponse = await fetchTUMBuildings(bounds, 1000);
-        const tumData = convertTUMToStandardGeoJSON(tumResponse);
-        if (tumData.features.length > 0) {
-          console.log(`  ✅ TUM数据获取成功: ${tumData.features.length} 个建筑物`);
-          allFeatures = tumData.features;
-          primarySource = 'tum';
-          sources.push('tum');
-          
-          // 保存到缓存系统
+        const wfsResponse = await fetchWfsBuildings(bounds, 1000);
+        const wfsData = convertWfsToStandardGeoJSON(wfsResponse);
+        if (wfsData.features.length > 0) {
+          console.log(`  ✅ WFS returned ${wfsData.features.length} buildings`);
+          allFeatures = wfsData.features;
+          primarySource = 'wfs';
+          sources.push('wfs');
+
           try {
-            // 计算瓦片中心点坐标
             const tileSize = 360 / Math.pow(2, z);
             const centerLng = (x + 0.5) * tileSize - 180;
             const centerLat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / Math.pow(2, z)))) * 180 / Math.PI;
             
-            // 并行保存到MongoDB和TUM长期缓存
             const savePromises = [
               buildingServiceMongoDB.saveBuildingTile(z, x, y, {
                 type: 'FeatureCollection',
-                features: tumData.features
+                features: wfsData.features
               }),
-              tumLongTermCacheService.setCachedData(centerLat, centerLng, z, {
+              buildingLongTermCacheService.setCachedData(centerLat, centerLng, z, {
                 type: 'FeatureCollection',
-                features: tumData.features
-              }, 'tum')
+                features: wfsData.features
+              }, 'wfs')
             ];
             
             await Promise.allSettled(savePromises);
-            console.log('  💾 TUM数据已保存到MongoDB和长期缓存');
+            console.log('  💾 WFS data cached in MongoDB and long-term store');
           } catch (saveError) {
-            console.warn('  ⚠️ TUM数据保存失败:', saveError);
+            console.warn('  ⚠️ Failed to persist WFS data', saveError);
           }
         }
       } catch (error) {
-        console.log('  ❌ TUM数据获取失败:', error);
+        console.log('  ❌ WFS request failed', error);
       }
     }
 
@@ -236,7 +223,7 @@ export async function checkAllDataSources(): Promise<{
   }
 
   // 检查TUM服务
-  if (HYBRID_CONFIG.enableTUM) {
+  if (HYBRID_CONFIG.enableWfs) {
     try {
       const tumHealth = await checkTUMServiceHealth();
       results.tum = tumHealth;

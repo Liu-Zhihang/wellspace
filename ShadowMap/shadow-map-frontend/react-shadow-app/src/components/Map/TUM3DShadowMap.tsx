@@ -2,10 +2,9 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
-import { tumShadowService, TUMShadowCalculationResult } from '../../services/tumShadowService';
-import { getTUMBuildings } from '../../services/tumBuildingService';
+import { shadowAnalysisService, ShadowCalculationResult } from '../../services/shadowAnalysisService';
+import { getWfsBuildings } from '../../services/wfsBuildingService';
 import { debugHelper } from '../../utils/debugHelper';
-import { testTUMShadowCalculation } from '../../utils/testTUMShadow';
 import { LayerDiagnostics } from '../../utils/layerDiagnostics';
 import * as SunCalc from 'suncalc';
 
@@ -19,7 +18,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
   const [is3D, setIs3D] = useState(true); // 默认3D模式
   const [isLoading, setIsLoading] = useState(false);
   const [isCalculatingShadows, setIsCalculatingShadows] = useState(false);
-  const [shadowData, setShadowData] = useState<TUMShadowCalculationResult | null>(null);
+  const [shadowData, setShadowData] = useState<ShadowCalculationResult | null>(null);
   
   const {
     mapSettings,
@@ -51,7 +50,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
 
     map.on('load', () => {
       console.log('✅ TUM 3D阴影地图加载完成');
-      loadTUMBuildings();
+      loadWfsBuildings();
       
       // 立即添加测试阴影
       setTimeout(() => {
@@ -78,13 +77,13 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
   }, [currentDate]);
 
   // 加载TUM建筑物数据
-  const loadTUMBuildings = async () => {
+  const loadWfsBuildings = async () => {
     if (!mapRef.current) return;
 
     setIsLoading(true);
     try {
       const mapBounds = mapRef.current.getBounds();
-      const buildingData = await getTUMBuildings({
+      const buildingData = await getWfsBuildings({
         north: mapBounds.getNorth(),
         south: mapBounds.getSouth(),
         east: mapBounds.getEast(),
@@ -93,20 +92,20 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
 
       if (buildingData.success && buildingData.data.features.length > 0) {
         addBuildingsToMap(buildingData.data);
-        addStatusMessage(`加载了 ${buildingData.data.features.length} 个TUM建筑物`, 'info');
+        addStatusMessage(`Loaded ${buildingData.data.features.length} buildings from WFS`, 'info');
         
         // 加载完成后自动计算真实阴影
         setTimeout(() => {
           addRealBuildingShadows();
         }, 500);
       } else {
-        addStatusMessage('未找到TUM建筑物数据', 'warning');
+        addStatusMessage('No building data returned from WFS', 'warning');
         // 即使没有建筑物数据，也添加测试阴影
         addRealBuildingShadows();
       }
     } catch (error) {
-      console.error('❌ 加载TUM建筑物失败:', error);
-      addStatusMessage(`加载TUM建筑物失败: ${error}`, 'error');
+      console.error('[ShadowMap] Failed to load WFS buildings', error);
+      addStatusMessage(`Failed to load WFS buildings: ${error}`, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -155,7 +154,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
       });
       
       console.log('🌅 开始计算阴影，边界:', bounds);
-      const result = await tumShadowService.calculateRealTimeShadows(bounds, currentDate, zoom);
+      const result = await shadowAnalysisService.calculateRealTimeShadows(bounds, currentDate, zoom);
       
       setShadowData(result);
       addShadowsToMap(result);
@@ -263,7 +262,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
   };
 
   // 将阴影添加到地图
-  const addShadowsToMap = (shadowResult: TUMShadowCalculationResult) => {
+  const addShadowsToMap = (shadowResult: ShadowCalculationResult) => {
     if (!mapRef.current) return;
 
     const map = mapRef.current;
@@ -560,7 +559,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
       console.log('🔄 地图移动，准备重新加载...');
       moveTimeoutRef.current = setTimeout(async () => {
         try {
-          await loadTUMBuildings();
+          await loadWfsBuildings();
           setTimeout(() => {
             addRealBuildingShadows();
           }, 500);
@@ -646,7 +645,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
             console.log('🔄 刷新所有图层...');
             setIsLoading(true);
             try {
-              await loadTUMBuildings();
+              await loadWfsBuildings();
               addStatusMessage('图层已刷新', 'info');
             } catch (error) {
               console.error('❌ 刷新失败:', error);

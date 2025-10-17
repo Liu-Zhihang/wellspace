@@ -4,7 +4,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import TUMCacheManager from '../UI/TUMCacheManager';
 import { CleanControlPanel } from '../UI/CleanControlPanel';
 import type { Feature } from 'geojson';
-import { getTUMBuildings } from '../../services/tumBuildingService';
+import { getWfsBuildings } from '../../services/wfsBuildingService';
 import { buildingCache } from '../../cache/buildingCache';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { shadowOptimizer } from '../../services/shadowOptimizer';
@@ -75,21 +75,21 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
   }, [])
 
   // Back-end connectivity quick check
-  const testTUMConnection = useCallback(async () => {
+  const testWfsConnection = useCallback(async () => {
     try {
-      setStatusMessage('Testing TUM connection...')
-      const response = await fetch('http://localhost:3500/api/tum-buildings/test')
+      setStatusMessage('Testing WFS connection...')
+      const response = await fetch('http://localhost:3500/api/wfs-buildings/test')
       const result = await response.json()
       
       if (result.success) {
-        setStatusMessage('TUM connection successful')
+        setStatusMessage('WFS connection successful')
         return true
       } else {
-        setStatusMessage('TUM connection failed: ' + result.message)
+        setStatusMessage('WFS connection failed: ' + result.message)
         return false
       }
     } catch (error) {
-      setStatusMessage('TUM connection failed: ' + (error as Error).message)
+      setStatusMessage('WFS connection failed: ' + (error as Error).message)
       return false
     }
   }, [])
@@ -117,7 +117,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       console.log('📍 Viewport bounds:', boundingBox)
 
       // Use the service with caching
-      const result = await getTUMBuildings(boundingBox, 10000) // Increase maxFeatures
+      const result = await getWfsBuildings(boundingBox, 10000) // Increase maxFeatures
       
       if (result.success && result.data) {
         addBuildingsToMap(result.data)
@@ -867,7 +867,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
       style: 'mapbox://styles/mapbox/streets-v11',
-      center: [11.5755, 48.1374], // 慕尼黑
+      center: [114.1694, 22.3193], // 香港
       zoom: 16,
       pitch: 45,
       bearing: 0,
@@ -929,7 +929,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         mapRef.current = null;
       }
     };
-  }, [loadShadowSimulator, testTUMConnection, initShadowSimulator]); // ✅ 移除 loadBuildings 依赖
+  }, [loadShadowSimulator, testWfsConnection, initShadowSimulator]); // ✅ 移除 loadBuildings 依赖
 
   return (
     <div className={`relative w-full h-full ${className}`}>
@@ -956,7 +956,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       <div className="absolute top-6 right-6 z-40 flex w-72 max-w-[90vw] flex-col gap-4">
         <div className="space-y-3 rounded-2xl border border-white/40 bg-white/95 p-4 shadow-2xl backdrop-blur-xl">
           <button
-            onClick={testTUMConnection}
+            onClick={testWfsConnection}
             disabled={isLoading}
             className={`${actionButtonBase} bg-blue-600 hover:bg-blue-700 focus:ring-blue-300`}
           >

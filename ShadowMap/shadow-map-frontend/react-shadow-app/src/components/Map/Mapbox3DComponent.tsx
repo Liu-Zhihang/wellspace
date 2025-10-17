@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
-import { getTUMBuildings } from '../../services/tumBuildingService';
+import { getWfsBuildings } from '../../services/wfsBuildingService';
 
 interface Mapbox3DComponentProps {
   className?: string;
@@ -47,7 +47,7 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
     // 地图加载完成后初始化
     map.on('load', () => {
       console.log('✅ Mapbox 3D地图加载完成');
-      loadTUMBuildings();
+      loadWfsBuildings();
       
       // 添加地图事件监听
       map.on('click', handleMapClick);
@@ -67,13 +67,13 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
   }, []);
 
   // 加载TUM建筑物数据
-  const loadTUMBuildings = async () => {
+  const loadWfsBuildings = async () => {
     if (!mapRef.current) return;
 
     setIsLoading(true);
     try {
       const bounds = mapRef.current.getBounds();
-      const buildingData = await getTUMBuildings({
+      const buildingData = await getWfsBuildings({
         north: bounds.getNorth(),
         south: bounds.getSouth(),
         east: bounds.getEast(),
@@ -82,13 +82,13 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
 
       if (buildingData.success && buildingData.data.features.length > 0) {
         addBuildingsToMap(buildingData.data);
-        addStatusMessage(`加载了 ${buildingData.data.features.length} 个TUM建筑物`, 'info');
+        addStatusMessage(`Loaded ${buildingData.data.features.length} buildings from WFS`, 'info');
       } else {
-        addStatusMessage('未找到TUM建筑物数据', 'warning');
+        addStatusMessage('No building data returned from WFS', 'warning');
       }
     } catch (error) {
-      console.error('❌ 加载TUM建筑物失败:', error);
-      addStatusMessage(`加载TUM建筑物失败: ${error}`, 'error');
+      console.error('[Mapbox3D] Failed to load WFS buildings', error);
+      addStatusMessage(`Failed to load WFS buildings: ${error}`, 'error');
     } finally {
       setIsLoading(false);
     }

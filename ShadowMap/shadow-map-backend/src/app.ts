@@ -7,18 +7,18 @@ import fs from 'fs';
 
 import demRoutes from './routes/dem';
 import healthRoutes from './routes/health';
-import buildingRoutes from './routes/buildings'; // 重新启用
+import buildingRoutes from './routes/buildings';
 import dataPreloadRoutes from './routes/dataPreload';
 import tileDebugRoutes from './routes/tileDebug';
 import buildingOptRoutes from './routes/buildingOptimization';
 import coordValidateRoutes from './routes/coordinateValidation';
-import tumBuildingRoutes from './routes/tumBuildings'; // TUM建筑数据路由
-import localTUMDataRoutes from './routes/localTUMData'; // 本地TUM数据路由
-import localBuildingDataRoutes from './routes/localBuildingData'; // 本地建筑数据处理路由
+import buildingWfsRoutes from './routes/buildingWfs';
+import localBuildingDatasetRoutes from './routes/localBuildingDataset';
+import localBuildingDataRoutes from './routes/localBuildingData';
 
 const app = express();
 
-// 中间件配置
+// Security middleware configuration
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: {
@@ -34,7 +34,7 @@ app.use(helmet({
   },
 }));
 
-// 最简单的 CORS 配置
+// Simple permissive CORS configuration
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', '*');
@@ -53,27 +53,27 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// API路由
+// API routes
 app.use('/api/health', healthRoutes);
 app.use('/api/dem', demRoutes);
-app.use('/api/buildings', buildingRoutes); // 重新启用
+app.use('/api/buildings', buildingRoutes);
 app.use('/api/preload', dataPreloadRoutes);
 app.use('/api/debug', tileDebugRoutes);
 app.use('/api/building-opt', buildingOptRoutes);
 app.use('/api/coord-validate', coordValidateRoutes);
-app.use('/api/tum-buildings', tumBuildingRoutes); // TUM建筑数据API
-app.use('/api/local-tum', localTUMDataRoutes); // 本地TUM数据API
-app.use('/api/local-buildings', localBuildingDataRoutes); // 本地建筑数据处理API
+app.use('/api/wfs-buildings', buildingWfsRoutes);
+app.use('/api/local-datasets', localBuildingDatasetRoutes);
+app.use('/api/local-buildings', localBuildingDataRoutes);
 
-// 静态文件服务 - 优先提供React构建产物，其次提供原型目录
+// Static file service - prefer the built React app, fall back to prototypes
 const reactDistPath = path.join(__dirname, '../../shadow-map-frontend/react-shadow-app/dist');
 const fallbackPublic = path.join(__dirname, '../../shadow-map-frontend');
 const publicRoot = fs.existsSync(reactDistPath) ? reactDistPath : fallbackPublic;
 
 app.use(express.static(publicRoot));
-console.log(`📁 静态文件服务: ${publicRoot}`);
+console.log(`[Static] Serving frontend assets from ${publicRoot}`);
 
-// 根路由
+// Root route
 app.get('/', (req, res) => {
   res.json({
     message: 'Shadow Map Backend API',
@@ -82,33 +82,32 @@ app.get('/', (req, res) => {
       health: '/api/health',
       dem: '/api/dem/:z/:x/:y.png',
       buildings: '/api/buildings/:z/:x/:y.json',
+      wfsBuildings: {
+        test: 'GET /api/wfs-buildings/test - verify GeoServer connectivity',
+        bounds: 'POST /api/wfs-buildings/bounds - fetch buildings for a bounding box',
+        tile: 'POST /api/wfs-buildings/tile - fetch buildings for a tile',
+        sample: 'GET /api/wfs-buildings/sample/beijing - sample dataset check'
+      },
       preload: {
-        cities: 'POST /api/preload/cities - 预处理热门城市',
-        location: 'POST /api/preload/location - 预处理指定位置',
-        status: 'GET /api/preload/status - 获取预处理状态',
-        cleanup: 'POST /api/preload/cleanup - 清理过期数据',
-        cityList: 'GET /api/preload/cities - 支持的城市列表'
+        cities: 'POST /api/preload/cities - warm frequently used city tiles',
+        location: 'POST /api/preload/location - warm cache for a coordinate radius',
+        status: 'GET /api/preload/status - inspect ongoing preload jobs',
+        cleanup: 'POST /api/preload/cleanup - clear stale preload entries',
+        cityList: 'GET /api/preload/cities - list supported preset cities'
       },
-      tumCache: {
-        stats: 'GET /api/tum-cache/stats - TUM缓存统计',
-        preload: 'POST /api/tum-cache/preload - 预加载区域',
-        check: 'GET /api/tum-cache/check - 检查缓存状态',
-        cleanup: 'DELETE /api/tum-cache/cleanup - 清理过期缓存',
-        config: 'GET /api/tum-cache/config - 缓存配置信息'
-      },
-      localTUM: {
-        status: 'GET /api/local-tum/status - 本地数据状态',
-        load: 'POST /api/local-tum/load - 加载数据到内存',
-        query: 'POST /api/local-tum/query - 查询建筑数据',
-        stats: 'GET /api/local-tum/stats - 统计信息',
-        info: 'GET /api/local-tum/info - 服务信息'
+      localDatasets: {
+        status: 'GET /api/local-datasets/status - inspect local dataset availability',
+        load: 'POST /api/local-datasets/load - load local dataset into memory',
+        query: 'POST /api/local-datasets/query - query buildings from local dataset',
+        stats: 'GET /api/local-datasets/stats - data statistics',
+        info: 'GET /api/local-datasets/info - metadata about the local dataset service'
       },
       docs: '/api/docs'
     }
   });
 });
 
-// 404处理
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
@@ -116,11 +115,11 @@ app.use((req, res) => {
   });
 });
 
-// 错误处理中间件
+// Error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('❌ Application Error:', err);
-  
-  // 防止头部已发送后再次发送响应
+  console.error('[Application] Unhandled error', err);
+
+  // Prevent duplicate responses once headers are sent
   if (res.headersSent) {
     return next(err);
   }

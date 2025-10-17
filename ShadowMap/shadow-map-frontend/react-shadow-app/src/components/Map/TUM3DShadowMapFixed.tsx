@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
-import { getTUMBuildings } from '../../services/tumBuildingService';
+import { getWfsBuildings } from '../../services/wfsBuildingService';
 
 // 声明全局ShadeMap类型
 declare global {
@@ -80,7 +80,7 @@ export const TUM3DShadowMapFixed: React.FC<TUM3DShadowMapProps> = ({ className =
 
     map.on('load', () => {
       console.log('✅ TUM 3D阴影地图加载完成');
-      loadTUMBuildings();
+      loadWfsBuildings();
       
       map.on('click', handleMapClick);
       map.on('moveend', handleMapMove);
@@ -95,13 +95,13 @@ export const TUM3DShadowMapFixed: React.FC<TUM3DShadowMapProps> = ({ className =
   }, []);
 
   // 加载TUM建筑物数据（只加载一次）
-  const loadTUMBuildings = useCallback(async () => {
+  const loadWfsBuildings = useCallback(async () => {
     if (!mapRef.current || buildingsLoaded) return;
 
     setIsLoading(true);
     try {
       const mapBounds = mapRef.current.getBounds();
-      const buildingData = await getTUMBuildings({
+      const buildingData = await getWfsBuildings({
         north: mapBounds.getNorth(),
         south: mapBounds.getSouth(),
         east: mapBounds.getEast(),
@@ -110,7 +110,7 @@ export const TUM3DShadowMapFixed: React.FC<TUM3DShadowMapProps> = ({ className =
 
       if (buildingData.success && buildingData.data.features.length > 0) {
         addBuildingsToMap(buildingData.data);
-        addStatusMessage(`加载了 ${buildingData.data.features.length} 个TUM建筑物`, 'info');
+        addStatusMessage(`Loaded ${buildingData.data.features.length} buildings from WFS`, 'info');
         setBuildingsLoaded(true);
         
         // 建筑物加载完成后初始化阴影模拟器
@@ -118,11 +118,11 @@ export const TUM3DShadowMapFixed: React.FC<TUM3DShadowMapProps> = ({ className =
           initShadowSimulator();
         }, 2000); // 增加延迟时间确保数据完全加载
       } else {
-        addStatusMessage('未找到TUM建筑物数据', 'warning');
+        addStatusMessage('No building data returned from WFS', 'warning');
       }
     } catch (error) {
-      console.error('❌ 加载TUM建筑物失败:', error);
-      addStatusMessage(`加载TUM建筑物失败: ${error}`, 'error');
+      console.error('[ShadowMapFixed] Failed to load WFS buildings', error);
+      addStatusMessage(`Failed to load WFS buildings: ${error}`, 'error');
     } finally {
       setIsLoading(false);
     }

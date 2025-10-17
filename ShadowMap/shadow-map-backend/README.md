@@ -24,6 +24,27 @@ npm run dev
 - DEM服务信息: http://localhost:3001/api/dem/info
 - 测试瓦片: http://localhost:3001/api/dem/10/512/384.png
 
+## 🌐 WFS Tile 配置
+
+- 使用 `./config/buildingTiles.json` 维护所有可用的 `tile_id`，每个条目包含经纬度范围、区域说明等。示例内容：
+  ```json
+  [
+    {
+      "tileId": "e110_n20_e115_n25",
+      "minLon": 110.0,
+      "minLat": 20.0,
+      "maxLon": 115.0,
+      "maxLat": 25.0,
+      "region": "East Asia"
+    }
+  ]
+  ```
+- 通过 `.env` 控制：
+  - `BUILDING_WFS_TILE_CATALOG_PATH`：tile catalog 文件路径（默认 `./config/buildingTiles.json`）。
+  - `BUILDING_WFS_TILE_STRATEGY`：`optional`（默认）表示未匹配到 tile 时仍按 BBOX 查询；`required` 表示必须匹配，未命中直接返回空结果。
+  - 可选 `BUILDING_WFS_TILE_ID`：在 catalog 未匹配时使用的兜底 tile。
+- 后端会根据前端传入的 bounds 自动解析需要的 `tile_id` 列表，并在向 GeoServer 发起请求时附带 `BBOX(...) AND tile_id IN (...)` 的过滤条件；响应的 `metadata.tilesQueried` 字段会回传实际命中的 tile，方便排查和扩展。
+
 ## 📋 可用脚本
 
 - `npm run dev` - 启动开发服务器 (带热重载)

@@ -464,5 +464,6 @@ export class TUMLongTermCacheService {
   }
 }
 
-// 导出单例实例
-export const tumLongTermCacheService = TUMLongTermCacheService.getInstance();
+// Export singleton instance
+export const buildingLongTermCacheService = TUMLongTermCacheService.getInstance();
+export const tumLongTermCacheService = buildingLongTermCacheService;

@@ -1,0 +1,20 @@
+[
+  {
+    "tileId": "e010_n50_e015_n45",
+    "minLon": 10.0,
+    "minLat": 45.0,
+    "maxLon": 15.0,
+    "maxLat": 50.0,
+    "region": "Europe",
+    "description": "Demo tile covering the Munich sample dataset"
+  },
+  {
+    "tileId": "e110_n25_e115_n20",
+    "minLon": 113.8,
+    "minLat": 21.8,
+    "maxLon": 114.6,
+    "maxLat": 22.7,
+    "region": "East Asia",
+    "description": "Hong Kong dataset tile"
+  }
+]

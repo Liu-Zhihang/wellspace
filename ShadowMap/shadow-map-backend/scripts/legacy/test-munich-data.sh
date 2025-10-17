@@ -48,12 +48,12 @@ echo ""
 echo "🧪 测试本地TUM数据API..."
 
 echo "1. 检查数据状态..."
-status_response=$(curl -s "$BACKEND_URL/api/local-tum/status" | head -c 500)
+status_response=$(curl -s "$BACKEND_URL/api/local-datasets/status" | head -c 500)
 echo "响应: $status_response"
 
 echo ""
 echo "2. 加载数据到内存..."
-load_response=$(curl -s -X POST "$BACKEND_URL/api/local-tum/load" | head -c 500)
+load_response=$(curl -s -X POST "$BACKEND_URL/api/local-datasets/load" | head -c 500)
 echo "响应: $load_response"
 
 echo ""
@@ -67,7 +67,7 @@ query_data='{
   "maxFeatures": 100
 }'
 
-query_response=$(curl -s -X POST "$BACKEND_URL/api/local-tum/query" \
+query_response=$(curl -s -X POST "$BACKEND_URL/api/local-datasets/query" \
   -H "Content-Type: application/json" \
   -d "$query_data")
 
@@ -103,6 +103,5 @@ echo "💡 下一步:"
 echo "1. 在React应用中切换到慕尼黑坐标 (11.5°E, 48.1°N)"
 echo "2. 测试3D阴影计算功能"
 echo "3. 验证整个系统工作正常后，再解决香港数据获取问题"
-
 
 

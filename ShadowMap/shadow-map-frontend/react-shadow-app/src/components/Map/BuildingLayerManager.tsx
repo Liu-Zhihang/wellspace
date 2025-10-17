@@ -7,7 +7,7 @@ import React, { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { localFirstBuildingService } from '../../services/localFirstBuildingService';
-import { tumBuildingService } from '../../services/tumBuildingService';
+import { wfsBuildingService } from '../../services/wfsBuildingService';
 
 interface BuildingLayerManagerProps {
   map: mapboxgl.Map;
@@ -75,11 +75,11 @@ export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map 
       })}`);
       
       // 首先尝试使用TUM数据
-      console.log('🏢 尝试获取TUM建筑数据...');
+      console.log('🏢 尝试获取WFS建筑数据...');
       let buildingData;
       
       try {
-        const tumResponse = await tumBuildingService.getTUMBuildings({
+        const tumResponse = await wfsBuildingService.getWfsBuildings({
           north: bounds.getNorth(),
           south: bounds.getSouth(),
           east: bounds.getEast(),
@@ -87,10 +87,10 @@ export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map 
         }, 2000);
         
         buildingData = tumResponse.data;
-        console.log(`✅ TUM数据获取成功: ${buildingData.features.length} 个建筑物`);
+        console.log(`✅ WFS 数据获取成功: ${buildingData.features.length} 个建筑物`);
         
       } catch (tumError) {
-        console.log('⚠️ TUM数据获取失败，回退到本地数据:', tumError);
+        console.log('⚠️ WFS 数据获取失败，回退到本地数据:', tumError);
         
         // 回退到本地数据
         buildingData = await localFirstBuildingService.getBuildingData({
@@ -103,14 +103,14 @@ export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map 
         console.log(`📊 本地数据: ${buildingData.features.length} 个建筑物`);
 
         if (buildingData.features.length === 0) {
-          console.log('📭 当前区域无建筑物数据，尝试获取北京区域TUM数据...');
+          console.log('📭 当前区域无建筑物数据，尝试获取北京示例建筑数据...');
           
           try {
-            const beijingTumResponse = await tumBuildingService.getBeijingTUMBuildings();
+            const beijingTumResponse = await wfsBuildingService.getBeijingSampleBuildings();
             buildingData = beijingTumResponse.data;
-            console.log(`🏙️ 北京TUM数据: ${buildingData.features.length} 个建筑物`);
+            console.log(`🏙️ 北京示例数据: ${buildingData.features.length} 个建筑物`);
           } catch (beijingTumError) {
-            console.log('❌ 北京TUM数据也获取失败，尝试本地北京数据:', beijingTumError);
+            console.log('❌ 北京示例数据也获取失败，尝试本地北京数据:', beijingTumError);
             
             // 最后尝试本地北京数据
             const beijingBounds = {

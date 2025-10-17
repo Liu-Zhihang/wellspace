@@ -54,12 +54,12 @@ echo ""
 echo "🧪 测试本地TUM数据API..."
 
 echo "1. 检查数据状态..."
-status_response=$(curl -s "$BACKEND_URL/api/local-tum/status" | head -c 500)
+status_response=$(curl -s "$BACKEND_URL/api/local-datasets/status" | head -c 500)
 echo "响应: $status_response"
 
 echo ""
 echo "2. 加载香港数据到内存..."
-load_response=$(curl -s -X POST "$BACKEND_URL/api/local-tum/load" | head -c 500)
+load_response=$(curl -s -X POST "$BACKEND_URL/api/local-datasets/load" | head -c 500)
 echo "响应: $load_response"
 
 echo ""
@@ -73,7 +73,7 @@ query_data='{
   "maxFeatures": 100
 }'
 
-query_response=$(curl -s -X POST "$BACKEND_URL/api/local-tum/query" \
+query_response=$(curl -s -X POST "$BACKEND_URL/api/local-datasets/query" \
   -H "Content-Type: application/json" \
   -d "$query_data")
 
@@ -125,6 +125,5 @@ echo "🌐 推荐测试位置:"
 echo "   - 香港中环: 114.158°E, 22.287°N"
 echo "   - 尖沙咀: 114.172°E, 22.297°N"  
 echo "   - 铜锣湾: 114.184°E, 22.281°N"
-
 
 

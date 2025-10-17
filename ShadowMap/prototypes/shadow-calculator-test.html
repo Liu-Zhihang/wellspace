@@ -141,7 +141,7 @@
         async function testTUMConnection() {
             try {
                 updateStatus('测试TUM连接...', 'warning');
-                const response = await fetch('http://localhost:3001/api/tum-buildings/test');
+                const response = await fetch('http://localhost:3001/api/wfs-buildings/test');
                 const result = await response.json();
                 
                 if (result.success) {
@@ -160,7 +160,7 @@
                 updateStatus('加载建筑物数据...', 'warning');
                 
                 const bounds = map.getBounds();
-                const response = await fetch('http://localhost:3001/api/tum-buildings/bounds', {
+                const response = await fetch('http://localhost:3001/api/wfs-buildings/bounds', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
