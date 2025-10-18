@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ant-design/icons": "^5.4.0",
     "@heroicons/react": "^2.2.0",
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/react-query": "^5.87.1",
@@ -21,7 +22,6 @@
     "leaflet": "^1.9.4",
     "leaflet-shadow-simulator": "^0.61.1",
     "mapbox-gl": "^2.15.0",
-    "mapbox-gl-shadow-simulator": "file:../../../mapbox-gl-shadow-simulator",
     "postcss": "^8.5.6",
     "rc-slider": "^11.1.9",
     "react": "^19.1.1",

@@ -489,13 +489,6 @@ export async function testWfsConnection(): Promise<boolean> {
   }
 }
 
-export type TUMBuildingFeature = WfsBuildingFeature;
-export type TUMBuildingResponse = WfsBuildingResponse;
-
-export const fetchTUMBuildings = fetchWfsBuildings;
-export const fetchTUMBuildingsPaginated = fetchWfsBuildingsPaginated;
-export const convertTUMToStandardGeoJSON = convertWfsToStandardGeoJSON;
-export const testTUMConnection = testWfsConnection;
 
 export default {
   fetchWfsBuildings,

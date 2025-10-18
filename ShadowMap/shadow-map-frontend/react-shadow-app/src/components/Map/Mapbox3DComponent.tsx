@@ -66,7 +66,7 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
     };
   }, []);
 
-  // 加载TUM建筑物数据
+// 加载WFS建筑物数据
   const loadWfsBuildings = async () => {
     if (!mapRef.current) return;
 
@@ -99,10 +99,10 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const sourceId = 'tum-buildings';
-    const fillLayerId = 'tum-buildings-fill';
-    const outlineLayerId = 'tum-buildings-outline';
-    const extrusionLayerId = 'tum-buildings-extrusion';
+    const sourceId = 'wfs-buildings';
+    const fillLayerId = 'wfs-buildings-fill';
+    const outlineLayerId = 'wfs-buildings-outline';
+    const extrusionLayerId = 'wfs-buildings-extrusion';
 
     // 移除现有图层
     if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
@@ -201,9 +201,9 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const extrusionLayerId = 'tum-buildings-extrusion';
-    const fillLayerId = 'tum-buildings-fill';
-    const outlineLayerId = 'tum-buildings-outline';
+    const extrusionLayerId = 'wfs-buildings-extrusion';
+    const fillLayerId = 'wfs-buildings-fill';
+    const outlineLayerId = 'wfs-buildings-outline';
 
     setIs3D(!is3D);
 
@@ -243,7 +243,7 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
     if (!mapRef.current) return;
 
     const features = mapRef.current.queryRenderedFeatures(e.point, {
-      layers: ['tum-buildings-fill', 'tum-buildings-extrusion']
+      layers: ['wfs-buildings-fill', 'wfs-buildings-extrusion']
     });
 
     if (features.length > 0) {
@@ -255,11 +255,11 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
         .setLngLat(e.lngLat)
         .setHTML(`
           <div class="min-w-48">
-            <h4 class="font-bold text-gray-800 mb-2">🏢 TUM建筑物信息</h4>
+            <h4 class="font-bold text-gray-800 mb-2">🏢 建筑物信息</h4>
             <p><strong>类型:</strong> ${props.buildingType || '未知'}</p>
             <p><strong>高度:</strong> ${props.height || '未知'}m</p>
             <p><strong>楼层:</strong> ${props.levels || '未知'}</p>
-            <p><strong>数据源:</strong> TUM GlobalBuildingAtlas</p>
+            <p><strong>数据源:</strong> WFS 服务</p>
           </div>
         `)
         .addTo(mapRef.current);
@@ -303,7 +303,7 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
           <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
             <div className="flex items-center gap-3">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-              <span className="text-gray-700">正在加载TUM建筑物数据...</span>
+              <span className="text-gray-700">正在加载建筑物数据...</span>
             </div>
           </div>
         </div>
@@ -313,7 +313,7 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
       <div className="absolute bottom-4 left-4 z-10">
         <div className="bg-white bg-opacity-90 rounded-lg px-3 py-2 shadow-lg">
           <div className="text-sm text-gray-600">
-            <span className="font-semibold">数据源:</span> TUM GlobalBuildingAtlas
+            <span className="font-semibold">数据源:</span> WFS 服务
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 /**
  * 调试辅助工具
- * 用于诊断TUM阴影计算问题
+ * 阴影计算诊断工具
  */
 
 export interface DebugInfo {
@@ -146,7 +146,7 @@ export class DebugHelper {
 
     const latest = recent[recent.length - 1];
     return `
-🔍 TUM阴影计算调试报告
+🔍 阴影计算调试报告
 ========================
 时间: ${latest.timestamp}
 地图就绪: ${latest.mapReady ? '是' : '否'}

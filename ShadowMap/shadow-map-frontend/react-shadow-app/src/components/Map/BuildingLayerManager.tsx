@@ -74,23 +74,23 @@ export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map 
         west: bounds.getWest()
       })}`);
       
-      // 首先尝试使用TUM数据
+      // 首先尝试使用WFS数据
       console.log('🏢 尝试获取WFS建筑数据...');
       let buildingData;
       
       try {
-        const tumResponse = await wfsBuildingService.getWfsBuildings({
+        const wfsResponse = await wfsBuildingService.getWfsBuildings({
           north: bounds.getNorth(),
           south: bounds.getSouth(),
           east: bounds.getEast(),
           west: bounds.getWest()
         }, 2000);
         
-        buildingData = tumResponse.data;
+        buildingData = wfsResponse.data;
         console.log(`✅ WFS 数据获取成功: ${buildingData.features.length} 个建筑物`);
         
-      } catch (tumError) {
-        console.log('⚠️ WFS 数据获取失败，回退到本地数据:', tumError);
+      } catch (wfsError) {
+        console.log('⚠️ WFS 数据获取失败，回退到本地数据:', wfsError);
         
         // 回退到本地数据
         buildingData = await localFirstBuildingService.getBuildingData({
@@ -106,11 +106,11 @@ export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map 
           console.log('📭 当前区域无建筑物数据，尝试获取北京示例建筑数据...');
           
           try {
-            const beijingTumResponse = await wfsBuildingService.getBeijingSampleBuildings();
-            buildingData = beijingTumResponse.data;
+            const beijingSampleResponse = await wfsBuildingService.getBeijingSampleBuildings();
+            buildingData = beijingSampleResponse.data;
             console.log(`🏙️ 北京示例数据: ${buildingData.features.length} 个建筑物`);
-          } catch (beijingTumError) {
-            console.log('❌ 北京示例数据也获取失败，尝试本地北京数据:', beijingTumError);
+          } catch (beijingError) {
+            console.log('❌ 北京示例数据也获取失败，尝试本地北京数据:', beijingError);
             
             // 最后尝试本地北京数据
             const beijingBounds = {

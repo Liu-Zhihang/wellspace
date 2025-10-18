@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import TUMCacheManager from '../UI/TUMCacheManager';
 import { CleanControlPanel } from '../UI/CleanControlPanel';
 import type { Feature } from 'geojson';
 import { getWfsBuildings } from '../../services/wfsBuildingService';
@@ -28,7 +27,6 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
   const [shadowLoaded, setShadowLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('准备中...');
-  const [showCacheManager, setShowCacheManager] = useState(false);
   const [autoLoadBuildings, setAutoLoadBuildings] = useState(true); // 🆕 默认开启自动加载
   const loadBuildingsRef = useRef<(() => Promise<void>) | undefined>(undefined); // 🆕 用于打破循环依赖
   const moveEndTimeoutRef = useRef<number | null>(null); // 🆕 防抖timer（在load事件中使用）
@@ -430,7 +428,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
             return `/Example/Height/europe/11.4_48.2_11.6_48.0_sr_ss.tif`;
           },
           getElevation: ({ r, g, b }: { r: number; g: number; b: number }) => {
-            // GeoTIFF格式的高程解析（根据TUM数据格式）
+            // GeoTIFF格式的高程解析（示例实现，视数据格式调整）
             return (r * 256 + g + b / 256) - 32768;
           }
         },
@@ -961,7 +959,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
             className={`${actionButtonBase} bg-blue-600 hover:bg-blue-700 focus:ring-blue-300`}
           >
             <span className="text-lg">🔍</span>
-            <span className="leading-tight">测试TUM连接</span>
+            <span className="leading-tight">测试WFS连接</span>
           </button>
 
           <button
@@ -1042,13 +1040,6 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
             <span className="leading-tight">清除所有数据</span>
           </button>
 
-          <button
-            onClick={() => setShowCacheManager(true)}
-            className={`${actionButtonBase} bg-indigo-500 hover:bg-indigo-600 focus:ring-indigo-300`}
-          >
-            <span className="text-lg">🗺️</span>
-            <span className="leading-tight">缓存管理器</span>
-          </button>
         </div>
 
         <div className="rounded-2xl border border-white/40 bg-white/95 p-4 shadow-2xl backdrop-blur-xl">
@@ -1087,7 +1078,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
           <div className="text-sm text-blue-800">
             <div className="font-medium mb-2">📋 操作步骤:</div>
             <div className="space-y-1 text-xs">
-              <div>1. 🔍 测试TUM连接</div>
+              <div>1. 🔍 测试WFS连接</div>
               <div>2. 🏢 加载建筑物数据</div>
               <div>3. 🌅 初始化阴影模拟器</div>
               <div>4. ⏰ 调整时间查看阴影变化</div>
@@ -1095,12 +1086,6 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
           </div>
         </div>
       </div>
-
-      {/* TUM缓存管理器 */}
-      <TUMCacheManager 
-        isVisible={showCacheManager}
-        onClose={() => setShowCacheManager(false)}
-      />
     </div>
   );
 };

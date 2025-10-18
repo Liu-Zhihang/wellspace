@@ -65,7 +65,7 @@ interface LoadedDataset {
 }
 
 const DEFAULT_DATA_DIR = path.join(__dirname, '../../data/local-buildings');
-const LEGACY_TUM_DIR = path.join(__dirname, '../../data/tum-buildings');
+const LEGACY_DATA_DIR = path.join(__dirname, '../../data/tum-buildings');
 
 const LOCAL_DATA_CONFIG = {
   dataDir: resolveDataDir(),
@@ -304,7 +304,7 @@ function resolveDataDir(): string {
     return process.env['LOCAL_BUILDING_DATA_DIR'];
   }
 
-  return preferExistingDirectory(DEFAULT_DATA_DIR, LEGACY_TUM_DIR);
+  return preferExistingDirectory(DEFAULT_DATA_DIR, LEGACY_DATA_DIR);
 }
 
 async function fileExists(filePath: string): Promise<boolean> {

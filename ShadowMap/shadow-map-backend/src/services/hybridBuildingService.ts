@@ -61,8 +61,8 @@ export async function getHybridBuildingTile(
         console.log(`  🚀 Long-term cache hit: ${longTermCacheData.features.length} buildings`);
         allFeatures = longTermCacheData.features;
         cached = true;
-        primarySource = 'tum-long-term-cache';
-        sources.push('tum-long-term-cache');
+        primarySource = 'long-term-cache';
+        sources.push('long-term-cache');
         
         // 异步预加载相邻网格
         buildingLongTermCacheService.preloadAdjacentGrids(centerLat, centerLng, z).catch(error => {
@@ -199,14 +199,14 @@ export async function getHybridBuildingTile(
  */
 export async function checkAllDataSources(): Promise<{
   mongodb: { available: boolean; stats?: any };
-  tum: { available: boolean; responseTime?: number; error?: string };
+  wfs: { available: boolean; responseTime?: number; error?: string };
   osm: { available: boolean; error?: string };
 }> {
-  console.log('🔍 检查所有数据源健康状态...');
+  console.log('[Hybrid] Checking data source health');
 
   const results = {
     mongodb: { available: false },
-    tum: { available: false },
+    wfs: { available: false },
     osm: { available: false }
   };
 
@@ -217,23 +217,23 @@ export async function checkAllDataSources(): Promise<{
       available: true,
       stats: mongoStats
     };
-    console.log('  ✅ MongoDB: 可用');
+    console.log('  ✅ MongoDB available');
   } catch (error) {
-    console.log('  ❌ MongoDB: 不可用', error);
+    console.log('  ❌ MongoDB unavailable', error);
   }
 
-  // 检查TUM服务
+  // 检查WFS服务
   if (HYBRID_CONFIG.enableWfs) {
     try {
-      const tumHealth = await checkTUMServiceHealth();
-      results.tum = tumHealth;
-      if (tumHealth.available) {
-        console.log(`  ✅ TUM: 可用 (${tumHealth.responseTime}ms)`);
+      const wfsHealth = await checkWfsServiceHealth();
+      results.wfs = wfsHealth;
+      if (wfsHealth.available) {
+        console.log(`  ✅ WFS available (${wfsHealth.responseTime}ms)`);
       } else {
-        console.log('  ❌ TUM: 不可用', tumHealth.error);
+        console.log('  ❌ WFS unavailable', wfsHealth.error);
       }
     } catch (error) {
-      console.log('  ❌ TUM: 检查失败', error);
+      console.log('  ❌ WFS health check failed', error);
     }
   }
 
@@ -241,10 +241,10 @@ export async function checkAllDataSources(): Promise<{
   try {
     // 实际实现中需要检查OSM服务
     results.osm = { available: true };
-    console.log('  ✅ OSM: 可用');
+    console.log('  ✅ OSM available');
   } catch (error) {
     results.osm = { available: false, error: 'Unknown error' };
-    console.log('  ❌ OSM: 不可用', error);
+    console.log('  ❌ OSM unavailable', error);
   }
 
   return results;
@@ -266,7 +266,7 @@ export async function getDataSourceStats(): Promise<{
       totalBuildings: mongoStats.totalBuildings,
       sourceDistribution: {
         mongodb: mongoStats.totalBuildings, // 简化处理
-        tum: 0, // 需要实际统计
+        wfs: 0, // 需要实际统计
         osm: 0  // 需要实际统计
       },
       averageResponseTime: 0, // 需要实际统计
@@ -279,6 +279,23 @@ export async function getDataSourceStats(): Promise<{
       sourceDistribution: {},
       averageResponseTime: 0,
       cacheHitRate: 0
+    };
+  }
+}
+
+async function checkWfsServiceHealth(): Promise<{ available: boolean; responseTime?: number; error?: string }> {
+  const start = Date.now();
+  try {
+    const ok = await testWfsConnection();
+    const responseTime = Date.now() - start;
+    if (ok) {
+      return { available: true, responseTime };
+    }
+    return { available: false, responseTime, error: 'No data returned' };
+  } catch (error) {
+    return {
+      available: false,
+      error: error instanceof Error ? error.message : String(error)
     };
   }
 }

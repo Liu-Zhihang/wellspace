@@ -8,11 +8,11 @@ import { debugHelper } from '../../utils/debugHelper';
 import { LayerDiagnostics } from '../../utils/layerDiagnostics';
 import * as SunCalc from 'suncalc';
 
-interface TUM3DShadowMapProps {
+interface Wfs3DShadowMapProps {
   className?: string;
 }
 
-export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }) => {
+export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [is3D, setIs3D] = useState(true); // 默认3D模式
@@ -31,7 +31,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    console.log('🗺️ 初始化TUM 3D阴影地图...');
+    console.log('🗺️ Initialising WFS 3D shadow map...');
 
     mapboxgl.accessToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
 
@@ -49,7 +49,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
     mapRef.current = map;
 
     map.on('load', () => {
-      console.log('✅ TUM 3D阴影地图加载完成');
+      console.log('✅ WFS 3D shadow map ready');
       loadWfsBuildings();
       
       // 立即添加测试阴影
@@ -76,7 +76,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
     }
   }, [currentDate]);
 
-  // 加载TUM建筑物数据
+  // 加载WFS建筑物数据
   const loadWfsBuildings = async () => {
     if (!mapRef.current) return;
 
@@ -176,10 +176,10 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const sourceId = 'tum-buildings';
-    const fillLayerId = 'tum-buildings-fill';
-    const outlineLayerId = 'tum-buildings-outline';
-    const extrusionLayerId = 'tum-buildings-extrusion';
+    const sourceId = 'wfs-buildings';
+    const fillLayerId = 'wfs-buildings-fill';
+    const outlineLayerId = 'wfs-buildings-outline';
+    const extrusionLayerId = 'wfs-buildings-extrusion';
 
     // 移除现有图层
     [fillLayerId, outlineLayerId, extrusionLayerId].forEach(layerId => {
@@ -266,8 +266,8 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const sourceId = 'tum-shadows';
-    const shadowLayerId = 'tum-shadows-fill';
+    const sourceId = 'wfs-shadows';
+    const shadowLayerId = 'wfs-shadows-fill';
 
     console.log(`🌅 开始添加阴影到地图: ${shadowResult.shadows.length} 个阴影`);
 
@@ -329,7 +329,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
       if (map.getSource(shadowSource)) map.removeSource(shadowSource);
       
       // 获取建筑物数据
-      const buildingSource = map.getSource('tum-buildings');
+      const buildingSource = map.getSource('wfs-buildings');
       if (!buildingSource || !buildingSource._data) {
         console.log('⚠️ 没有建筑物数据，无法生成阴影');
         return;
@@ -472,9 +472,9 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const extrusionLayerId = 'tum-buildings-extrusion';
-    const fillLayerId = 'tum-buildings-fill';
-    const outlineLayerId = 'tum-buildings-outline';
+    const extrusionLayerId = 'wfs-buildings-extrusion';
+    const fillLayerId = 'wfs-buildings-fill';
+    const outlineLayerId = 'wfs-buildings-outline';
 
     console.log(`🔄 切换模式: ${is3D ? '3D' : '2D'} → ${!is3D ? '3D' : '2D'}`);
 
@@ -575,7 +575,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
     if (!mapRef.current) return;
 
     const features = mapRef.current.queryRenderedFeatures(e.point, {
-      layers: ['tum-buildings-fill', 'tum-buildings-extrusion']
+      layers: ['wfs-buildings-fill', 'wfs-buildings-extrusion']
     });
 
     if (features.length > 0) {
@@ -586,11 +586,11 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
         .setLngLat(e.lngLat)
         .setHTML(`
           <div class="min-w-48">
-            <h4 class="font-bold text-gray-800 mb-2">🏢 TUM建筑物信息</h4>
+            <h4 class="font-bold text-gray-800 mb-2">🏢 建筑物信息</h4>
             <p><strong>类型:</strong> ${props.buildingType || '未知'}</p>
             <p><strong>高度:</strong> ${props.height || '未知'}m</p>
             <p><strong>楼层:</strong> ${props.levels || '未知'}</p>
-            <p><strong>数据源:</strong> TUM GlobalBuildingAtlas</p>
+            <p><strong>数据源:</strong> WFS 服务</p>
             ${shadowData ? `
               <hr class="my-2">
               <h5 class="font-semibold text-gray-700 mb-1">☀️ 太阳信息</h5>
@@ -668,7 +668,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
             <div className="flex items-center gap-3">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
               <span className="text-gray-700">
-                {isLoading ? '正在加载TUM建筑物数据...' : '正在计算实时阴影...'}
+                {isLoading ? '正在加载建筑物数据...' : '正在计算实时阴影...'}
               </span>
             </div>
           </div>
@@ -679,7 +679,7 @@ export const TUM3DShadowMap: React.FC<TUM3DShadowMapProps> = ({ className = '' }
       <div className="absolute bottom-4 left-4 z-[9999]">
         <div className="bg-white bg-opacity-90 rounded px-3 py-2 shadow-lg">
           <div className="text-sm text-gray-700">
-            <div>模式: {is3D ? '3D' : '2D'} | 数据: TUM</div>
+            <div>模式: {is3D ? '3D' : '2D'} | 数据: WFS</div>
             {shadowData && (
               <div>建筑物: {shadowData.buildingCount} | 阴影: {shadowData.shadows.length}</div>
             )}

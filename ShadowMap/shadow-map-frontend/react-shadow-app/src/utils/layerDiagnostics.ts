@@ -44,10 +44,10 @@ export class LayerDiagnostics {
 
     // 检查关键图层
     const layerIds = [
-      'tum-buildings-fill',
-      'tum-buildings-outline', 
-      'tum-buildings-extrusion',
-      'tum-shadows-fill'
+      'wfs-buildings-fill',
+      'wfs-buildings-outline', 
+      'wfs-buildings-extrusion',
+      'wfs-shadows-fill'
     ];
 
     layerIds.forEach(layerId => {
@@ -85,7 +85,7 @@ export class LayerDiagnostics {
     const style = map.getStyle();
     if (style && style.sources) {
       Object.keys(style.sources).forEach(sourceId => {
-        if (sourceId.startsWith('tum-')) {
+        if (sourceId.startsWith('wfs-')) {
           sources.push(sourceId);
         }
       });
@@ -153,20 +153,20 @@ export class LayerDiagnostics {
     }
 
     // 检查建筑物图层
-    const buildingFill = diagnostics.layers.find(l => l.layerId === 'tum-buildings-fill');
+    const buildingFill = diagnostics.layers.find(l => l.layerId === 'wfs-buildings-fill');
     if (!buildingFill || !buildingFill.exists) {
       issues.push('❌ 建筑物填充图层不存在');
     } else if (!buildingFill.visible) {
       issues.push('⚠️ 建筑物填充图层被隐藏');
     }
 
-    const buildingExtrusion = diagnostics.layers.find(l => l.layerId === 'tum-buildings-extrusion');
+    const buildingExtrusion = diagnostics.layers.find(l => l.layerId === 'wfs-buildings-extrusion');
     if (!buildingExtrusion || !buildingExtrusion.exists) {
       issues.push('❌ 建筑物3D挤出图层不存在');
     }
 
     // 检查阴影图层
-    const shadowFill = diagnostics.layers.find(l => l.layerId === 'tum-shadows-fill');
+    const shadowFill = diagnostics.layers.find(l => l.layerId === 'wfs-shadows-fill');
     if (!shadowFill || !shadowFill.exists) {
       issues.push('❌ 阴影填充图层不存在');
     } else if (!shadowFill.visible) {
@@ -175,7 +175,7 @@ export class LayerDiagnostics {
 
     // 检查数据源
     if (diagnostics.sources.length === 0) {
-      issues.push('❌ 没有TUM数据源');
+      issues.push('❌ 未找到WFS数据源');
     }
 
     // 检查缩放级别
@@ -204,8 +204,8 @@ export class LayerDiagnostics {
       suggestions.push('🔍 放大地图到15级或以上');
     }
 
-    if (issues.some(i => i.includes('没有TUM数据源'))) {
-      suggestions.push('🔄 点击"强制刷新"按钮重新加载数据');
+    if (issues.some(i => i.includes('未找到WFS数据源'))) {
+      suggestions.push('🔄 点击"强制刷新"按钮重新加载WFS数据');
     }
 
     if (suggestions.length === 0) {

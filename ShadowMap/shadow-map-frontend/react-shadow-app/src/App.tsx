@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React, { useState } from 'react'
 import { MapComponent } from './components/Map/MapComponent'
 import { MapboxMapComponent } from './components/Map/MapboxMapComponent'
-import { TUM3DShadowMapFixed } from './components/Map/TUM3DShadowMapFixed'
+import { Wfs3DShadowMapFixed } from './components/Map/Wfs3DShadowMapFixed'
 import { CleanShadowMap } from './components/Map/CleanShadowMap'
 import { ReferenceInspiredSearch } from './components/UI/ReferenceInspiredSearch'
 import { ReferenceInspiredControls } from './components/UI/ReferenceInspiredControls'
@@ -23,7 +23,7 @@ const queryClient = new QueryClient({
 })
 
 function App() {
-  const [mapMode, setMapMode] = useState<'mapbox' | 'leaflet' | 'tum3d' | 'clean'>('clean') // Switch map engine
+  const [mapMode, setMapMode] = useState<'mapbox' | 'leaflet' | 'wfs3d' | 'clean'>('clean') // Switch map engine
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -39,7 +39,7 @@ function App() {
             </h1>
             <div className="flex items-center text-xs font-medium text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full shadow-sm">
               <div className="w-1.5 h-1.5 bg-green-500 rounded-full mr-1.5"></div>
-              {mapMode === 'clean' ? 'Clean 3D' : mapMode === 'tum3d' ? 'TUM 3D' : mapMode === 'mapbox' ? 'Mapbox GL' : 'Leaflet'}
+              {mapMode === 'clean' ? 'Clean 3D' : mapMode === 'wfs3d' ? 'WFS 3D' : mapMode === 'mapbox' ? 'Mapbox GL' : 'Leaflet'}
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -53,14 +53,14 @@ function App() {
                 Clean 3D
               </button>
               <button
-                onClick={() => setMapMode('tum3d')}
+                onClick={() => setMapMode('wfs3d')}
                 className={`text-xs px-3 py-1.5 rounded-full transition-colors font-medium ${
-                  mapMode === 'tum3d' 
+                  mapMode === 'wfs3d' 
                     ? 'bg-emerald-500 text-white shadow-sm'
                     : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100'
                 }`}
               >
-                TUM 3D
+                WFS 3D
               </button>
               <button
                 onClick={() => setMapMode('mapbox')}
@@ -90,8 +90,8 @@ function App() {
         <main className="absolute inset-0">
           {mapMode === 'clean' ? (
             <CleanShadowMap className="w-full h-full" />
-          ) : mapMode === 'tum3d' ? (
-            <TUM3DShadowMapFixed className="w-full h-full" />
+          ) : mapMode === 'wfs3d' ? (
+            <Wfs3DShadowMapFixed className="w-full h-full" />
           ) : mapMode === 'mapbox' ? (
             <MapboxMapComponent className="w-full h-full" />
           ) : (

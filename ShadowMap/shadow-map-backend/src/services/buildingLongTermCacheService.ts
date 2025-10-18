@@ -1,14 +1,14 @@
 /**
- * TUM数据长期缓存服务
- * 基于TUM GlobalBuildingAtlas数据4个月更新频率的特点，实现长期缓存策略
+ * Long-term building cache service.
+ * Provides tile-level caching with configurable TTL tiers.
  */
 
 import { dbManager } from '../config/database';
 import { redisCacheService } from './redisCacheService';
 
-// TUM数据缓存配置
-const TUM_CACHE_CONFIG = {
-  // 基于TUM数据4个月更新频率，设置2-3个月缓存时间
+// 长期缓存配置
+const LONG_TERM_CACHE_CONFIG = {
+  // 缓存TTL配置
   LONG_TERM_TTL: 60 * 60 * 24 * 90, // 90天 (3个月)
   MEDIUM_TERM_TTL: 60 * 60 * 24 * 60, // 60天 (2个月)
   SHORT_TERM_TTL: 60 * 60 * 24 * 30, // 30天 (1个月)
@@ -22,6 +22,8 @@ const TUM_CACHE_CONFIG = {
   PRELOAD_BATCH_SIZE: 5, // 批量预加载大小
 };
 
+const CACHE_COLLECTION = 'building_long_term_cache';
+
 // 网格坐标接口
 interface GridCoordinate {
   gridX: number;
@@ -30,20 +32,20 @@ interface GridCoordinate {
 }
 
 // 缓存项接口
-interface TUMCacheItem {
+interface CacheItem {
   gridCoord: GridCoordinate;
   data: any;
   timestamp: number;
   lastAccessed: number;
   accessCount: number;
-  dataSource: 'tum' | 'osm' | 'hybrid';
+  dataSource: 'wfs' | 'osm' | 'hybrid';
   expiresAt: number;
 }
 
 // 缓存统计接口
 interface CacheStats {
   totalGrids: number;
-  tumDataGrids: number;
+  primaryDataGrids: number;
   osmDataGrids: number;
   hybridDataGrids: number;
   cacheHitRate: number;
@@ -51,24 +53,24 @@ interface CacheStats {
   storageSize: number; // 存储大小（MB）
 }
 
-export class TUMLongTermCacheService {
-  private static instance: TUMLongTermCacheService;
+export class LongTermCacheService {
+  private static instance: LongTermCacheService;
 
   private constructor() {}
 
-  public static getInstance(): TUMLongTermCacheService {
-    if (!TUMLongTermCacheService.instance) {
-      TUMLongTermCacheService.instance = new TUMLongTermCacheService();
+  public static getInstance(): LongTermCacheService {
+    if (!LongTermCacheService.instance) {
+      LongTermCacheService.instance = new LongTermCacheService();
     }
-    return TUMLongTermCacheService.instance;
+    return LongTermCacheService.instance;
   }
 
   /**
    * 将地理坐标转换为网格坐标
    */
   private coordToGrid(lat: number, lng: number, zoom: number): GridCoordinate {
-    const gridX = Math.floor(lng / TUM_CACHE_CONFIG.GRID_SIZE);
-    const gridY = Math.floor(lat / TUM_CACHE_CONFIG.GRID_SIZE);
+    const gridX = Math.floor(lng / LONG_TERM_CACHE_CONFIG.GRID_SIZE);
+    const gridY = Math.floor(lat / LONG_TERM_CACHE_CONFIG.GRID_SIZE);
     return { gridX, gridY, level: zoom };
   }
 
@@ -76,10 +78,10 @@ export class TUMLongTermCacheService {
    * 将网格坐标转换为地理边界
    */
   private gridToBounds(grid: GridCoordinate): { west: number; south: number; east: number; north: number } {
-    const west = grid.gridX * TUM_CACHE_CONFIG.GRID_SIZE;
-    const south = grid.gridY * TUM_CACHE_CONFIG.GRID_SIZE;
-    const east = west + TUM_CACHE_CONFIG.GRID_SIZE;
-    const north = south + TUM_CACHE_CONFIG.GRID_SIZE;
+    const west = grid.gridX * LONG_TERM_CACHE_CONFIG.GRID_SIZE;
+    const south = grid.gridY * LONG_TERM_CACHE_CONFIG.GRID_SIZE;
+    const east = west + LONG_TERM_CACHE_CONFIG.GRID_SIZE;
+    const north = south + LONG_TERM_CACHE_CONFIG.GRID_SIZE;
     return { west, south, east, north };
   }
 
@@ -87,22 +89,22 @@ export class TUMLongTermCacheService {
    * 生成网格缓存键
    */
   private getGridCacheKey(grid: GridCoordinate): string {
-    return `tum_grid:${grid.level}:${grid.gridX}:${grid.gridY}`;
+    return `building_cache_grid:${grid.level}:${grid.gridX}:${grid.gridY}`;
   }
 
   /**
    * 确定缓存TTL（基于数据源和访问模式）
    */
-  private determineCacheTTL(dataSource: 'tum' | 'osm' | 'hybrid', accessCount: number): number {
-    if (dataSource === 'tum') {
-      // TUM数据4个月更新，设置长期缓存
-      return accessCount > 10 ? TUM_CACHE_CONFIG.LONG_TERM_TTL : TUM_CACHE_CONFIG.MEDIUM_TERM_TTL;
+  private determineCacheTTL(dataSource: 'wfs' | 'osm' | 'hybrid', accessCount: number): number {
+    if (dataSource === 'wfs') {
+      // Primary dataset: apply long-term TTL
+      return accessCount > 10 ? LONG_TERM_CACHE_CONFIG.LONG_TERM_TTL : LONG_TERM_CACHE_CONFIG.MEDIUM_TERM_TTL;
     } else if (dataSource === 'hybrid') {
-      // 混合数据中期缓存
-      return TUM_CACHE_CONFIG.MEDIUM_TERM_TTL;
+      // Hybrid data: medium-term TTL
+      return LONG_TERM_CACHE_CONFIG.MEDIUM_TERM_TTL;
     } else {
-      // OSM数据短期缓存
-      return TUM_CACHE_CONFIG.SHORT_TERM_TTL;
+      // OSM data: short-term TTL
+      return LONG_TERM_CACHE_CONFIG.SHORT_TERM_TTL;
     }
   }
 
@@ -117,11 +119,11 @@ export class TUMLongTermCacheService {
       // 1. 首先尝试从Redis获取（最快）
       const redisData = await redisCacheService.get(cacheKey);
       if (redisData) {
-        const cacheItem: TUMCacheItem = JSON.parse(redisData);
+        const cacheItem: CacheItem = JSON.parse(redisData);
         
         // 检查是否过期
         if (cacheItem.expiresAt > Date.now()) {
-          console.log(`⚡ TUM长期缓存命中 (Redis): Grid ${grid.gridX},${grid.gridY} (${cacheItem.dataSource})`);
+          console.log(`⚡ Long-term cache hit (Redis): Grid ${grid.gridX},${grid.gridY} (${cacheItem.dataSource})`);
           
           // 更新访问统计
           cacheItem.lastAccessed = Date.now();
@@ -137,7 +139,7 @@ export class TUMLongTermCacheService {
       // 2. 然后尝试从MongoDB获取
       const mongoData = await this.getFromMongoDB(grid);
       if (mongoData) {
-        console.log(`📊 TUM长期缓存命中 (MongoDB): Grid ${grid.gridX},${grid.gridY}`);
+        console.log(`📊 Long-term cache hit (MongoDB): Grid ${grid.gridX},${grid.gridY}`);
         
         // 异步缓存到Redis
         this.saveToRedis(cacheKey, mongoData);
@@ -147,7 +149,7 @@ export class TUMLongTermCacheService {
 
       return null;
     } catch (error) {
-      console.warn('⚠️ TUM长期缓存获取失败:', error);
+      console.warn('⚠️ Long-term cache retrieval failed:', error);
       return null;
     }
   }
@@ -160,13 +162,13 @@ export class TUMLongTermCacheService {
     lng: number, 
     zoom: number, 
     data: any, 
-    dataSource: 'tum' | 'osm' | 'hybrid'
+    dataSource: 'wfs' | 'osm' | 'hybrid'
   ): Promise<void> {
     const grid = this.coordToGrid(lat, lng, zoom);
     const cacheKey = this.getGridCacheKey(grid);
     const now = Date.now();
     
-    const cacheItem: TUMCacheItem = {
+    const cacheItem: CacheItem = {
       gridCoord: grid,
       data,
       timestamp: now,
@@ -184,10 +186,10 @@ export class TUMLongTermCacheService {
       ];
 
       await Promise.allSettled(savePromises);
-      console.log(`💾 TUM数据已缓存: Grid ${grid.gridX},${grid.gridY} (${dataSource}, TTL: ${Math.round((cacheItem.expiresAt - now) / 86400000)}天)`);
+      console.log(`💾 Cached building data: Grid ${grid.gridX},${grid.gridY} (${dataSource}, TTL: ${Math.round((cacheItem.expiresAt - now) / 86400000)}天)`);
       
     } catch (error) {
-      console.warn('⚠️ TUM长期缓存保存失败:', error);
+      console.warn('⚠️ Long-term cache persistence failed:', error);
     }
   }
 
@@ -198,10 +200,10 @@ export class TUMLongTermCacheService {
     const centerGrid = this.coordToGrid(centerLat, centerLng, zoom);
     const preloadTasks: Promise<void>[] = [];
 
-    console.log(`🔄 开始预加载相邻网格: 中心(${centerGrid.gridX}, ${centerGrid.gridY}), 半径${TUM_CACHE_CONFIG.PRELOAD_RADIUS}`);
+    console.log(`🔄 开始预加载相邻网格: 中心(${centerGrid.gridX}, ${centerGrid.gridY}), 半径${LONG_TERM_CACHE_CONFIG.PRELOAD_RADIUS}`);
 
-    for (let dx = -TUM_CACHE_CONFIG.PRELOAD_RADIUS; dx <= TUM_CACHE_CONFIG.PRELOAD_RADIUS; dx++) {
-      for (let dy = -TUM_CACHE_CONFIG.PRELOAD_RADIUS; dy <= TUM_CACHE_CONFIG.PRELOAD_RADIUS; dy++) {
+    for (let dx = -LONG_TERM_CACHE_CONFIG.PRELOAD_RADIUS; dx <= LONG_TERM_CACHE_CONFIG.PRELOAD_RADIUS; dx++) {
+      for (let dy = -LONG_TERM_CACHE_CONFIG.PRELOAD_RADIUS; dy <= LONG_TERM_CACHE_CONFIG.PRELOAD_RADIUS; dy++) {
         if (dx === 0 && dy === 0) continue; // 跳过中心网格
 
         const targetGrid: GridCoordinate = {
@@ -223,7 +225,7 @@ export class TUMLongTermCacheService {
         }
 
         // 批量处理，避免过多并发
-        if (preloadTasks.length >= TUM_CACHE_CONFIG.PRELOAD_BATCH_SIZE) {
+        if (preloadTasks.length >= LONG_TERM_CACHE_CONFIG.PRELOAD_BATCH_SIZE) {
           await Promise.allSettled(preloadTasks);
           preloadTasks.length = 0; // 清空数组
         }
@@ -249,7 +251,7 @@ export class TUMLongTermCacheService {
       
       // 模拟预加载逻辑
       // const data = await this.fetchDataForGrid(lat, lng, zoom);
-      // await this.setCachedData(lat, lng, zoom, data, 'tum');
+      // await this.setCachedData(lat, lng, zoom, data, 'wfs');
       
     } catch (error) {
       console.warn(`⚠️ 网格预加载失败 (${lat.toFixed(4)}, ${lng.toFixed(4)}):`, error);
@@ -266,7 +268,7 @@ export class TUMLongTermCacheService {
         throw new Error('Database not connected');
       }
 
-      const collection = db.collection('tum_long_term_cache');
+      const collection = db.collection(CACHE_COLLECTION);
       
       // 聚合查询获取统计信息
       const stats = await collection.aggregate([
@@ -283,7 +285,7 @@ export class TUMLongTermCacheService {
 
       // 计算总体统计
       let totalGrids = 0;
-      let tumDataGrids = 0;
+      let primaryDataGrids = 0;
       let osmDataGrids = 0;
       let hybridDataGrids = 0;
       let totalSize = 0;
@@ -295,8 +297,8 @@ export class TUMLongTermCacheService {
         totalAge += stat.avgAge * stat.count;
 
         switch (stat._id) {
-          case 'tum':
-            tumDataGrids = stat.count;
+          case 'wfs':
+            primaryDataGrids = stat.count;
             break;
           case 'osm':
             osmDataGrids = stat.count;
@@ -309,7 +311,7 @@ export class TUMLongTermCacheService {
 
       return {
         totalGrids,
-        tumDataGrids,
+        primaryDataGrids,
         osmDataGrids,
         hybridDataGrids,
         cacheHitRate: 0, // 需要额外计算
@@ -321,7 +323,7 @@ export class TUMLongTermCacheService {
       console.warn('⚠️ 获取缓存统计失败:', error);
       return {
         totalGrids: 0,
-        tumDataGrids: 0,
+        primaryDataGrids: 0,
         osmDataGrids: 0,
         hybridDataGrids: 0,
         cacheHitRate: 0,
@@ -341,7 +343,7 @@ export class TUMLongTermCacheService {
         throw new Error('Database not connected');
       }
 
-      const collection = db.collection('tum_long_term_cache');
+      const collection = db.collection(CACHE_COLLECTION);
       const now = Date.now();
 
       // 查找过期项
@@ -379,16 +381,16 @@ export class TUMLongTermCacheService {
 
   // 私有辅助方法
 
-  private async saveToRedis(cacheKey: string, cacheItem: TUMCacheItem): Promise<void> {
+  private async saveToRedis(cacheKey: string, cacheItem: CacheItem): Promise<void> {
     const ttlSeconds = Math.round((cacheItem.expiresAt - Date.now()) / 1000);
     await redisCacheService.setWithTTL(cacheKey, JSON.stringify(cacheItem), ttlSeconds);
   }
 
-  private async saveToMongoDB(cacheItem: TUMCacheItem): Promise<void> {
+  private async saveToMongoDB(cacheItem: CacheItem): Promise<void> {
     const db = dbManager.getDatabase();
     if (!db) return;
 
-    const collection = db.collection('tum_long_term_cache');
+    const collection = db.collection(CACHE_COLLECTION);
     
     await collection.replaceOne(
       {
@@ -401,11 +403,11 @@ export class TUMLongTermCacheService {
     );
   }
 
-  private async getFromMongoDB(grid: GridCoordinate): Promise<TUMCacheItem | null> {
+  private async getFromMongoDB(grid: GridCoordinate): Promise<CacheItem | null> {
     const db = dbManager.getDatabase();
     if (!db) return null;
 
-    const collection = db.collection('tum_long_term_cache');
+    const collection = db.collection(CACHE_COLLECTION);
     
     const result = await collection.findOne({
       'gridCoord.gridX': grid.gridX,
@@ -414,10 +416,10 @@ export class TUMLongTermCacheService {
       expiresAt: { $gt: Date.now() }
     });
 
-    return result as TUMCacheItem | null;
+    return result as CacheItem | null;
   }
 
-  private async updateAccessStats(cacheKey: string, cacheItem: TUMCacheItem): Promise<void> {
+  private async updateAccessStats(cacheKey: string, cacheItem: CacheItem): Promise<void> {
     // 异步更新Redis
     redisCacheService.setWithTTL(
       cacheKey, 
@@ -428,7 +430,7 @@ export class TUMLongTermCacheService {
     // 异步更新MongoDB
     const db = dbManager.getDatabase();
     if (db) {
-      const collection = db.collection('tum_long_term_cache');
+      const collection = db.collection(CACHE_COLLECTION);
       collection.updateOne(
         {
           'gridCoord.gridX': cacheItem.gridCoord.gridX,
@@ -454,7 +456,7 @@ export class TUMLongTermCacheService {
     const db = dbManager.getDatabase();
     if (!db) return false;
 
-    const collection = db.collection('tum_long_term_cache');
+    const collection = db.collection(CACHE_COLLECTION);
     const count = await collection.countDocuments({
       cacheKey,
       expiresAt: { $gt: Date.now() }
@@ -465,5 +467,4 @@ export class TUMLongTermCacheService {
 }
 
 // Export singleton instance
-export const buildingLongTermCacheService = TUMLongTermCacheService.getInstance();
-export const tumLongTermCacheService = buildingLongTermCacheService;
+export const buildingLongTermCacheService = LongTermCacheService.getInstance();
