@@ -1,10 +1,8 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Button, Radio, Space } from 'antd';
-import { GlobalOutlined, PictureOutlined } from '@ant-design/icons';
-import { useShadowMapStore } from '../../store/shadowMapStore';
-import { baseMapManager } from '../../services/baseMapManager';
+import { GlobalOutlined } from '@ant-design/icons';
 
-export const MapStylePanel: React.FC = () => {
+export const MapStylePanel = () => {
   const [selectedMap, setSelectedMap] = useState('osm');
   const [isExpanded, setIsExpanded] = useState(false);
 

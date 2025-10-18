@@ -284,10 +284,11 @@ export class ShadowCalculationOptimizer {
     delay: number = 500
   ): void {
     if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
+      window.clearTimeout(this.debounceTimer);
     }
 
-    this.debounceTimer = setTimeout(() => {
+    this.debounceTimer = window.setTimeout(() => {
+      this.debounceTimer = null;
       if (!this.isCalculating) {
         callback();
       }

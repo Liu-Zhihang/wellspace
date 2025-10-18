@@ -1,7 +1,6 @@
-import React from 'react';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 
-export const AnalysisPanel: React.FC = () => {
+export const AnalysisPanel = () => {
   const {
     analysisResult,
     analysisResults,
@@ -9,12 +8,6 @@ export const AnalysisPanel: React.FC = () => {
     removeStatusMessage,
   } = useShadowMapStore();
 
-  // 格式化阴影等级
-  const formatShadowLevel = (key: string, value: number): string => {
-    const total = analysisResult?.samplePoints?.length || 1;
-    const percentage = ((value / total) * 100).toFixed(1);
-    return `${value} (${percentage}%)`;
-  };
 
   // 格式化数值
   const formatNumber = (num: number | undefined, decimals: number = 1): string => {

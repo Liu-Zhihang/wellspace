@@ -8,6 +8,7 @@ import mapboxgl from 'mapbox-gl';
 export class MapboxShadowSync {
   private map: mapboxgl.Map;
   private shadeMap: any;
+  private syncTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(map: mapboxgl.Map, shadeMap: any) {
     this.map = map;
@@ -22,7 +23,8 @@ export class MapboxShadowSync {
 
     try {
       // 1. 获取Mapbox的当前变换矩阵
-      const mapboxTransform = this.map.transform;
+      const mapWithTransform = this.map as mapboxgl.Map & { transform: unknown };
+      const mapboxTransform = mapWithTransform.transform;
       const mapboxCenter = this.map.getCenter();
       const mapboxZoom = this.map.getZoom();
       const mapboxBearing = this.map.getBearing();
@@ -114,8 +116,10 @@ export class MapboxShadowSync {
     if (!this.shadeMap) return;
 
     // 防抖处理，避免过于频繁的同步
-    clearTimeout((this as any).syncTimeout);
-    (this as any).syncTimeout = setTimeout(() => {
+    if (this.syncTimeout) {
+      clearTimeout(this.syncTimeout);
+    }
+    this.syncTimeout = setTimeout(() => {
       console.log(`🔄 同步阴影 (${changeType})`);
       this.forceSynchronization();
     }, 100); // 100ms防抖

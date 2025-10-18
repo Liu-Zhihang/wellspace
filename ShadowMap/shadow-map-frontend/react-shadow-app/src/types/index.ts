@@ -1,36 +1,58 @@
-export interface Building {
-  type: 'Feature';
-  geometry: {
-    type: 'Polygon';
-    coordinates: number[][][];
-  };
-  properties: {
-    id: string;
-    buildingType: string;
-    height: number;
-    levels?: number;
-  };
-}
+import type { Feature, FeatureCollection, Geometry } from 'geojson';
 
-export interface BuildingTileData {
-  type: 'FeatureCollection';
-  features: Building[];
-  bbox: [number, number, number, number];
-  tileInfo: {
-    z: number;
-    x: number;
-    y: number;
-  };
-}
+export type BoundingBox = {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+};
 
-export interface ShadowAnalysisPoint {
+export type BuildingProperties = {
+  id?: string;
+  buildingType?: string;
+  height?: number;
+  levels?: number;
+  name?: string;
+  render_height?: number;
+  [key: string]: unknown;
+};
+
+export type BuildingFeature = Feature<Geometry, BuildingProperties>;
+
+export type BuildingFeatureCollection = FeatureCollection<Geometry, BuildingProperties>;
+
+export type BuildingServiceMetadata = {
+  source?: string;
+  bounds?: BoundingBox;
+  totalFeatures?: number;
+  numberMatched?: number;
+  numberReturned?: number;
+  timestamp?: string;
+  [key: string]: unknown;
+};
+
+export type BuildingServiceResponse = {
+  success: boolean;
+  data: BuildingFeatureCollection & {
+    metadata?: BuildingServiceMetadata;
+  };
+  metadata?: Record<string, unknown>;
+  message?: string;
+};
+
+export type ShadowAnalysisPoint = {
   lat: number;
   lng: number;
   hoursOfSun: number;
   shadowPercent: number;
-}
+};
 
-export interface ShadowAnalysisResult {
+export type SunPosition = {
+  altitude: number;
+  azimuth: number;
+};
+
+export type ShadowAnalysisResult = {
   center: [number, number];
   radius: number;
   samplePoints: ShadowAnalysisPoint[];
@@ -56,47 +78,9 @@ export interface ShadowAnalysisResult {
     date: Date;
     sampleCount: number;
   };
-}
+};
 
-// 数据层类型枚举
-export type DataLayerType = 'shadows' | 'sunlight_hours' | 'annual_sunlight' | 'buildings' | 'terrain';
-
-// 数据层配置接口
-export interface DataLayer {
-  id: DataLayerType;
-  name: string;
-  description: string;
-  icon: string; // 图标URL或emoji
-  enabled: boolean;
-  opacity: number;
-  color?: string;
-  renderMode: 'overlay' | 'heatmap' | 'vector';
-}
-
-export interface MapSettings {
-  // 传统设置（保持兼容性）
-  shadowColor: string;
-  shadowOpacity: number;
-  showShadowLayer: boolean;
-  showBuildingLayer: boolean;
-  showDEMLayer: boolean;
-  showCacheStats: boolean;
-  showSunExposure: boolean;
-  // 🔧 新增：建筑物筛选控制
-  enableBuildingFilter: boolean;
-  // 🔧 新增：动态质量控制
-  enableDynamicQuality: boolean;
-  
-  // 新的数据层系统
-  dataLayers: {
-    [K in DataLayerType]: DataLayer;
-  };
-  
-  // 当前活跃的数据层
-  activeDataLayer: DataLayerType;
-}
-
-export interface ShadowSettings {
+export type ShadowSettings = {
   shadowResolution: number;
   shadowOpacity: number;
   buildingHeightMultiplier: number;
@@ -104,17 +88,52 @@ export interface ShadowSettings {
   shadowColor: string;
   shadowBlur: number;
   enableShadowAnimation: boolean;
-  showSunExposure: boolean; // 太阳曝光热力图开关
-}
+  showSunExposure: boolean;
+};
 
-export interface SunPosition {
-  altitude: number;
-  azimuth: number;
-}
+export type DataLayerType = 'shadows' | 'sunlight_hours' | 'annual_sunlight' | 'buildings' | 'terrain';
 
-export interface TerrainSource {
+export type DataLayer = {
+  id: DataLayerType;
+  name: string;
+  description: string;
+  icon: string;
+  enabled: boolean;
+  opacity: number;
+  color?: string;
+  renderMode: 'overlay' | 'heatmap' | 'vector';
+};
+
+export type MapSettings = {
+  shadowColor: string;
+  shadowOpacity: number;
+  showShadowLayer: boolean;
+  showBuildingLayer: boolean;
+  showDEMLayer: boolean;
+  showCacheStats: boolean;
+  showSunExposure: boolean;
+  enableBuildingFilter: boolean;
+  enableDynamicQuality: boolean;
+  autoOptimize?: boolean;
+  dataLayers: { [K in DataLayerType]: DataLayer };
+  activeDataLayer: DataLayerType;
+};
+
+export type TerrainSource = {
   tileSize: number;
   maxZoom: number;
   getSourceUrl: ({ x, y, z }: { x: number; y: number; z: number }) => string;
   getElevation: ({ r, g, b, a }: { r: number; g: number; b: number; a: number }) => number;
-}
+};
+
+export type BuildingTileInfo = {
+  z: number;
+  x: number;
+  y: number;
+};
+
+export type BuildingTileData = BuildingFeatureCollection & {
+  bbox?: [number, number, number, number];
+  tileInfo?: BuildingTileInfo;
+  metadata?: Record<string, unknown>;
+};

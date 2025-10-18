@@ -1,5 +1,5 @@
 import * as SunCalc from 'suncalc';
-import type { SunPosition } from '../types';
+import type { SunPosition } from '../types/index.ts';
 
 export class GeoUtils {
   /**

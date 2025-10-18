@@ -1,5 +1,7 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
+import type { GeoJSONSourceRaw } from 'mapbox-gl';
+import type { BuildingFeature, BuildingFeatureCollection } from '../../types/index.ts';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { getWfsBuildings } from '../../services/wfsBuildingService';
@@ -15,7 +17,9 @@ interface Wfs3DShadowMapProps {
   className?: string;
 }
 
-export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className = '' }) => {
+type GeoJSONSourceWithData = mapboxgl.GeoJSONSource & { _data?: BuildingFeatureCollection };
+
+export const Wfs3DShadowMapFixed = ({ className = '' }: Wfs3DShadowMapProps) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const shadeMapRef = useRef<any>(null);
@@ -23,9 +27,12 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
   const [isLoading, setIsLoading] = useState(false);
   const [buildingsLoaded, setBuildingsLoaded] = useState(false);
   const [shadowInitRetries, setShadowInitRetries] = useState(0);
+  const buildingSourceId = 'wfs-buildings-source';
+  const buildingFillLayerId = 'wfs-buildings-fill';
+  const buildingOutlineLayerId = 'wfs-buildings-outline';
+  const buildingExtrusionLayerId = 'wfs-buildings-extrusion';
   
   const {
-    mapSettings,
     currentDate,
     addStatusMessage,
     setMapView,
@@ -114,7 +121,7 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
         setBuildingsLoaded(true);
         
         // 建筑物加载完成后初始化阴影模拟器
-        setTimeout(() => {
+        window.setTimeout(() => {
           initShadowSimulator();
         }, 2000); // 增加延迟时间确保数据完全加载
       } else {
@@ -129,48 +136,58 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
   }, [buildingsLoaded, addStatusMessage]);
 
   // 将建筑物添加到地图
-  const addBuildingsToMap = (buildingData: any) => {
+  const addBuildingsToMap = (buildingData: BuildingFeatureCollection | null) => {
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const sourceId = 'wfs-buildings';
-    const fillLayerId = 'wfs-buildings-fill';
-    const outlineLayerId = 'wfs-buildings-outline';
-    const extrusionLayerId = 'wfs-buildings-extrusion';
 
     // 移除现有图层
-    [fillLayerId, outlineLayerId, extrusionLayerId].forEach(layerId => {
+    [buildingFillLayerId, buildingOutlineLayerId, buildingExtrusionLayerId].forEach(layerId => {
       if (map.getLayer(layerId)) map.removeLayer(layerId);
     });
-    if (map.getSource(sourceId)) map.removeSource(sourceId);
+    if (map.getSource(buildingSourceId)) map.removeSource(buildingSourceId);
+
+    if (!buildingData) {
+      addStatusMessage('No building data available to render', 'warning');
+      return;
+    }
 
     // 处理建筑物数据
-    const processedFeatures = buildingData.features.map((feature: any) => {
-      if (!feature.properties) feature.properties = {};
-      
-      if (!feature.properties.height) {
-        feature.properties.height = feature.properties.levels ? 
-          feature.properties.levels * 3.5 : 
-          estimateBuildingHeight(feature.properties.buildingType || 'building');
-      }
-      
-      return feature;
+    const processedFeatures = buildingData.features.map((feature: BuildingFeature) => {
+      const baseHeight = feature.properties?.height ?? (
+        feature.properties?.levels
+          ? feature.properties.levels * 3.5
+          : estimateBuildingHeight(feature.properties?.buildingType || 'building')
+      );
+
+      const properties: BuildingFeature['properties'] = {
+        ...feature.properties,
+        height: baseHeight,
+        render_height: baseHeight,
+      };
+
+      return {
+        ...feature,
+        properties,
+      };
     });
 
     // 添加数据源
-    map.addSource(sourceId, {
+    const sourceSpec: GeoJSONSourceRaw = {
       type: 'geojson',
       data: {
         type: 'FeatureCollection',
         features: processedFeatures
       }
-    });
+    };
+
+    map.addSource(buildingSourceId, sourceSpec);
 
     // 添加2D填充图层
     map.addLayer({
-      id: fillLayerId,
+      id: buildingFillLayerId,
       type: 'fill',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'fill-color': '#D3D3D3',
         'fill-opacity': 0.8
@@ -179,9 +196,9 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
 
     // 添加轮廓图层
     map.addLayer({
-      id: outlineLayerId,
+      id: buildingOutlineLayerId,
       type: 'line',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'line-color': '#A0A0A0',
         'line-width': 1,
@@ -191,9 +208,9 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
 
     // 添加3D挤出图层
     map.addLayer({
-      id: extrusionLayerId,
+      id: buildingExtrusionLayerId,
       type: 'fill-extrusion',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'fill-extrusion-color': '#D3D3D3',
         'fill-extrusion-height': [
@@ -209,9 +226,9 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
     });
 
     // 初始时显示3D图层（默认3D模式）
-    map.setLayoutProperty(extrusionLayerId, 'visibility', 'visible');
-    map.setLayoutProperty(fillLayerId, 'visibility', 'none');
-    map.setLayoutProperty(outlineLayerId, 'visibility', 'none');
+    map.setLayoutProperty(buildingExtrusionLayerId, 'visibility', 'visible');
+    map.setLayoutProperty(buildingFillLayerId, 'visibility', 'none');
+    map.setLayoutProperty(buildingOutlineLayerId, 'visibility', 'none');
     
     console.log('🏗️ 建筑物图层初始化完成，当前模式: 3D');
   };
@@ -224,12 +241,13 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
     }
 
     // 检查建筑物数据是否已加载
-    const buildingSource = mapRef.current.getSource('wfs-buildings');
-    if (!buildingSource || !(buildingSource as any)._data || !(buildingSource as any)._data.features.length) {
+    const buildingSource = mapRef.current.getSource(buildingSourceId) as GeoJSONSourceWithData | undefined;
+    const sourceData = buildingSource?._data;
+    if (!sourceData || !sourceData.features.length) {
       if (shadowInitRetries < 5) {
         console.log(`⚠️ 建筑物数据未就绪，延迟初始化阴影模拟器 (重试 ${shadowInitRetries + 1}/5)`);
         setShadowInitRetries(prev => prev + 1);
-        setTimeout(() => {
+        window.setTimeout(() => {
           initShadowSimulator();
         }, 1000);
         return;
@@ -250,7 +268,7 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
       }
 
       // 获取建筑物数据
-      const buildings = (buildingSource as any)._data.features;
+      const buildings = sourceData.features as BuildingFeature[];
       console.log(`🏢 准备为阴影模拟器提供 ${buildings.length} 个建筑物`);
 
       // 创建新的阴影模拟器
@@ -261,11 +279,11 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
         apiKey: mapboxgl.accessToken, // 使用Mapbox的access token作为apiKey
         getFeatures: () => {
           // 确保返回最新的建筑物数据
-          const currentSource = mapRef.current?.getSource('wfs-buildings');
-          if (currentSource && (currentSource as any)._data) {
-            const currentBuildings = (currentSource as any)._data.features;
+          const currentSource = mapRef.current?.getSource(buildingSourceId) as GeoJSONSourceWithData | undefined;
+          const currentBuildings = currentSource?._data?.features;
+          if (currentBuildings) {
             console.log(`🏢 为阴影模拟器提供 ${currentBuildings.length} 个建筑物`);
-            return currentBuildings;
+            return currentBuildings as BuildingFeature[];
           }
           console.warn('⚠️ 无法获取建筑物数据，返回空数组');
           return [];
@@ -307,9 +325,9 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const extrusionLayerId = 'wfs-buildings-extrusion';
-    const fillLayerId = 'wfs-buildings-fill';
-    const outlineLayerId = 'wfs-buildings-outline';
+    const extrusionLayerId = buildingExtrusionLayerId;
+    const fillLayerId = buildingFillLayerId;
+    const outlineLayerId = buildingOutlineLayerId;
 
     console.log(`🔄 切换模式: ${is3D ? '3D' : '2D'} → ${!is3D ? '3D' : '2D'}`);
 
@@ -382,7 +400,7 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
     if (zoom < 14 && buildingsLoaded) {
       console.log('📊 缩放级别过低，隐藏建筑物');
       const map = mapRef.current;
-      ['wfs-buildings-fill', 'wfs-buildings-outline', 'wfs-buildings-extrusion'].forEach(layerId => {
+      [buildingFillLayerId, buildingOutlineLayerId, buildingExtrusionLayerId].forEach(layerId => {
         if (map.getLayer(layerId)) {
           map.setLayoutProperty(layerId, 'visibility', 'none');
         }
@@ -390,29 +408,25 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
     } else if (zoom >= 14 && buildingsLoaded) {
       console.log('📊 缩放级别足够，显示建筑物');
       const map = mapRef.current;
-      const extrusionLayerId = 'wfs-buildings-extrusion';
-      const fillLayerId = 'wfs-buildings-fill';
-      const outlineLayerId = 'wfs-buildings-outline';
-      
       if (is3D) {
-        if (map.getLayer(extrusionLayerId)) {
-          map.setLayoutProperty(extrusionLayerId, 'visibility', 'visible');
+        if (map.getLayer(buildingExtrusionLayerId)) {
+          map.setLayoutProperty(buildingExtrusionLayerId, 'visibility', 'visible');
         }
-        if (map.getLayer(fillLayerId)) {
-          map.setLayoutProperty(fillLayerId, 'visibility', 'none');
+        if (map.getLayer(buildingFillLayerId)) {
+          map.setLayoutProperty(buildingFillLayerId, 'visibility', 'none');
         }
-        if (map.getLayer(outlineLayerId)) {
-          map.setLayoutProperty(outlineLayerId, 'visibility', 'none');
+        if (map.getLayer(buildingOutlineLayerId)) {
+          map.setLayoutProperty(buildingOutlineLayerId, 'visibility', 'none');
         }
       } else {
-        if (map.getLayer(extrusionLayerId)) {
-          map.setLayoutProperty(extrusionLayerId, 'visibility', 'none');
+        if (map.getLayer(buildingExtrusionLayerId)) {
+          map.setLayoutProperty(buildingExtrusionLayerId, 'visibility', 'none');
         }
-        if (map.getLayer(fillLayerId)) {
-          map.setLayoutProperty(fillLayerId, 'visibility', 'visible');
+        if (map.getLayer(buildingFillLayerId)) {
+          map.setLayoutProperty(buildingFillLayerId, 'visibility', 'visible');
         }
-        if (map.getLayer(outlineLayerId)) {
-          map.setLayoutProperty(outlineLayerId, 'visibility', 'visible');
+        if (map.getLayer(buildingOutlineLayerId)) {
+          map.setLayoutProperty(buildingOutlineLayerId, 'visibility', 'visible');
         }
       }
     }
@@ -423,21 +437,24 @@ export const Wfs3DShadowMapFixed: React.FC<Wfs3DShadowMapProps> = ({ className =
     if (!mapRef.current) return;
 
     const features = mapRef.current.queryRenderedFeatures(e.point, {
-      layers: ['wfs-buildings-fill', 'wfs-buildings-extrusion']
+      layers: [buildingFillLayerId, buildingExtrusionLayerId],
     });
 
     if (features.length > 0) {
       const feature = features[0];
-      const props = feature.properties;
+      const props = (feature.properties ?? {}) as Record<string, unknown>;
+      const buildingType = typeof props.buildingType === 'string' ? props.buildingType : '未知';
+      const heightValue = typeof props.height === 'number' ? props.height : '未知';
+      const levelsValue = typeof props.levels === 'number' ? props.levels : '未知';
       
       new mapboxgl.Popup()
         .setLngLat(e.lngLat)
         .setHTML(`
           <div class="min-w-48">
             <h4 class="font-bold text-gray-800 mb-2">🏢 建筑物信息</h4>
-            <p><strong>类型:</strong> ${props.buildingType || '未知'}</p>
-            <p><strong>高度:</strong> ${props.height || '未知'}m</p>
-            <p><strong>楼层:</strong> ${props.levels || '未知'}</p>
+            <p><strong>类型:</strong> ${buildingType}</p>
+            <p><strong>高度:</strong> ${heightValue}m</p>
+            <p><strong>楼层:</strong> ${levelsValue}</p>
             <p><strong>数据源:</strong> WFS 服务</p>
           </div>
         `)

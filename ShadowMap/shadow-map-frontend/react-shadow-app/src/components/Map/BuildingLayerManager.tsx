@@ -3,8 +3,10 @@
  * 负责在地图上显示建筑物轮廓和高度信息
  */
 
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
+import type { GeoJSONSourceRaw } from 'mapbox-gl';
+import type { BuildingFeature, BuildingFeatureCollection } from '../../types/index.ts';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { localFirstBuildingService } from '../../services/localFirstBuildingService';
 import { wfsBuildingService } from '../../services/wfsBuildingService';
@@ -13,12 +15,12 @@ interface BuildingLayerManagerProps {
   map: mapboxgl.Map;
 }
 
-export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map }) => {
+export const BuildingLayerManager = ({ map }: BuildingLayerManagerProps) => {
   const { mapSettings } = useShadowMapStore();
-  const buildingSourceId = 'buildings-source';
-  const buildingFillLayerId = 'buildings-fill';
-  const buildingOutlineLayerId = 'buildings-outline';
-  const buildingLabelsLayerId = 'buildings-labels';
+  const buildingSourceId = 'wfs-buildings-source';
+  const buildingFillLayerId = 'wfs-buildings-fill';
+  const buildingOutlineLayerId = 'wfs-buildings-outline';
+  const buildingLabelsLayerId = 'wfs-buildings-labels';
   const isLayerAddedRef = useRef(false);
 
   // 移除建筑物图层
@@ -76,7 +78,7 @@ export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map 
       
       // 首先尝试使用WFS数据
       console.log('🏢 尝试获取WFS建筑数据...');
-      let buildingData;
+      let buildingData: BuildingFeatureCollection | null = null;
       
       try {
         const wfsResponse = await wfsBuildingService.getWfsBuildings({
@@ -93,13 +95,16 @@ export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map 
         console.log('⚠️ WFS 数据获取失败，回退到本地数据:', wfsError);
         
         // 回退到本地数据
-        buildingData = await localFirstBuildingService.getBuildingData({
+        const localData = await localFirstBuildingService.getBuildingData({
           north: bounds.getNorth(),
           south: bounds.getSouth(),
           east: bounds.getEast(),
           west: bounds.getWest()
         }, zoom);
-
+        buildingData = {
+          type: 'FeatureCollection',
+          features: (localData.features as BuildingFeature[]) ?? [],
+        };
         console.log(`📊 本地数据: ${buildingData.features.length} 个建筑物`);
 
         if (buildingData.features.length === 0) {
@@ -128,36 +133,57 @@ export const BuildingLayerManager: React.FC<BuildingLayerManagerProps> = ({ map 
               return;
             }
             
-            buildingData = beijingData;
+            buildingData = {
+              type: 'FeatureCollection',
+              features: (beijingData.features as BuildingFeature[]) ?? [],
+            };
           }
         }
+      }
+
+      if (!buildingData) {
+        console.warn('⚠️ 未获取到任何建筑数据，终止渲染流程');
+        return;
       }
 
       console.log(`🏗️ 准备渲染 ${buildingData.features.length} 个建筑物`);
 
       // 创建GeoJSON数据源
-      const geojsonData = {
-        type: 'FeatureCollection',
-        features: buildingData.features.map(feature => ({
+      const processedFeatures = buildingData.features.map((feature: BuildingFeature) => {
+        const baseHeight = feature.properties?.height ?? (
+          feature.properties?.levels
+            ? feature.properties.levels * 3.5
+            : 10
+        );
+
+        const properties: BuildingFeature['properties'] = {
+          ...feature.properties,
+          height: baseHeight,
+          buildingType: feature.properties?.buildingType || 'building',
+          levels: feature.properties?.levels ?? Math.round(baseHeight / 3.5),
+          render_height: baseHeight,
+        };
+
+        return {
           ...feature,
-          properties: {
-            ...feature.properties,
-            // 确保有高度信息
-            height: feature.properties.height || 10,
-            // 添加显示用的属性
-            buildingType: feature.properties.buildingType || 'building',
-            levels: feature.properties.levels || Math.round((feature.properties.height || 10) / 3)
-          }
-        }))
+          properties,
+        };
+      }) as BuildingFeatureCollection['features'];
+
+      const geojsonData: BuildingFeatureCollection = {
+        type: 'FeatureCollection',
+        features: processedFeatures
       };
 
       console.log(`📊 处理后的GeoJSON数据: ${geojsonData.features.length} 个建筑物`);
 
       // 添加数据源
-      map.addSource(buildingSourceId, {
+      const sourceSpec: GeoJSONSourceRaw = {
         type: 'geojson',
         data: geojsonData
-      });
+      };
+
+      map.addSource(buildingSourceId, sourceSpec);
       console.log(`✅ 数据源添加成功: ${buildingSourceId}`);
 
       // 添加建筑物填充图层 - 浅灰色（参考ShadeMap）

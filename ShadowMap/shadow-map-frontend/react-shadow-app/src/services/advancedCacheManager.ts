@@ -1,8 +1,19 @@
-import type { BuildingTileData } from '../types';
+import type { BuildingTileData } from '../types/index.ts';
 
 const API_BASE_URL = 'http://localhost:3500/api';
 
 // 缓存配置
+export interface CacheStats {
+  memorySize: number;
+  storageSize: number;
+  maxMemorySize: number;
+  maxStorageSize: number;
+  hitRate: number;
+  totalHits: number;
+  totalMisses: number;
+  memoryUsage: string;
+}
+
 interface CacheConfig {
   maxMemorySize: number;     // 内存缓存最大条目数
   maxStorageSize: number;    // 本地存储最大条目数
@@ -175,18 +186,16 @@ class AdvancedCacheManager {
   }
 
   // 获取缓存统计信息
-  async getStats() {
+  getStats(): CacheStats {
     const total = this.hitCount + this.missCount;
     const hitRate = total > 0 ? (this.hitCount / total) * 100 : 0;
     
     return {
-      size: this.totalSize,
-      count: this.memoryCache.size + this.storageCache.size,
-      hitRate: hitRate,
       memorySize: this.memoryCache.size,
       storageSize: this.storageCache.size,
       maxMemorySize: this.config.maxMemorySize,
       maxStorageSize: this.config.maxStorageSize,
+      hitRate,
       totalHits: this.hitCount,
       totalMisses: this.missCount,
       memoryUsage: this.formatBytes(this.totalSize),

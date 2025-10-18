@@ -70,29 +70,35 @@ importers:
         version: 5.0.8(@types/react@19.2.2)(react@19.2.0)
     devDependencies:
       '@eslint/js':
-        specifier: ^9.33.0
+        specifier: ^9.38.0
         version: 9.38.0
       '@tailwindcss/postcss':
-        specifier: ^4.1.13
+        specifier: ^4.1.14
         version: 4.1.14
+      '@types/geojson':
+        specifier: ^7946.0.14
+        version: 7946.0.16
       '@types/leaflet':
-        specifier: ^1.9.20
+        specifier: ^1.9.21
         version: 1.9.21
       '@types/mapbox-gl':
         specifier: ^2.7.21
         version: 2.7.21
+      '@types/node':
+        specifier: ^22.10.1
+        version: 22.18.11
       '@types/react':
-        specifier: ^19.1.10
+        specifier: ^19.2.2
         version: 19.2.2
       '@types/react-dom':
-        specifier: ^19.1.7
+        specifier: ^19.2.2
         version: 19.2.2(@types/react@19.2.2)
       '@types/suncalc':
         specifier: ^1.9.2
         version: 1.9.2
       '@vitejs/plugin-react':
         specifier: ^5.0.0
-        version: 5.0.4(vite@4.5.14(lightningcss@1.30.1))
+        version: 5.0.4(vite@4.5.14(@types/node@22.18.11)(lightningcss@1.30.1))
       eslint:
         specifier: ^9.33.0
         version: 9.38.0(jiti@2.6.1)
@@ -113,7 +119,7 @@ importers:
         version: 8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.8.3)
       vite:
         specifier: ^4.5.3
-        version: 4.5.14(lightningcss@1.30.1)
+        version: 4.5.14(@types/node@22.18.11)(lightningcss@1.30.1)
 
 packages:
 
@@ -693,6 +699,9 @@ packages:
 
   '@types/mapbox-gl@2.7.21':
     resolution: {integrity: sha512-Dx9MuF2kKgT/N22LsMUB4b3acFZh9clVqz9zv1fomoiPoBrJolwYxpWA/9LPO/2N0xWbKi4V+pkjTaFkkx/4wA==}
+
+  '@types/node@22.18.11':
+    resolution: {integrity: sha512-Gd33J2XIrXurb+eT2ktze3rJAfAp9ZNjlBdh4SVgyrKEOADwCbdUDaK7QgJno8Ue4kcajscsKqu6n8OBG3hhCQ==}
 
   '@types/react-dom@19.2.2':
     resolution: {integrity: sha512-9KQPoO6mZCi7jcIStSnlOWn2nEF3mNmyr3rIAsGnAbQKYbRLyqmeSc39EVgtxXVia+LMT8j3knZLAZAh+xLmrw==}
@@ -1814,6 +1823,9 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+
   update-browserslist-db@1.1.3:
     resolution: {integrity: sha512-UxhIZQ+QInVdunkDAaiazvvT/+fXL5Osr0JZlJulepYu6Jd7qJtDZjlur0emRlT71EN3ScPoE7gvsuIKKNavKw==}
     hasBin: true
@@ -2455,6 +2467,10 @@ snapshots:
     dependencies:
       '@types/geojson': 7946.0.16
 
+  '@types/node@22.18.11':
+    dependencies:
+      undici-types: 6.21.0
+
   '@types/react-dom@19.2.2(@types/react@19.2.2)':
     dependencies:
       '@types/react': 19.2.2
@@ -2558,7 +2574,7 @@ snapshots:
       '@typescript-eslint/types': 8.46.1
       eslint-visitor-keys: 4.2.1
 
-  '@vitejs/plugin-react@5.0.4(vite@4.5.14(lightningcss@1.30.1))':
+  '@vitejs/plugin-react@5.0.4(vite@4.5.14(@types/node@22.18.11)(lightningcss@1.30.1))':
     dependencies:
       '@babel/core': 7.28.4
       '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.28.4)
@@ -2566,7 +2582,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-beta.38
       '@types/babel__core': 7.20.5
       react-refresh: 0.17.0
-      vite: 4.5.14(lightningcss@1.30.1)
+      vite: 4.5.14(@types/node@22.18.11)(lightningcss@1.30.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -3705,6 +3721,8 @@ snapshots:
 
   typescript@5.8.3: {}
 
+  undici-types@6.21.0: {}
+
   update-browserslist-db@1.1.3(browserslist@4.26.3):
     dependencies:
       browserslist: 4.26.3
@@ -3717,12 +3735,13 @@ snapshots:
 
   util-deprecate@1.0.2: {}
 
-  vite@4.5.14(lightningcss@1.30.1):
+  vite@4.5.14(@types/node@22.18.11)(lightningcss@1.30.1):
     dependencies:
       esbuild: 0.18.20
       postcss: 8.5.6
       rollup: 3.29.5
     optionalDependencies:
+      '@types/node': 22.18.11
       fsevents: 2.3.3
       lightningcss: 1.30.1
 

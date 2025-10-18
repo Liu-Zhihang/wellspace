@@ -87,7 +87,7 @@ class LocalDemService {
    */
   private async loadTifFile(
     path: string,
-    bounds: [number, number, number, number]
+    _bounds: [number, number, number, number]
   ): Promise<{
     data: Float32Array;
     width: number;

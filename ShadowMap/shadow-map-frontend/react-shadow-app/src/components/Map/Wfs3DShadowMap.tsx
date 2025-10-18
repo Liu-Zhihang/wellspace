@@ -1,27 +1,35 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
+import type { GeoJSONSourceRaw } from 'mapbox-gl';
+import type { Feature, Geometry } from 'geojson';
+import type { BuildingFeature, BuildingFeatureCollection } from '../../types/index.ts';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
-import { shadowAnalysisService, ShadowCalculationResult } from '../../services/shadowAnalysisService';
+import { shadowAnalysisService } from '../../services/shadowAnalysisService';
+import type { ShadowCalculationResult } from '../../services/shadowAnalysisService';
 import { getWfsBuildings } from '../../services/wfsBuildingService';
 import { debugHelper } from '../../utils/debugHelper';
-import { LayerDiagnostics } from '../../utils/layerDiagnostics';
 import * as SunCalc from 'suncalc';
 
 interface Wfs3DShadowMapProps {
   className?: string;
 }
 
-export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }) => {
+type GeoJSONSourceWithData = mapboxgl.GeoJSONSource & { _data?: BuildingFeatureCollection };
+
+export const Wfs3DShadowMap = ({ className = '' }: Wfs3DShadowMapProps) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [is3D, setIs3D] = useState(true); // 默认3D模式
   const [isLoading, setIsLoading] = useState(false);
   const [isCalculatingShadows, setIsCalculatingShadows] = useState(false);
   const [shadowData, setShadowData] = useState<ShadowCalculationResult | null>(null);
+  const buildingSourceId = 'wfs-buildings-source';
+  const buildingFillLayerId = 'wfs-buildings-fill';
+  const buildingOutlineLayerId = 'wfs-buildings-outline';
+  const buildingExtrusionLayerId = 'wfs-buildings-extrusion';
   
   const {
-    mapSettings,
     currentDate,
     addStatusMessage,
     setMapView,
@@ -53,7 +61,7 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
       loadWfsBuildings();
       
       // 立即添加测试阴影
-      setTimeout(() => {
+      window.setTimeout(() => {
         addRealBuildingShadows();
       }, 1000);
       
@@ -95,7 +103,7 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
         addStatusMessage(`Loaded ${buildingData.data.features.length} buildings from WFS`, 'info');
         
         // 加载完成后自动计算真实阴影
-        setTimeout(() => {
+        window.setTimeout(() => {
           addRealBuildingShadows();
         }, 500);
       } else {
@@ -172,48 +180,58 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
   }, [currentDate, addStatusMessage]);
 
   // 将建筑物添加到地图
-  const addBuildingsToMap = (buildingData: any) => {
+  const addBuildingsToMap = (buildingData: BuildingFeatureCollection | null) => {
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const sourceId = 'wfs-buildings';
-    const fillLayerId = 'wfs-buildings-fill';
-    const outlineLayerId = 'wfs-buildings-outline';
-    const extrusionLayerId = 'wfs-buildings-extrusion';
 
     // 移除现有图层
-    [fillLayerId, outlineLayerId, extrusionLayerId].forEach(layerId => {
+    [buildingFillLayerId, buildingOutlineLayerId, buildingExtrusionLayerId].forEach(layerId => {
       if (map.getLayer(layerId)) map.removeLayer(layerId);
     });
-    if (map.getSource(sourceId)) map.removeSource(sourceId);
+    if (map.getSource(buildingSourceId)) map.removeSource(buildingSourceId);
+
+    if (!buildingData) {
+      addStatusMessage('No building data available to render', 'warning');
+      return;
+    }
 
     // 处理建筑物数据
-    const processedFeatures = buildingData.features.map((feature: any) => {
-      if (!feature.properties) feature.properties = {};
-      
-      if (!feature.properties.height) {
-        feature.properties.height = feature.properties.levels ? 
-          feature.properties.levels * 3.5 : 
-          estimateBuildingHeight(feature.properties.buildingType || 'building');
-      }
-      
-      return feature;
+    const processedFeatures = buildingData.features.map((feature: BuildingFeature) => {
+      const baseHeight = feature.properties?.height ?? (
+        feature.properties?.levels
+          ? feature.properties.levels * 3.5
+          : estimateBuildingHeight(feature.properties?.buildingType || 'building')
+      );
+
+      const properties: BuildingFeature['properties'] = {
+        ...feature.properties,
+        height: baseHeight,
+        render_height: baseHeight,
+      };
+
+      return {
+        ...feature,
+        properties,
+      };
     });
 
     // 添加数据源
-    map.addSource(sourceId, {
+    const sourceSpec: GeoJSONSourceRaw = {
       type: 'geojson',
       data: {
         type: 'FeatureCollection',
         features: processedFeatures
-      }
-    });
+      } as BuildingFeatureCollection
+    };
+
+    map.addSource(buildingSourceId, sourceSpec);
 
     // 添加2D填充图层
     map.addLayer({
-      id: fillLayerId,
+      id: buildingFillLayerId,
       type: 'fill',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'fill-color': '#D3D3D3',
         'fill-opacity': 0.8
@@ -224,9 +242,9 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
 
     // 添加轮廓图层
     map.addLayer({
-      id: outlineLayerId,
+      id: buildingOutlineLayerId,
       type: 'line',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'line-color': '#A0A0A0',
         'line-width': 1,
@@ -236,9 +254,9 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
 
     // 添加3D挤出图层
     map.addLayer({
-      id: extrusionLayerId,
+      id: buildingExtrusionLayerId,
       type: 'fill-extrusion',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'fill-extrusion-color': '#D3D3D3',
         'fill-extrusion-height': [
@@ -254,9 +272,9 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
     });
 
     // 初始时显示3D图层（默认3D模式）
-    map.setLayoutProperty(extrusionLayerId, 'visibility', 'visible');
-    map.setLayoutProperty(fillLayerId, 'visibility', 'none');
-    map.setLayoutProperty(outlineLayerId, 'visibility', 'none');
+    map.setLayoutProperty(buildingExtrusionLayerId, 'visibility', 'visible');
+    map.setLayoutProperty(buildingFillLayerId, 'visibility', 'none');
+    map.setLayoutProperty(buildingOutlineLayerId, 'visibility', 'none');
     
     console.log('🏗️ 建筑物图层初始化完成，当前模式: 3D');
   };
@@ -329,13 +347,14 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
       if (map.getSource(shadowSource)) map.removeSource(shadowSource);
       
       // 获取建筑物数据
-      const buildingSource = map.getSource('wfs-buildings');
-      if (!buildingSource || !buildingSource._data) {
-        console.log('⚠️ 没有建筑物数据，无法生成阴影');
-        return;
-      }
-      
-      const buildings = buildingSource._data.features;
+    const buildingSource = map.getSource(buildingSourceId) as GeoJSONSourceWithData | undefined;
+    const sourceData = buildingSource?._data;
+    if (!sourceData) {
+      console.log('⚠️ 没有建筑物数据，无法生成阴影');
+      return;
+    }
+    
+      const buildings = sourceData.features as BuildingFeature[];
       if (!buildings || buildings.length === 0) {
         console.log('⚠️ 建筑物数据为空，无法生成阴影');
         return;
@@ -350,7 +369,7 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
       console.log(`☀️ 太阳位置: 高度角 ${sunPosition.altitude.toFixed(1)}°, 方位角 ${sunPosition.azimuth.toFixed(1)}°`);
       
       // 为每个建筑物计算阴影
-      const shadowFeatures = buildings.map((building: any) => {
+      const shadowFeatures = buildings.map<Feature<Geometry> | null>((building: BuildingFeature) => {
         if (!building.geometry || !building.properties) return null;
         
         const height = building.properties.height || 20;
@@ -371,19 +390,21 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
         const offsetY = shadowLength * Math.cos(shadowDirectionRad);
         
         // 根据几何类型处理阴影
-        let shadowGeometry;
+        let shadowGeometry: Geometry;
         
         if (geometry.type === 'Polygon') {
-          shadowGeometry = calculatePolygonShadow(geometry.coordinates[0], offsetX, offsetY);
+          shadowGeometry = {
+            type: 'Polygon',
+            coordinates: geometry.coordinates.map((ring: number[][]) =>
+              offsetPolygonRing(ring, offsetX, offsetY)
+            ),
+          };
         } else if (geometry.type === 'MultiPolygon') {
-          const shadowCoordinates = geometry.coordinates.map((polygon: any) => 
-            polygon.map((ring: any) => 
-              calculatePolygonShadow(ring, offsetX, offsetY)
-            )
-          );
           shadowGeometry = {
             type: 'MultiPolygon',
-            coordinates: shadowCoordinates
+            coordinates: geometry.coordinates.map((polygon: number[][][]) =>
+              polygon.map((ring: number[][]) => offsetPolygonRing(ring, offsetX, offsetY))
+            ),
           };
         } else {
           return null;
@@ -398,7 +419,7 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
             shadowLength: shadowLength
           }
         };
-      }).filter(Boolean);
+      }).filter((feature): feature is Feature<Geometry> => feature !== null);
       
       if (shadowFeatures.length === 0) {
         console.log('⚠️ 没有生成任何阴影');
@@ -443,7 +464,7 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
   };
   
   // 计算多边形阴影
-  const calculatePolygonShadow = (coordinates: number[][], offsetX: number, offsetY: number) => {
+  const offsetPolygonRing = (coordinates: number[][], offsetX: number, offsetY: number) => {
     return coordinates.map(coord => [
       coord[0] + offsetX,
       coord[1] + offsetY
@@ -472,9 +493,9 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const extrusionLayerId = 'wfs-buildings-extrusion';
-    const fillLayerId = 'wfs-buildings-fill';
-    const outlineLayerId = 'wfs-buildings-outline';
+    const extrusionLayerId = buildingExtrusionLayerId;
+    const fillLayerId = buildingFillLayerId;
+    const outlineLayerId = buildingOutlineLayerId;
 
     console.log(`🔄 切换模式: ${is3D ? '3D' : '2D'} → ${!is3D ? '3D' : '2D'}`);
 
@@ -539,7 +560,7 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
   };
 
   // 防抖定时器
-  const moveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const moveTimeoutRef = useRef<number | null>(null);
 
   // 处理地图移动
   const handleMapMove = () => {
@@ -551,21 +572,23 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
     
     // 清除之前的定时器
     if (moveTimeoutRef.current) {
-      clearTimeout(moveTimeoutRef.current);
+      window.clearTimeout(moveTimeoutRef.current);
+      moveTimeoutRef.current = null;
     }
     
     // 地图移动后重新加载建筑物数据和计算阴影（防抖）
     if (zoom >= 14) {
       console.log('🔄 地图移动，准备重新加载...');
-      moveTimeoutRef.current = setTimeout(async () => {
+      moveTimeoutRef.current = window.setTimeout(async () => {
         try {
           await loadWfsBuildings();
-          setTimeout(() => {
+          window.setTimeout(() => {
             addRealBuildingShadows();
           }, 500);
         } catch (error) {
           console.error('❌ 地图移动后重新加载失败:', error);
         }
+        moveTimeoutRef.current = null;
       }, 2000); // 2秒防抖
     }
   };
@@ -575,21 +598,24 @@ export const Wfs3DShadowMap: React.FC<Wfs3DShadowMapProps> = ({ className = '' }
     if (!mapRef.current) return;
 
     const features = mapRef.current.queryRenderedFeatures(e.point, {
-      layers: ['wfs-buildings-fill', 'wfs-buildings-extrusion']
+      layers: [buildingFillLayerId, buildingExtrusionLayerId],
     });
 
     if (features.length > 0) {
       const feature = features[0];
-      const props = feature.properties;
+      const props = (feature.properties ?? {}) as Record<string, unknown>;
+      const buildingType = typeof props.buildingType === 'string' ? props.buildingType : '未知';
+      const heightValue = typeof props.height === 'number' ? props.height : '未知';
+      const levelsValue = typeof props.levels === 'number' ? props.levels : '未知';
       
       new mapboxgl.Popup()
         .setLngLat(e.lngLat)
         .setHTML(`
           <div class="min-w-48">
             <h4 class="font-bold text-gray-800 mb-2">🏢 建筑物信息</h4>
-            <p><strong>类型:</strong> ${props.buildingType || '未知'}</p>
-            <p><strong>高度:</strong> ${props.height || '未知'}m</p>
-            <p><strong>楼层:</strong> ${props.levels || '未知'}</p>
+            <p><strong>类型:</strong> ${buildingType}</p>
+            <p><strong>高度:</strong> ${heightValue}m</p>
+            <p><strong>楼层:</strong> ${levelsValue}</p>
             <p><strong>数据源:</strong> WFS 服务</p>
             ${shadowData ? `
               <hr class="my-2">

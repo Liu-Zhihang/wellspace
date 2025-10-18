@@ -8,7 +8,8 @@ import {
   PlayCircleIcon,
   PauseCircleIcon,
 } from '@heroicons/react/24/outline'
-import { useShadowMapStore, MobilityTracePoint } from '../../store/shadowMapStore'
+import { useShadowMapStore } from '../../store/shadowMapStore'
+import type { MobilityTracePoint } from '../../store/shadowMapStore'
 
 type PanelId = 'time' | 'shadow' | 'style' | 'upload' | null;
 

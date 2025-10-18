@@ -1,4 +1,5 @@
-import { BoundingBox, BuildingServiceResponse, getWfsBuildings } from './wfsBuildingService';
+import { getWfsBuildings } from './wfsBuildingService';
+import type { BoundingBox } from '../types/index.ts';
 
 const API_BASE = 'http://localhost:3500/api';
 

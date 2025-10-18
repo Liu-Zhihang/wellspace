@@ -32,12 +32,13 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
-    "@eslint/js": "^9.33.0",
-    "@tailwindcss/postcss": "^4.1.13",
-    "@types/leaflet": "^1.9.20",
+    "@eslint/js": "^9.38.0",
+    "@tailwindcss/postcss": "^4.1.14",
+    "@types/geojson": "^7946.0.14",
+    "@types/leaflet": "^1.9.21",
     "@types/mapbox-gl": "^2.7.21",
-    "@types/react": "^19.1.10",
-    "@types/react-dom": "^19.1.7",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
     "@types/suncalc": "^1.9.2",
     "@vitejs/plugin-react": "^5.0.0",
     "eslint": "^9.33.0",
@@ -46,6 +47,7 @@
     "globals": "^16.3.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^4.5.3"
+    "vite": "^4.5.3",
+    "@types/node": "^22.10.1"
   }
 }

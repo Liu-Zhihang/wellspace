@@ -1,31 +1,21 @@
 import { buildingCache } from '../cache/buildingCache';
+import type {
+  BoundingBox,
+  BuildingFeatureCollection,
+  BuildingServiceMetadata,
+  BuildingServiceResponse,
+} from '../types/index.ts';
 
 const API_BASE = 'http://localhost:3500/api';
 
-export interface BoundingBox {
-  north: number;
-  south: number;
-  east: number;
-  west: number;
-}
-
-export interface BuildingServiceResponse {
-  success: boolean;
-  data: {
-    type: 'FeatureCollection';
-    features: any[];
-    metadata: {
-      source: string;
-      bounds?: BoundingBox;
-      totalFeatures: number;
-      numberMatched: number;
-      numberReturned: number;
-      timestamp: string;
-      [key: string]: unknown;
+type RawBuildingServiceResponse = BuildingServiceResponse & {
+  data: BuildingFeatureCollection & {
+    metadata?: BuildingServiceMetadata & {
+      numberMatched?: number;
+      numberReturned?: number;
     };
   };
-  metadata?: unknown;
-}
+};
 
 export async function testWfsConnection(): Promise<boolean> {
   try {
@@ -73,23 +63,27 @@ export async function getWfsBuildings(
       throw new Error(`HTTP ${response.status} ${response.statusText}`);
     }
 
-    const result: BuildingServiceResponse = await response.json();
+    const result = (await response.json()) as RawBuildingServiceResponse;
 
     if (!result.success) {
       throw new Error(result?.message ?? 'WFS bounds request failed');
     }
 
     buildingCache.add(result.data);
-    const aggregated = buildingCache.getAllAsFeatureCollection();
+    const aggregated = buildingCache.getAllAsFeatureCollection() as BuildingFeatureCollection;
+
+    const metadata: BuildingServiceMetadata = {
+      ...(result.data.metadata ?? {}),
+      totalFeatures: aggregated.features.length,
+      numberReturned: aggregated.features.length,
+    };
 
     return {
       ...result,
       data: {
-        ...result.data,
-        features: aggregated.features,
-        totalFeatures: aggregated.features.length,
-        numberReturned: aggregated.features.length,
-      }
+        ...aggregated,
+        metadata,
+      },
     };
   } catch (error) {
     console.error('[WFS] Failed to fetch buildings by bounds', error);
@@ -107,7 +101,7 @@ export async function getBeijingSampleBuildings(): Promise<BuildingServiceRespon
       throw new Error(`HTTP ${response.status} ${response.statusText}`);
     }
 
-    const result: BuildingServiceResponse = await response.json();
+    const result = (await response.json()) as BuildingServiceResponse;
 
     if (!result.success) {
       throw new Error(result?.message ?? 'WFS sample request failed');
@@ -148,7 +142,7 @@ export async function getWfsBuildingsByTile(
       throw new Error(`HTTP ${response.status} ${response.statusText}`);
     }
 
-    const result: BuildingServiceResponse = await response.json();
+    const result = (await response.json()) as BuildingServiceResponse;
 
     if (!result.success) {
       throw new Error(result?.message ?? 'WFS tile request failed');

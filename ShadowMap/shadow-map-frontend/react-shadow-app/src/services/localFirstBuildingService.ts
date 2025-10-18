@@ -4,16 +4,20 @@
  * 优先使用本地预处理数据，减少网络请求
  */
 
+import type { BoundingBox, BuildingFeature, BuildingFeatureCollection } from '../types/index.ts';
+
 interface BuildingTile {
   z: number;
   x: number;
   y: number;
 }
 
+type BuildingDataSource = 'local-preload' | 'cache' | 'mongodb' | 'osm-api';
+
 interface BuildingData {
-  features: any[];
+  features: BuildingFeature[];
   timestamp: number;
-  source: 'local-preload' | 'cache' | 'mongodb' | 'osm-api';
+  source: BuildingDataSource;
   processingTime: number;
 }
 
@@ -47,12 +51,7 @@ export class LocalFirstBuildingService {
   /**
    * 获取建筑物数据 - 本地优先策略
    */
-  async getBuildingData(bounds: {
-    north: number;
-    south: number;
-    east: number;
-    west: number;
-  }, zoom: number): Promise<BuildingData> {
+  async getBuildingData(bounds: BoundingBox, zoom: number): Promise<BuildingData> {
     const tiles = this.boundsToTiles(bounds, zoom);
     const cacheKey = this.generateCacheKey(bounds, zoom);
     
@@ -96,13 +95,13 @@ export class LocalFirstBuildingService {
     // 1. 优先尝试本地预处理数据
     if (this.config.enableLocalFirst) {
       try {
-        const localData = await this.fetchLocalPreloadedData(tiles);
-        if (localData && localData.features.length > 0) {
+        const localFeatures = await this.fetchLocalPreloadedData(tiles);
+        if (localFeatures && localFeatures.length > 0) {
           const processingTime = Date.now() - startTime;
-          console.log(`✅ 本地预处理数据: ${cacheKey} (${localData.features.length} 建筑物, ${processingTime}ms)`);
-          
+          console.log(`✅ 本地预处理数据: ${cacheKey} (${localFeatures.length} 建筑物, ${processingTime}ms)`);
+
           return {
-            features: localData.features,
+            features: localFeatures,
             timestamp: Date.now(),
             source: 'local-preload',
             processingTime
@@ -116,13 +115,13 @@ export class LocalFirstBuildingService {
     // 2. 回退到后端缓存
     if (this.config.enableNetworkFallback) {
       try {
-        const backendData = await this.fetchFromBackend(tiles);
-        if (backendData && backendData.features.length > 0) {
+        const backendFeatures = await this.fetchFromBackend(tiles);
+        if (backendFeatures && backendFeatures.length > 0) {
           const processingTime = Date.now() - startTime;
-          console.log(`🔄 后端缓存数据: ${cacheKey} (${backendData.features.length} 建筑物, ${processingTime}ms)`);
+          console.log(`🔄 后端缓存数据: ${cacheKey} (${backendFeatures.length} 建筑物, ${processingTime}ms)`);
           
           return {
-            features: backendData.features,
+            features: backendFeatures,
             timestamp: Date.now(),
             source: 'mongodb',
             processingTime
@@ -149,7 +148,7 @@ export class LocalFirstBuildingService {
   /**
    * 获取本地预处理数据
    */
-  private async fetchLocalPreloadedData(tiles: BuildingTile[]): Promise<BuildingData | null> {
+  private async fetchLocalPreloadedData(tiles: BuildingTile[]): Promise<BuildingFeature[] | null> {
     // 尝试从本地文件系统获取预处理数据
     // 这里可以实现从本地JSON文件或IndexedDB获取数据
     
@@ -161,9 +160,9 @@ export class LocalFirstBuildingService {
         // 尝试从public目录获取本地文件
         const response = await fetch(localFilePath);
         if (response.ok) {
-          const data = await response.json();
+          const data = (await response.json()) as BuildingFeatureCollection;
           if (data.features && data.features.length > 0) {
-            return data;
+            return data.features as BuildingFeature[];
           }
         }
       } catch (error) {
@@ -178,13 +177,13 @@ export class LocalFirstBuildingService {
   /**
    * 从后端获取数据
    */
-  private async fetchFromBackend(tiles: BuildingTile[]): Promise<BuildingData | null> {
+  private async fetchFromBackend(tiles: BuildingTile[]): Promise<BuildingFeature[] | null> {
     const promises = tiles.map(tile => 
       this.fetchTileFromBackend(tile.z, tile.x, tile.y)
     );
     
     const results = await Promise.allSettled(promises);
-    const allFeatures: any[] = [];
+    const allFeatures: BuildingFeature[] = [];
     
     for (const result of results) {
       if (result.status === 'fulfilled' && result.value) {
@@ -192,18 +191,18 @@ export class LocalFirstBuildingService {
       }
     }
     
-    return allFeatures.length > 0 ? { features: allFeatures } as any : null;
+    return allFeatures.length > 0 ? allFeatures : null;
   }
 
   /**
    * 从后端获取单个瓦片
    */
-  private async fetchTileFromBackend(z: number, x: number, y: number): Promise<any[] | null> {
+  private async fetchTileFromBackend(z: number, x: number, y: number): Promise<BuildingFeature[] | null> {
     try {
       const response = await fetch(`http://localhost:3500/api/buildings/${Math.floor(z)}/${x}/${y}.json`);
       if (response.ok) {
-        const data = await response.json();
-        return data.features || [];
+        const data = (await response.json()) as BuildingFeatureCollection;
+        return (data.features as BuildingFeature[]) || [];
       }
     } catch (error) {
       console.warn(`⚠️ 后端瓦片请求失败: ${z}/${x}/${y}`, error);
@@ -214,11 +213,11 @@ export class LocalFirstBuildingService {
   /**
    * 从OSM API获取数据 (最后回退)
    */
-  private async fetchFromOSMApi(tiles: BuildingTile[]): Promise<BuildingData> {
+  private async fetchFromOSMApi(_tiles: BuildingTile[]): Promise<BuildingData> {
     // 这里实现OSM API调用逻辑
     // 为了简洁，返回空数据
     return {
-      features: [],
+      features: [] as BuildingFeature[],
       timestamp: Date.now(),
       source: 'osm-api',
       processingTime: 0
@@ -228,7 +227,7 @@ export class LocalFirstBuildingService {
   /**
    * 边界转瓦片坐标
    */
-  private boundsToTiles(bounds: any, zoom: number): BuildingTile[] {
+  private boundsToTiles(bounds: BoundingBox, zoom: number): BuildingTile[] {
     const tiles: BuildingTile[] = [];
     const safeZoom = Math.floor(Math.max(0, Math.min(zoom, 18)));
     
@@ -251,7 +250,7 @@ export class LocalFirstBuildingService {
   /**
    * 生成缓存键
    */
-  private generateCacheKey(bounds: any, zoom: number): string {
+  private generateCacheKey(bounds: BoundingBox, zoom: number): string {
     const precision = 4;
     return `${zoom}_${bounds.north.toFixed(precision)}_${bounds.south.toFixed(precision)}_${bounds.east.toFixed(precision)}_${bounds.west.toFixed(precision)}`;
   }

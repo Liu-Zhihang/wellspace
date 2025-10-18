@@ -5,8 +5,7 @@ import ShadeMap from 'leaflet-shadow-simulator';
 import { useShadowMapStore } from '../store/shadowMapStore';
 import { GeoUtils } from '../utils/geoUtils';
 import { ApiService } from '../services/apiService';
-import { shadowLayerManager } from '../services/shadowLayerManager';
-import type { TerrainSource, DataLayerType } from '../types';
+import type { TerrainSource } from '../types/index.ts';
 
 // 声明 leaflet-shadow-simulator 的类型
 declare global {
@@ -24,8 +23,6 @@ if (typeof window !== 'undefined' && window.L && !window.L.shadeMap) {
 }
 
 export const useShadowMap = () => {
-  const shadowOnlyRef = useRef<any>(null); // 纯阴影模拟器
-  const heatmapOnlyRef = useRef<any>(null); // 纯热力图模拟器
   const shadeMapRef = useRef<any>(null); // 当前活跃的模拟器
   const mapRef = useRef<L.Map | null>(null);
   const {
@@ -36,72 +33,7 @@ export const useShadowMap = () => {
     setAnalysisResults,
     addStatusMessage,
     mapCenter,
-    toggleDataLayer,
-    updateDataLayer,
   } = useShadowMapStore();
-
-  // 创建纯阴影模拟器
-  const createShadowOnlySimulator = async (map: L.Map) => {
-    const terrainSource = {
-      tileSize: 256,
-      maxZoom: 15,
-      getSourceUrl: ({ x, y, z }: { x: number; y: number; z: number }) => {
-        return ApiService.getDEMTileUrl(z, x, y);
-      },
-      getElevation: ({ r, g, b }: { r: number; g: number; b: number }) => {
-        return (r * 256 + g + b / 256) - 32768;
-      },
-    };
-
-    const shadowSimulator = L.shadeMap({
-      date: currentDate,
-      color: mapSettings.shadowColor,
-      opacity: mapSettings.shadowOpacity,
-      apiKey: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Imp3dTkyM0Bjb25uZWN0LmhrdXN0LWd6LmVkdS5jbiIsImNyZWF0ZWQiOjE3NTcyNDMxNzAxMzIsImlhdCI6MTc1NzI0MzE3MH0.Z7ejYmxcuKL3Le1Ydil1uRbP_EOS_wtLA6rsSewDUoA',
-      showExposure: false, // 纯阴影，无热力图
-      belowCanopy: false,
-      terrainSource,
-      getFeatures: async () => await getCurrentViewBuildings(map),
-    });
-
-    shadowSimulator.addTo(map);
-    return shadowSimulator;
-  };
-
-  // 创建纯热力图模拟器
-  const createHeatmapOnlySimulator = async (map: L.Map) => {
-    const terrainSource = {
-      tileSize: 256,
-      maxZoom: 15,
-      getSourceUrl: ({ x, y, z }: { x: number; y: number; z: number }) => {
-        return ApiService.getDEMTileUrl(z, x, y);
-      },
-      getElevation: ({ r, g, b }: { r: number; g: number; b: number }) => {
-        return (r * 256 + g + b / 256) - 32768;
-      },
-    };
-
-    const heatmapSimulator = L.shadeMap({
-      date: currentDate,
-      color: '#000000', // 阴影设为透明
-      opacity: 0, // 阴影完全透明
-      apiKey: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Imp3dTkyM0Bjb25uZWN0LmhrdXN0LWd6LmVkdS5jbiIsImNyZWF0ZWQiOjE3NTcyNDMxNzAxMzIsImlhdCI6MTc1NzI0MzE3MH0.Z7ejYmxcuKL3Le1Ydil1uRbP_EOS_wtLA6rsSewDUoA',
-      showExposure: true, // 只显示热力图
-      belowCanopy: false,
-      terrainSource,
-      getFeatures: async () => await getCurrentViewBuildings(map),
-    });
-
-    // 启用太阳曝光分析
-    await heatmapSimulator.setSunExposure(true, {
-      startDate: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 6, 0, 0),
-      endDate: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 18, 0, 0),
-      iterations: 24
-    });
-
-    heatmapSimulator.addTo(map);
-    return heatmapSimulator;
-  };
 
   // 初始化阴影模拟器
   const initShadowSimulator = async (map: L.Map) => {
@@ -156,10 +88,11 @@ export const useShadowMap = () => {
           terrainSource,
           getFeatures: async () => {
             // 确保地图已经完全加载后再获取建筑物数据
-            if (!map._loaded) {
+            const mapWithLoadState = map as L.Map & { _loaded?: boolean };
+            if (!mapWithLoadState._loaded) {
               console.log('等待地图完全加载...');
               await new Promise(resolve => {
-                if (map._loaded) {
+                if (mapWithLoadState._loaded) {
                   resolve(true);
                 } else {
                   map.whenReady(() => resolve(true));
@@ -260,7 +193,8 @@ export const useShadowMap = () => {
   const getCurrentViewBuildings = async (map: L.Map) => {
     try {
       // 检查地图是否已经完全初始化
-      if (!map || !map.getContainer() || !map._loaded) {
+      const mapWithLoadState = map as L.Map & { _loaded?: boolean };
+      if (!map || !map.getContainer() || !mapWithLoadState._loaded) {
         console.warn('地图尚未完全初始化，跳过建筑物数据获取');
         return [];
       }

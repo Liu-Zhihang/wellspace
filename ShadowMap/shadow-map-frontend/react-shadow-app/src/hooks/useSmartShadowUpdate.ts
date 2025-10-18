@@ -21,15 +21,15 @@ export function useSmartShadowUpdate(
     minZoom = 15
   } = options;
 
-  const updateTimeoutRef = useRef<NodeJS.Timeout>();
+  const updateTimeoutRef = useRef<number | null>(null);
   const isInteractingRef = useRef(false);
   const lastUpdateRef = useRef({ center: '', zoom: 0, time: 0 });
 
   // 清理定时器
   const clearUpdateTimeout = useCallback(() => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-      updateTimeoutRef.current = undefined;
+    if (updateTimeoutRef.current !== null) {
+      window.clearTimeout(updateTimeoutRef.current);
+      updateTimeoutRef.current = null;
     }
   }, []);
 
@@ -75,7 +75,8 @@ export function useSmartShadowUpdate(
 
     console.log(`🔄 安排阴影更新 (${type}, 延迟: ${delay}ms)`);
 
-    updateTimeoutRef.current = setTimeout(() => {
+    updateTimeoutRef.current = window.setTimeout(() => {
+      updateTimeoutRef.current = null;
       console.log(`✅ 执行阴影更新 (${type})`);
       
       // 更新缓存

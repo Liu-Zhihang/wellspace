@@ -1,5 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
+import type { GeoJSONSourceRaw } from 'mapbox-gl';
+import type { BuildingFeature, BuildingFeatureCollection } from '../../types/index.ts';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { getWfsBuildings } from '../../services/wfsBuildingService';
@@ -8,18 +10,17 @@ interface Mapbox3DComponentProps {
   className?: string;
 }
 
-export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className = '' }) => {
+export const Mapbox3DComponent = ({ className = '' }: Mapbox3DComponentProps) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [is3D, setIs3D] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const buildingSourceId = 'wfs-buildings-source';
+  const buildingFillLayerId = 'wfs-buildings-fill';
+  const buildingOutlineLayerId = 'wfs-buildings-outline';
+  const buildingExtrusionLayerId = 'wfs-buildings-extrusion';
   
-  const {
-    mapSettings,
-    currentDate,
-    addStatusMessage,
-    setMapView,
-  } = useShadowMapStore();
+  const { addStatusMessage, setMapView } = useShadowMapStore();
 
   // 初始化3D地图
   useEffect(() => {
@@ -95,49 +96,58 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
   };
 
   // 将建筑物添加到地图
-  const addBuildingsToMap = (buildingData: any) => {
+  const addBuildingsToMap = (buildingData: BuildingFeatureCollection | null) => {
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const sourceId = 'wfs-buildings';
-    const fillLayerId = 'wfs-buildings-fill';
-    const outlineLayerId = 'wfs-buildings-outline';
-    const extrusionLayerId = 'wfs-buildings-extrusion';
 
     // 移除现有图层
-    if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
-    if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId);
-    if (map.getLayer(extrusionLayerId)) map.removeLayer(extrusionLayerId);
-    if (map.getSource(sourceId)) map.removeSource(sourceId);
+    if (map.getLayer(buildingFillLayerId)) map.removeLayer(buildingFillLayerId);
+    if (map.getLayer(buildingOutlineLayerId)) map.removeLayer(buildingOutlineLayerId);
+    if (map.getLayer(buildingExtrusionLayerId)) map.removeLayer(buildingExtrusionLayerId);
+    if (map.getSource(buildingSourceId)) map.removeSource(buildingSourceId);
+
+    if (!buildingData) {
+      addStatusMessage('No building data available to render', 'warning');
+      return;
+    }
 
     // 处理建筑物数据，确保有高度信息
-    const processedFeatures = buildingData.features.map((feature: any) => {
-      if (!feature.properties) feature.properties = {};
-      
-      // 确保有高度属性
-      if (!feature.properties.height) {
-        feature.properties.height = feature.properties.levels ? 
-          feature.properties.levels * 3.5 : 
-          estimateBuildingHeight(feature.properties.buildingType || 'building');
-      }
-      
-      return feature;
+    const processedFeatures = buildingData.features.map((feature: BuildingFeature) => {
+      const baseHeight = feature.properties?.height ?? (
+        feature.properties?.levels
+          ? feature.properties.levels * 3.5
+          : estimateBuildingHeight(feature.properties?.buildingType || 'building')
+      );
+
+      const properties: BuildingFeature['properties'] = {
+        ...feature.properties,
+        height: baseHeight,
+        render_height: baseHeight,
+      };
+
+      return {
+        ...feature,
+        properties,
+      };
     });
 
     // 添加数据源
-    map.addSource(sourceId, {
+    const sourceSpec: GeoJSONSourceRaw = {
       type: 'geojson',
       data: {
         type: 'FeatureCollection',
         features: processedFeatures
-      }
-    });
+      } as BuildingFeatureCollection
+    };
+
+    map.addSource(buildingSourceId, sourceSpec);
 
     // 添加2D填充图层（浅灰色）
     map.addLayer({
-      id: fillLayerId,
+      id: buildingFillLayerId,
       type: 'fill',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'fill-color': '#D3D3D3',
         'fill-opacity': 0.8
@@ -146,9 +156,9 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
 
     // 添加轮廓图层
     map.addLayer({
-      id: outlineLayerId,
+      id: buildingOutlineLayerId,
       type: 'line',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'line-color': '#A0A0A0',
         'line-width': 1,
@@ -158,9 +168,9 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
 
     // 添加3D挤出图层（基于高度）
     map.addLayer({
-      id: extrusionLayerId,
+      id: buildingExtrusionLayerId,
       type: 'fill-extrusion',
-      source: sourceId,
+      source: buildingSourceId,
       paint: {
         'fill-extrusion-color': '#D3D3D3',
         'fill-extrusion-height': [
@@ -176,7 +186,7 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
     });
 
     // 初始时隐藏3D图层
-    map.setLayoutProperty(extrusionLayerId, 'visibility', 'none');
+    map.setLayoutProperty(buildingExtrusionLayerId, 'visibility', 'none');
   };
 
   // 估算建筑物高度
@@ -201,9 +211,9 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const extrusionLayerId = 'wfs-buildings-extrusion';
-    const fillLayerId = 'wfs-buildings-fill';
-    const outlineLayerId = 'wfs-buildings-outline';
+    const extrusionLayerId = buildingExtrusionLayerId;
+    const fillLayerId = buildingFillLayerId;
+    const outlineLayerId = buildingOutlineLayerId;
 
     setIs3D(!is3D);
 
@@ -248,17 +258,16 @@ export const Mapbox3DComponent: React.FC<Mapbox3DComponentProps> = ({ className 
 
     if (features.length > 0) {
       const feature = features[0];
-      const props = feature.properties;
+      const props = (feature.properties as Record<string, any>) ?? {};
       
-      // 显示建筑物信息弹窗
       new mapboxgl.Popup()
         .setLngLat(e.lngLat)
         .setHTML(`
           <div class="min-w-48">
             <h4 class="font-bold text-gray-800 mb-2">🏢 建筑物信息</h4>
             <p><strong>类型:</strong> ${props.buildingType || '未知'}</p>
-            <p><strong>高度:</strong> ${props.height || '未知'}m</p>
-            <p><strong>楼层:</strong> ${props.levels || '未知'}</p>
+            <p><strong>高度:</strong> ${props.height ?? '未知'}m</p>
+            <p><strong>楼层:</strong> ${props.levels ?? '未知'}</p>
             <p><strong>数据源:</strong> WFS 服务</p>
           </div>
         `)

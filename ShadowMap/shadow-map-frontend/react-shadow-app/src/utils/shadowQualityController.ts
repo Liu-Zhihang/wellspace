@@ -1,3 +1,5 @@
+import type { BuildingFeature } from '../types/index.ts';
+
 /**
  * 阴影质量控制器
  * 解决阴影"脏"和密密麻麻的问题
@@ -12,21 +14,6 @@ interface ShadowQualityConfig {
   shadowColor: string;          // 动态阴影颜色
   shadowResolution: number;     // 阴影分辨率系数
   enableSmallBuildings: boolean; // 是否显示小建筑
-}
-
-interface BuildingFeature {
-  type: 'Feature';
-  geometry: {
-    type: 'Polygon';
-    coordinates: number[][][];
-  };
-  properties: {
-    height?: number;
-    levels?: number;
-    buildingType?: string;
-    area?: number;
-    id?: string;
-  };
 }
 
 export class ShadowQualityController {
@@ -146,18 +133,27 @@ export class ShadowQualityController {
     // 1. 计算建筑物面积和优先级
     const enrichedBuildings = buildings.map(building => {
       const area = this.calculateBuildingArea(building.geometry);
-      const height = building.properties?.height || 
-                    (building.properties?.levels ? building.properties.levels * 3.5 : 8);
+      const height = typeof building.properties?.height === 'number'
+        ? building.properties.height
+        : building.properties?.levels
+          ? building.properties.levels * 3.5
+          : 8;
       const importance = this.calculateBuildingImportance(building, area, height);
-      
+
+      const properties = {
+        ...building.properties,
+        area,
+        calculatedHeight: height,
+        importance,
+      } as BuildingFeature['properties'] & {
+        area: number;
+        calculatedHeight: number;
+        importance: number;
+      };
+
       return {
         ...building,
-        properties: {
-          ...building.properties,
-          area,
-          calculatedHeight: height,
-          importance
-        }
+        properties,
       };
     });
 
@@ -172,19 +168,26 @@ export class ShadowQualityController {
       }
       
       // 面积过滤
-      if ((building.properties.area || 0) < config.minBuildingArea) {
+      const propsRecord = building.properties as Record<string, unknown>;
+      const area = typeof propsRecord.area === 'number' ? propsRecord.area : 0;
+
+      if (area < config.minBuildingArea) {
         stats.removedSmall++;
         return false;
       }
       
       // 高度过滤
-      if ((building.properties.calculatedHeight || 0) < config.minBuildingHeight) {
+      const calculatedHeight = typeof propsRecord.calculatedHeight === 'number'
+        ? propsRecord.calculatedHeight
+        : 0;
+
+      if (calculatedHeight < config.minBuildingHeight) {
         stats.removedLow++;
         return false;
       }
       
       // 小建筑物控制
-      if (!config.enableSmallBuildings && (building.properties.area || 0) < 100) {
+      if (!config.enableSmallBuildings && area < 100) {
         stats.removedSmall++;
         return false;
       }

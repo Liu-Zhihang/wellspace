@@ -1,4 +1,4 @@
-import type { BuildingTileData } from '../types';
+import type { BuildingTileData } from '../types/index.ts';
 import { advancedCacheManager } from './advancedCacheManager';
 
 const API_BASE_URL = 'http://localhost:3500/api';

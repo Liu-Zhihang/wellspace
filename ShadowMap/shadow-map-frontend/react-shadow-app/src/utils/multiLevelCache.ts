@@ -107,7 +107,7 @@ export class MultiLevelCache<T> {
   /**
    * 设置缓存数据
    */
-  set(key: string, data: T, ttl?: number): void {
+  set(key: string, data: T, _ttl?: number): void {
     const size = this.estimateSize(data);
     const now = Date.now();
     
@@ -222,20 +222,18 @@ export class MultiLevelCache<T> {
   /**
    * 生成时间模式预测
    */
-  private generateTemporalPredictions(key: string, accessHistory: number[]): string[] {
+  private generateTemporalPredictions(_key: string, accessHistory: number[]): string[] {
     // 基于访问间隔预测下一次访问时间
     const intervals = [];
     for (let i = 1; i < accessHistory.length; i++) {
       intervals.push(accessHistory[i] - accessHistory[i - 1]);
     }
     
-    if (intervals.length === 0) return [];
-    
-    // 平均间隔
-    const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-    const nextAccessTime = Date.now() + avgInterval;
-    
-    // 生成时间相关的预测键（这里需要根据具体业务逻辑调整）
+    if (intervals.length === 0) {
+      return [];
+    }
+
+    // TODO(@future): 使用平均间隔生成真正的预测键
     return [];
   }
 

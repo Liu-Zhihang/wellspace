@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { MapComponent } from './components/Map/MapComponent'
 import { MapboxMapComponent } from './components/Map/MapboxMapComponent'
 import { Wfs3DShadowMapFixed } from './components/Map/Wfs3DShadowMapFixed'

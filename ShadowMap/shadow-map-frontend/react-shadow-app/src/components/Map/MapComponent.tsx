@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
@@ -123,16 +123,27 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
   }, []);
 
   // 更新缓存统计
-  const updateCacheStats = () => {
+  const updateCacheStats = useCallback(() => {
     const stats = advancedCacheManager.getStats();
-    setCacheStats(stats);
-  };
+    setCacheStats({
+      memorySize: stats.memorySize,
+      storageSize: stats.storageSize,
+      maxMemorySize: stats.maxMemorySize,
+      maxStorageSize: stats.maxStorageSize,
+      hitRate: `${stats.hitRate.toFixed(1)}%`,
+      totalHits: stats.totalHits,
+      totalMisses: stats.totalMisses,
+      memoryUsage: stats.memoryUsage,
+    });
+  }, []);
 
   // 定期更新缓存统计
   useEffect(() => {
-    const interval = setInterval(updateCacheStats, 5000); // 每5秒更新一次
+    const interval = setInterval(() => {
+      updateCacheStats();
+    }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [updateCacheStats]);
 
   // 处理地图点击事件
   const handleMapClick = async (e: L.LeafletMouseEvent) => {
@@ -244,13 +255,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
       
       {/* 底图选择器 */}
       <div className="absolute left-6 bottom-28 z-[1000]">
-        <BaseMapSelector 
-          mapInstance={mapRef.current}
-          onBaseMapChange={(baseMapId) => {
-            console.log('底图已切换到:', baseMapId);
-            addStatusMessage(`已切换到 ${baseMapId} 底图`, 'info');
-          }}
-        />
+        <BaseMapSelector />
       </div>
 
       {/* 缓存状态显示 */}

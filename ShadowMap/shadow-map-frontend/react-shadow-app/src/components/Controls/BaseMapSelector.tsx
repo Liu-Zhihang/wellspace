@@ -1,26 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { baseMapManager, type BaseMapOption } from '../../services/baseMapManager';
+import { useState } from 'react';
+import { baseMapManager } from '../../services/baseMapManager';
 import { useShadowMapStore } from '../../store/shadowMapStore';
-import { useShadowMap } from '../../hooks/useShadowMap';
 
-export const BaseMapSelector: React.FC = () => {
+export const BaseMapSelector = () => {
   const [selectedCategory, setSelectedCategory] = useState<'street' | 'satellite' | 'terrain' | 'dark' | 'light'>('street');
   const [currentBaseMap, setCurrentBaseMap] = useState<string>('osm-standard');
   const [mapboxApiKey, setMapboxApiKey] = useState<string>('');
   const [isExpanded, setIsExpanded] = useState(false);
   
   const { addStatusMessage } = useShadowMapStore();
-  const { mapRef } = useShadowMap();
 
   const categories = baseMapManager.getCategories();
   const availableMaps = baseMapManager.getBaseMapsByCategory(selectedCategory);
-
-  // 设置地图管理器
-  useEffect(() => {
-    if (mapRef.current) {
-      baseMapManager.setMap(mapRef.current);
-    }
-  }, [mapRef.current]);
 
   // 切换底图
   const handleBaseMapChange = (mapId: string) => {

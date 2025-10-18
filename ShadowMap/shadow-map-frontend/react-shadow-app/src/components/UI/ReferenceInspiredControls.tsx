@@ -98,7 +98,7 @@ export const ReferenceInspiredControls: React.FC = () => {
                       <span className="text-sm text-gray-700">Auto optimise</span>
                       <input
                         type="checkbox"
-                        checked={mapSettings.autoOptimize}
+                        checked={!!mapSettings.autoOptimize}
                         onChange={(event) =>
                           updateMapSettings({ autoOptimize: event.target.checked })
                         }

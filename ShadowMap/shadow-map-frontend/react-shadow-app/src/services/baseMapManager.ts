@@ -219,7 +219,7 @@ export class BaseMapManager {
   }
 
   // 预加载底图瓦片
-  preloadBaseMap(mapId: string, bounds: L.LatLngBounds, zoom: number, apiKey?: string): void {
+  preloadBaseMap(mapId: string, _bounds: L.LatLngBounds, _zoom: number, _apiKey?: string): void {
     const mapOption = BASE_MAPS.find(m => m.id === mapId);
     if (!mapOption) return;
 

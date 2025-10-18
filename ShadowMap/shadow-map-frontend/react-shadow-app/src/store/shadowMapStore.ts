@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { MapSettings, ShadowAnalysisResult, SunPosition, ShadowSettings, DataLayer, DataLayerType } from '../types';
+import type { MapSettings, ShadowAnalysisResult, SunPosition, ShadowSettings, DataLayer, DataLayerType } from '../types/index.ts';
 
 export interface MobilityTracePoint {
   coordinates: [number, number];
@@ -64,7 +64,6 @@ interface ShadowMapState {
   setCurrentTraceIndex: (index: number) => void;
   setTracePlaying: (playing: boolean) => void;
   advanceTraceIndex: () => void;
-  advanceTraceIndex: () => void;
   
   // 数据层管理方法
   toggleDataLayer: (layerId: DataLayerType) => void;
@@ -98,6 +97,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     enableBuildingFilter: false, // 默认关闭筛选，显示所有建筑
     // 🔧 新增：动态质量控制
     enableDynamicQuality: true, // 默认开启动态质量调整
+    autoOptimize: false,
     
     // 新的数据层系统
     dataLayers: {

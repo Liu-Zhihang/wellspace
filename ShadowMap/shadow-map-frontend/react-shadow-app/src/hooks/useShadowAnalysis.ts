@@ -1,8 +1,7 @@
 import { useRef } from 'react';
 import L from 'leaflet';
 import { useShadowMapStore } from '../store/shadowMapStore';
-import { GeoUtils } from '../utils/geoUtils';
-import type { ShadowAnalysisResult, ShadowAnalysisPoint } from '../types';
+import type { ShadowAnalysisResult, ShadowAnalysisPoint } from '../types/index.ts';
 
 export const useShadowAnalysis = () => {
   const analysisMarkerRef = useRef<L.Marker | null>(null);
@@ -233,7 +232,7 @@ export const useShadowAnalysis = () => {
             
             if (pixelData && pixelData.length >= 4) {
               // 分析像素数据来判断阴影情况
-              const [r, g, b, a] = pixelData;
+              const [r, g, b] = pixelData;
               const brightness = (r + g + b) / 3;
               
               // 基于亮度计算阴影百分比
@@ -296,7 +295,7 @@ export const useShadowAnalysis = () => {
 
   // 显示分析结果弹窗
   const showAnalysisPopup = (map: L.Map, lat: number, lng: number, result: ShadowAnalysisResult) => {
-    const popup = L.popup({
+    L.popup({
       maxWidth: 300,
       className: 'shadow-analysis-popup',
     })
@@ -345,71 +344,6 @@ export const useShadowAnalysis = () => {
   };
 
   // 计算一天内的日照时长（详细版本）
-  const calculateDailyHoursOfSun = async (lat: number, lng: number, date: Date): Promise<number> => {
-    try {
-      let totalHoursOfSun = 0;
-      const samplesPerHour = 4; // 每小时4次采样
-      const startHour = 6; // 从早上6点开始
-      const endHour = 18; // 到晚上6点结束
-      
-      for (let hour = startHour; hour <= endHour; hour += 1/samplesPerHour) {
-        const testDate = new Date(date);
-        testDate.setHours(Math.floor(hour), (hour % 1) * 60, 0, 0);
-        
-        const sunPosition = GeoUtils.getSunPosition(testDate, lat, lng);
-        
-        if (sunPosition.altitude > 0) {
-          // 太阳在地平线以上，计算是否有阴影遮挡
-          const shadowFactor = calculateShadowFactor(sunPosition, lat, lng, testDate);
-          const sunlightStrength = Math.min(1, sunPosition.altitude / 60) * (1 - shadowFactor);
-          
-          if (sunlightStrength > 0.1) { // 阈值：10%以上的阳光强度算作有日照
-            totalHoursOfSun += (1 / samplesPerHour) * sunlightStrength;
-          }
-        }
-      }
-      
-      console.log(`🌞 ${lat.toFixed(4)}, ${lng.toFixed(4)} 计算得出日照时长: ${totalHoursOfSun.toFixed(1)} 小时`);
-      return Math.max(0, totalHoursOfSun);
-    } catch (error) {
-      console.error('计算日照时长失败:', error);
-      return 0;
-    }
-  };
-
-  // 计算阴影因子（基于真实太阳位置和时间）
-  const calculateShadowFactor = (sunPosition: any, lat: number, lng: number, testDate: Date): number => {
-    // 基于真实时间而不是当前时间
-    const timeOfDay = testDate.getHours() + testDate.getMinutes() / 60;
-    
-    // 基于太阳高度角的精确计算
-    let shadowFactor = 0;
-    
-    // 太阳高度角越低，阴影越多
-    if (sunPosition.altitude < 5) {
-      shadowFactor = 0.9; // 极低角度，几乎全是阴影
-    } else if (sunPosition.altitude < 15) {
-      shadowFactor = 0.6; // 低角度，较多阴影
-    } else if (sunPosition.altitude < 30) {
-      shadowFactor = 0.3; // 中等角度，中等阴影
-    } else if (sunPosition.altitude < 45) {
-      shadowFactor = 0.15; // 较高角度，较少阴影
-    } else {
-      shadowFactor = 0.05; // 高角度，最少阴影
-    }
-    
-    // 考虑地理位置的影响（纬度越高，冬季阴影越多）
-    const latitudeFactor = Math.abs(lat) / 90 * 0.1; // 纬度影响最大10%
-    shadowFactor += latitudeFactor;
-    
-    // 考虑季节影响
-    const dayOfYear = Math.floor((testDate.getTime() - new Date(testDate.getFullYear(), 0, 0).getTime()) / 86400000);
-    const seasonFactor = 0.1 * Math.sin((dayOfYear - 172) * 2 * Math.PI / 365); // 冬季更多阴影
-    shadowFactor += Math.abs(seasonFactor);
-    
-    return Math.min(0.9, Math.max(0.05, shadowFactor)); // 限制在5%-90%范围内
-  };
-
   // 清理分析缓存
   const clearAnalysisCache = () => {
     analysisCache.current.clear();

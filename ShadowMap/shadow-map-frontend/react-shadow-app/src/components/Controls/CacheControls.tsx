@@ -1,13 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { advancedCacheManager } from '../../services/advancedCacheManager';
+import type { CacheStats } from '../../services/advancedCacheManager';
 import { ApiService } from '../../services/apiService';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 
 export const CacheControls: React.FC = () => {
-  const [cacheStats, setCacheStats] = useState({
-    size: 0,
-    count: 0,
-    hitRate: 0
+  const [cacheStats, setCacheStats] = useState<CacheStats>({
+    memorySize: 0,
+    storageSize: 0,
+    maxMemorySize: 0,
+    maxStorageSize: 0,
+    hitRate: 0,
+    totalHits: 0,
+    totalMisses: 0,
+    memoryUsage: '0%',
   });
   const [isClearing, setIsClearing] = useState(false);
   const { addStatusMessage } = useShadowMapStore();
@@ -88,7 +94,9 @@ export const CacheControls: React.FC = () => {
         </h4>
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="text-center">
-            <div className="text-lg font-bold text-blue-600">{cacheStats.count}</div>
+            <div className="text-lg font-bold text-blue-600">
+              {cacheStats.memorySize + cacheStats.storageSize}
+            </div>
             <div className="text-gray-600">缓存项</div>
           </div>
           <div className="text-center">

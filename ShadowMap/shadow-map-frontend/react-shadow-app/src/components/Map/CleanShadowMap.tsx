@@ -122,11 +122,13 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         setBuildingsLoaded(true)
         setStatusMessage(`Loaded ${result.data.features.length} buildings in this session`)
       } else {
-        throw new Error(result.metadata?.message || 'Failed to load buildings')
+        const metadata = result.metadata as { message?: string } | undefined
+        throw new Error(metadata?.message ?? 'Failed to load buildings')
       }
     } catch (error) {
       console.error('❌ Failed to load buildings:', error)
-      setStatusMessage('Building load failed: ' + (error as Error).message)
+      const message = error instanceof Error ? error.message : String(error)
+      setStatusMessage('Building load failed: ' + message)
       setBuildingsLoaded(false)
     } finally {
       setIsLoading(false)

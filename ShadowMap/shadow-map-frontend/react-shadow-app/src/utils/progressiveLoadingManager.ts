@@ -183,7 +183,7 @@ export class ProgressiveLoadingManager {
   /**
    * 基于性能指标优化策略
    */
-  private optimizeBasedOnMetrics(strategy: LoadingStrategy, context: ProgressiveContext): LoadingStrategy {
+  private optimizeBasedOnMetrics(strategy: LoadingStrategy, _context: ProgressiveContext): LoadingStrategy {
     if (this.performanceMetrics.totalCalculations < 5) {
       return strategy; // 数据不足，不进行优化
     }

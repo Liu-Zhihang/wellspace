@@ -8,7 +8,7 @@ export function debounce<T extends (...args: any[]) => any>(
   wait: number,
   immediate = false
 ): (...args: Parameters<T>) => void {
-  let timeout: NodeJS.Timeout | null = null;
+  let timeout: number | null = null;
   
   return function executedFunction(...args: Parameters<T>) {
     const later = () => {
@@ -18,8 +18,10 @@ export function debounce<T extends (...args: any[]) => any>(
     
     const callNow = immediate && !timeout;
     
-    if (timeout) clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
+    if (timeout !== null) {
+      window.clearTimeout(timeout);
+    }
+    timeout = window.setTimeout(later, wait);
     
     if (callNow) func(...args);
   };
@@ -32,11 +34,13 @@ export function throttle<T extends (...args: any[]) => any>(
 ): (...args: Parameters<T>) => void {
   let inThrottle = false;
   
-  return function(...args: Parameters<T>) {
+  return (...args: Parameters<T>) => {
     if (!inThrottle) {
-      func.apply(this, args);
+      func(...args);
       inThrottle = true;
-      setTimeout(() => inThrottle = false, limit);
+      window.setTimeout(() => {
+        inThrottle = false;
+      }, limit);
     }
   };
 }
@@ -92,8 +96,10 @@ export class ShadowCache {
   set(key: string, data: any): void {
     // 清理旧缓存
     if (this.cache.size >= this.maxSize) {
-      const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
+      const oldestEntry = this.cache.keys().next().value as string | undefined;
+      if (oldestEntry !== undefined) {
+        this.cache.delete(oldestEntry);
+      }
     }
 
     this.cache.set(key, {

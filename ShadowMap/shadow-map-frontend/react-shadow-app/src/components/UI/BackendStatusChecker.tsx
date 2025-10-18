@@ -18,11 +18,13 @@ export const BackendStatusChecker: React.FC = () => {
   const checkBackendStatus = async () => {
     setChecking(true);
     
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+
     try {
-      // Check basic connection
       const response = await fetch('http://localhost:3500/api/health', {
         method: 'GET',
-        timeout: 5000,
+        signal: controller.signal,
       });
       
       if (response.ok) {
@@ -50,6 +52,7 @@ export const BackendStatusChecker: React.FC = () => {
         buildingApiStatus: 'unknown'
       });
     } finally {
+      clearTimeout(timeoutId);
       setChecking(false);
     }
   };

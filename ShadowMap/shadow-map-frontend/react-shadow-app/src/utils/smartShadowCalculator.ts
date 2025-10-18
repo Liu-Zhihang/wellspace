@@ -20,11 +20,12 @@ interface CalculationThrottleOptions {
 }
 
 export class SmartShadowCalculator {
-  private debounceTimers = new Map<string, NodeJS.Timeout>();
+  private debounceTimers = new Map<string, number>();
   private lastCalculation: CalculationContext | null = null;
   private lastCalculationTime = 0;
   private isCalculating = false;
   private pendingCalculation: CalculationContext | null = null;
+  private calculateFunction: (context: CalculationContext) => Promise<void>;
   
   private readonly options: CalculationThrottleOptions = {
     moveDelay: 800,           // 地图移动停止后800ms才计算
@@ -36,9 +37,10 @@ export class SmartShadowCalculator {
   };
 
   constructor(
-    private calculateFunction: (context: CalculationContext) => Promise<void>,
+    calculateFunction: (context: CalculationContext) => Promise<void>,
     options?: Partial<CalculationThrottleOptions>
   ) {
+    this.calculateFunction = calculateFunction;
     if (options) {
       this.options = { ...this.options, ...options };
     }
@@ -86,11 +88,14 @@ export class SmartShadowCalculator {
     
     // 清除现有定时器
     if (this.debounceTimers.has(timerKey)) {
-      clearTimeout(this.debounceTimers.get(timerKey)!);
+      const existingTimer = this.debounceTimers.get(timerKey);
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer);
+      }
     }
 
     // 设置新的防抖定时器
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       this.debounceTimers.delete(timerKey);
       this.performCalculation(context, `${trigger}触发`);
     }, delay);
@@ -259,7 +264,7 @@ export class SmartShadowCalculator {
    * 取消所有待处理的计算
    */
   cancelPending(): void {
-    this.debounceTimers.forEach(timer => clearTimeout(timer));
+    this.debounceTimers.forEach(timer => window.clearTimeout(timer));
     this.debounceTimers.clear();
     this.pendingCalculation = null;
     console.log('🚫 取消所有待处理的阴影计算');

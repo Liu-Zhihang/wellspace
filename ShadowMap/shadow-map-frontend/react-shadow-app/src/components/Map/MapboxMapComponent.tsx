@@ -7,6 +7,7 @@ import { shadowQualityController } from '../../utils/shadowQualityController';
 import { MapboxShadowSync } from '../../utils/mapboxShadowSync';
 import { localFirstBuildingService } from '../../services/localFirstBuildingService';
 import { BuildingLayerManager } from './BuildingLayerManager';
+import type { BuildingFeature } from '../../types/index.ts';
 
 // 🔧 正确导入mapbox-gl-shadow-simulator
 declare global {
@@ -265,11 +266,20 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
           }
           
           // 🔧 坐标精度对齐处理 - 修复阴影错位
-          const alignedBuildings = processedBuildings.map(building => {
-            if (!building.geometry?.coordinates) return building;
+          const alignedBuildings = processedBuildings.map((building) => {
+            const geometry = building.geometry;
+
+            if (!geometry) {
+              return building;
+            }
+
+            if (geometry.type !== 'Polygon') {
+              // 当前仅处理Polygon，要支持MultiPolygon可在此扩展
+              return building;
+            }
             
             // 确保坐标精度一致（6位小数精度）
-            const alignedCoordinates = building.geometry.coordinates.map((ring: number[][]) => {
+            const alignedCoordinates = geometry.coordinates.map((ring: number[][]) => {
               return ring.map((coord: number[]) => [
                 Math.round(coord[0] * 1000000) / 1000000, // 经度6位小数
                 Math.round(coord[1] * 1000000) / 1000000  // 纬度6位小数
@@ -283,7 +293,7 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
             return {
               ...building,
               geometry: {
-                ...building.geometry,
+                ...geometry,
                 coordinates: alignedCoordinates
               },
               properties: {
@@ -524,7 +534,7 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
   };
 
   // Get current view building data with local-first strategy
-  const getCurrentViewBuildings = async (map: mapboxgl.Map): Promise<any[]> => {
+  const getCurrentViewBuildings = async (map: mapboxgl.Map): Promise<BuildingFeature[]> => {
     try {
       // Check if we're at an appropriate zoom level
       const currentZoom = map.getZoom();
@@ -543,24 +553,27 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
       }, currentZoom);
       
       const buildings = buildingData.features;
-      
+
       // Add building type validation and enhancement
-      const enhancedBuildings = buildings.map(building => {
-        if (!building.properties) building.properties = {};
-        
-        // Ensure height property
-        if (!building.properties.height) {
-          building.properties.height = building.properties.levels ? 
-            building.properties.levels * 3.5 : 
-            estimateBuildingHeight(building.properties.buildingType || 'building');
-        }
-        
-        // Ensure render_height for shadow simulator
-        building.properties.render_height = building.properties.height;
-        
-        return building;
+      const enhancedBuildings = buildings.map((building) => {
+        const baseHeight = building.properties?.height ?? (
+          building.properties?.levels
+            ? building.properties.levels * 3.5
+            : estimateBuildingHeight(building.properties?.buildingType || 'building')
+        );
+
+        const properties: BuildingFeature['properties'] = {
+          ...building.properties,
+          height: baseHeight,
+          render_height: baseHeight,
+        };
+
+        return {
+          ...building,
+          properties,
+        };
       });
-      
+
       console.log(`✅ Processed ${enhancedBuildings.length} buildings for shadow simulation`);
       return enhancedBuildings;
 
