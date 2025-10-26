@@ -7,6 +7,21 @@ import { getWfsBuildings } from '../../services/wfsBuildingService';
 import { buildingCache } from '../../cache/buildingCache';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { shadowOptimizer } from '../../services/shadowOptimizer';
+import { weatherService } from '../../services/weatherService';
+
+const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
+const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
+
+const computeEffectiveShadowOpacity = (
+  baseOpacity: number,
+  sunlightFactor: number,
+  enforceMinimum: boolean
+): number => {
+  const factor = enforceMinimum
+    ? MIN_SHADOW_DARKNESS_FACTOR + (1 - MIN_SHADOW_DARKNESS_FACTOR) * sunlightFactor
+    : sunlightFactor;
+  return Math.max(0, Math.min(1, baseOpacity * factor));
+};
 
 // 声明全局ShadeMap类型
 declare global {
@@ -31,11 +46,16 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
   const loadBuildingsRef = useRef<(() => Promise<void>) | undefined>(undefined); // 🆕 用于打破循环依赖
   const moveEndTimeoutRef = useRef<number | null>(null); // 🆕 防抖timer（在load事件中使用）
   const tracePlaybackRef = useRef<number | null>(null);
+  const weatherRequestRef = useRef<Promise<void> | null>(null);
+  const lastWeatherKeyRef = useRef<string | null>(null);
   
   // Connect to Zustand store
   const {
     currentDate,
     mapSettings,
+    shadowSettings: shadowSettingsState,
+    currentWeather,
+    setCurrentWeather,
     mobilityTrace,
     currentTraceIndex,
     isTracePlaying,
@@ -47,6 +67,76 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
 
   // Component initialisation lifecycle
   console.log('✅ CleanShadowMap mounted')
+
+  const getActiveSunlightFactor = useCallback(() => (
+    shadowSettingsState.autoCloudAttenuation
+      ? (currentWeather.sunlightFactor ?? 1)
+      : shadowSettingsState.manualSunlightFactor
+  ), [shadowSettingsState.autoCloudAttenuation, shadowSettingsState.manualSunlightFactor, currentWeather.sunlightFactor]);
+
+  const getEffectiveOpacity = useCallback((baseOpacity: number) =>
+    computeEffectiveShadowOpacity(
+      baseOpacity,
+      getActiveSunlightFactor(),
+      shadowSettingsState.autoCloudAttenuation
+    ), [getActiveSunlightFactor, shadowSettingsState.autoCloudAttenuation]);
+
+  const applyShadowOpacity = useCallback((baseOpacity: number) => {
+    if (!shadeMapRef.current || typeof shadeMapRef.current.setOpacity !== 'function') {
+      return;
+    }
+    const effectiveOpacity = getEffectiveOpacity(baseOpacity);
+    shadeMapRef.current.setOpacity(effectiveOpacity);
+  }, [getEffectiveOpacity]);
+
+  const refreshWeatherData = useCallback((reason: string) => {
+    if (!mapRef.current) return;
+    if (!shadowSettingsState.autoCloudAttenuation) return;
+
+    const now = Date.now();
+    const center = mapRef.current.getCenter();
+    const cacheKey = weatherService.buildCacheKey(center.lat, center.lng, currentDate);
+
+    const lastFetched = currentWeather.fetchedAt ? currentWeather.fetchedAt.getTime() : 0;
+    if (lastWeatherKeyRef.current === cacheKey && now - lastFetched < WEATHER_REFRESH_THROTTLE_MS) {
+      return;
+    }
+
+    if (weatherRequestRef.current) {
+      return;
+    }
+
+    weatherRequestRef.current = (async () => {
+      try {
+        const { snapshot } = await weatherService.getCurrentWeather(center.lat, center.lng, currentDate);
+        const fetchedAt = snapshot.fetchedAt ?? new Date();
+
+        setCurrentWeather({
+          cloudCover: snapshot.cloudCover,
+          sunlightFactor: snapshot.sunlightFactor,
+          fetchedAt,
+          raw: snapshot.raw ?? null,
+          source: 'gfs'
+        });
+        lastWeatherKeyRef.current = cacheKey;
+
+        if (snapshot.cloudCover != null && shadowSettingsState.autoCloudAttenuation) {
+          const cloudPct = Math.round(snapshot.cloudCover * 100);
+          const sunlightPct = Math.round(snapshot.sunlightFactor * 100);
+          setStatusMessage(`Cloud cover ${cloudPct}%, sunlight factor ${sunlightPct}%`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[weather] refresh failed (${reason}):`, message);
+      } finally {
+        weatherRequestRef.current = null;
+      }
+    })();
+  }, [shadowSettingsState.autoCloudAttenuation, currentWeather.fetchedAt, currentDate, setCurrentWeather]);
+
+  useEffect(() => {
+    refreshWeatherData(shadowSettingsState.autoCloudAttenuation ? 'auto-on' : 'manual-mode');
+  }, [refreshWeatherData, shadowSettingsState.autoCloudAttenuation, currentDate]);
 
   // Load the shadow simulator script on demand
   const loadShadowSimulator = useCallback(() => {
@@ -334,7 +424,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
     }, 1000);
 
     console.log('🎯 建筑物添加流程完成');
-  }, []);
+  }, [refreshWeatherData]);
 
   // 初始化阴影模拟器
   const initShadowSimulator = useCallback(() => {
@@ -420,7 +510,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       shadeMapRef.current = new window.ShadeMap({
         date: latestDate,
         color: latestMapSettings.shadowColor,
-        opacity: latestMapSettings.shadowOpacity,
+        opacity: getEffectiveOpacity(latestMapSettings.shadowOpacity),
         apiKey: mapboxgl.accessToken,
         terrainSource: {
           tileSize: 256,
@@ -454,6 +544,8 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
           console.log('ShadeMap:', msg);
         }
       }).addTo(mapRef.current);
+
+      applyShadowOpacity(latestMapSettings.shadowOpacity);
 
       // 🎯 记录这次计算，用于后续优化
       shadowOptimizer.recordCalculation(mapRef.current, latestDate, validBuildings.length);
@@ -504,6 +596,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         shadeMapRef.current.setDate(newTime);
         setCurrentDate(newTime);
         setStatusMessage('阴影时间已更新: ' + newTime.toLocaleString());
+        refreshWeatherData('time-update');
       }
     } catch (error) {
       console.error('❌ Error updating shadow time:', error);
@@ -763,9 +856,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       }
       
       // Update opacity
-      if (typeof shadeMapRef.current.setOpacity === 'function') {
-        shadeMapRef.current.setOpacity(mapSettings.shadowOpacity);
-      }
+      applyShadowOpacity(mapSettings.shadowOpacity);
       
       // Update date
       if (typeof shadeMapRef.current.setDate === 'function') {
@@ -775,7 +866,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       console.error('❌ Error updating shadow settings:', error);
       // Don't crash the app, just log the error
     }
-  }, [mapSettings.shadowColor, mapSettings.shadowOpacity, currentDate]);
+  }, [mapSettings.shadowColor, mapSettings.shadowOpacity, currentDate, applyShadowOpacity]);
 
   // 🆕 Watch for layer visibility changes and update map layers
   useEffect(() => {
@@ -806,7 +897,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         // but we can control it via opacity
         if (typeof shadeMapRef.current.setOpacity === 'function') {
           const effectiveOpacity = mapSettings.showShadowLayer 
-            ? mapSettings.shadowOpacity 
+            ? getEffectiveOpacity(mapSettings.shadowOpacity)
             : 0;
           shadeMapRef.current.setOpacity(effectiveOpacity);
           console.log(`🌑 Shadow layer: ${mapSettings.showShadowLayer ? 'visible' : 'hidden'}`);
@@ -815,7 +906,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
         console.error('❌ Error controlling shadow visibility:', error);
       }
     }
-  }, [mapSettings.showBuildingLayer, mapSettings.showShadowLayer, mapSettings.shadowOpacity]);
+  }, [mapSettings.showBuildingLayer, mapSettings.showShadowLayer, mapSettings.shadowOpacity, getEffectiveOpacity]);
 
   // 清除建筑物和阴影
   const clearBuildings = useCallback(() => {
@@ -894,6 +985,8 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
       setTimeout(() => {
         initShadowSimulator();
       }, 500);
+
+      refreshWeatherData('map-load');
       
       // 🆕 地图加载完成后，绑定 moveend 监听器
       console.log('🎯 地图完全加载，现在绑定moveend监听器...');
@@ -916,6 +1009,7 @@ export const CleanShadowMap: React.FC<CleanShadowMapProps> = ({ className = '' }
           if (loadBuildingsRef.current) {
             loadBuildingsRef.current();
           }
+          refreshWeatherData('moveend');
         }, 500);
       };
       

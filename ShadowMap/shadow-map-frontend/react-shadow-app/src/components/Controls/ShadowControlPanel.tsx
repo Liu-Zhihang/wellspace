@@ -6,7 +6,13 @@ import { useShadowMapStore } from '../../store/shadowMapStore';
 import type { Color } from 'antd/es/color-picker';
 
 export const ShadowControlPanel: React.FC = () => {
-  const { mapSettings, updateMapSettings } = useShadowMapStore();
+  const {
+    mapSettings,
+    updateMapSettings,
+    shadowSettings,
+    updateShadowSettings,
+    currentWeather,
+  } = useShadowMapStore();
 
   const colorPresets = [
     {
@@ -51,6 +57,42 @@ export const ShadowControlPanel: React.FC = () => {
           showText
           size="middle"
           style={{ width: '100%' }}
+        />
+      </div>
+
+      {/* Cloud Attenuation */}
+      <div>
+        <label className="text-xs text-gray-600 block mb-2">Cloud Attenuation</label>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-gray-500">Auto cloud-based attenuation</span>
+          <Switch
+            size="small"
+            checked={shadowSettings.autoCloudAttenuation}
+            onChange={(checked) => updateShadowSettings({ autoCloudAttenuation: checked })}
+          />
+        </div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-gray-600">Manual factor</span>
+          <span className="text-xs font-semibold bg-gray-100 px-2 py-0.5 rounded">
+            {Math.round(
+              (shadowSettings.autoCloudAttenuation
+                ? (currentWeather.sunlightFactor ?? 1)
+                : shadowSettings.manualSunlightFactor) * 100,
+            )}
+            %
+          </span>
+        </div>
+        <Slider
+          min={0}
+          max={1}
+          step={0.05}
+          disabled={shadowSettings.autoCloudAttenuation}
+          value={shadowSettings.manualSunlightFactor}
+          onChange={(value) => {
+            const numericValue = Array.isArray(value) ? value[0] : value;
+            updateShadowSettings({ manualSunlightFactor: numericValue });
+          }}
+          tooltip={{ formatter: (value) => `${Math.round((value || 0) * 100)}%` }}
         />
       </div>
 

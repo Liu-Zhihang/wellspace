@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { MapSettings, ShadowAnalysisResult, SunPosition, ShadowSettings, DataLayer, DataLayerType } from '../types/index.ts';
+import type { MapSettings, ShadowAnalysisResult, SunPosition, ShadowSettings, DataLayer, DataLayerType, WeatherSnapshot } from '../types/index.ts';
 
 export interface MobilityTracePoint {
   coordinates: [number, number];
@@ -70,6 +70,10 @@ interface ShadowMapState {
   updateDataLayer: (layerId: DataLayerType, updates: Partial<DataLayer>) => void;
   setActiveDataLayer: (layerId: DataLayerType) => void;
   getEnabledLayers: () => DataLayer[];
+
+  // 天气 / 云量信息
+  currentWeather: WeatherSnapshot;
+  setCurrentWeather: (snapshot: Partial<WeatherSnapshot>) => void;
 }
 
 export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
@@ -182,6 +186,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     shadowBlur: 2,
     enableShadowAnimation: false,
     showSunExposure: false, // 控制太阳曝光热力图显示
+    autoCloudAttenuation: true,
+    manualSunlightFactor: 1,
   },
   updateShadowSettings: (settings: Partial<ShadowSettings>) =>
     set(state => ({ shadowSettings: { ...state.shadowSettings, ...settings } })),
@@ -307,6 +313,22 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       mapSettings: {
         ...state.mapSettings,
         activeDataLayer: layerId
+      }
+    }));
+  },
+
+  currentWeather: {
+    cloudCover: null,
+    sunlightFactor: 1,
+    fetchedAt: null,
+    source: undefined,
+    raw: null
+  },
+  setCurrentWeather: (snapshot: Partial<WeatherSnapshot>) => {
+    set(state => ({
+      currentWeather: {
+        ...state.currentWeather,
+        ...snapshot
       }
     }));
   },

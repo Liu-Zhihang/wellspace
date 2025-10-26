@@ -89,6 +89,8 @@ export type ShadowSettings = {
   shadowBlur: number;
   enableShadowAnimation: boolean;
   showSunExposure: boolean;
+  autoCloudAttenuation: boolean;
+  manualSunlightFactor: number;
 };
 
 export type DataLayerType = 'shadows' | 'sunlight_hours' | 'annual_sunlight' | 'buildings' | 'terrain';
@@ -136,4 +138,34 @@ export type BuildingTileData = BuildingFeatureCollection & {
   bbox?: [number, number, number, number];
   tileInfo?: BuildingTileInfo;
   metadata?: Record<string, unknown>;
+};
+
+export type WeatherMetrics = {
+  temperature: number;
+  humidity: number;
+  cloud_cover: number;
+  uv_index: number;
+  wind_speed: number;
+  wind_direction: number;
+  visibility: number;
+  precipitation: number;
+  pressure: number;
+};
+
+export type WeatherApiResponse = {
+  location: {
+    latitude: number;
+    longitude: number;
+  };
+  timestamp: string;
+  weather: WeatherMetrics;
+  units: Record<string, string>;
+};
+
+export type WeatherSnapshot = {
+  cloudCover: number | null;
+  sunlightFactor: number;
+  fetchedAt: Date | null;
+  source?: string;
+  raw?: WeatherMetrics | null;
 };

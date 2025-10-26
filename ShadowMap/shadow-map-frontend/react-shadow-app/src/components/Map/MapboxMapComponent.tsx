@@ -1,13 +1,56 @@
 import React, { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import type { Feature } from 'geojson';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { SmartShadowCalculator } from '../../utils/smartShadowCalculator';
 import { shadowQualityController } from '../../utils/shadowQualityController';
 import { MapboxShadowSync } from '../../utils/mapboxShadowSync';
 import { localFirstBuildingService } from '../../services/localFirstBuildingService';
+import { weatherService } from '../../services/weatherService';
 import { BuildingLayerManager } from './BuildingLayerManager';
 import type { BuildingFeature } from '../../types/index.ts';
+
+const CLOUD_SOURCE_ID = 'shadowmap-cloud-attenuation';
+const CLOUD_LAYER_ID = 'shadowmap-cloud-attenuation-layer';
+const CLOUD_LAYER_MAX_OPACITY = 0.45;
+const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
+const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
+
+const WORLD_CLOUD_MASK: Feature = {
+  type: 'Feature',
+  properties: {},
+  geometry: {
+    type: 'Polygon',
+    coordinates: [
+      [
+        [-180, -85],
+        [180, -85],
+        [180, 85],
+        [-180, 85],
+        [-180, -85]
+      ]
+    ]
+  }
+};
+
+const computeEffectiveShadowOpacity = (
+  baseOpacity: number,
+  sunlightFactor: number,
+  enforceMinimum: boolean
+): number => {
+  const factor = enforceMinimum
+    ? MIN_SHADOW_DARKNESS_FACTOR + (1 - MIN_SHADOW_DARKNESS_FACTOR) * sunlightFactor
+    : sunlightFactor;
+  return Math.max(0, Math.min(1, baseOpacity * factor));
+};
+
+const calculateCloudOverlayOpacity = (cloudCover: number | null | undefined): number => {
+  if (cloudCover == null || Number.isNaN(cloudCover)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(CLOUD_LAYER_MAX_OPACITY, cloudCover * CLOUD_LAYER_MAX_OPACITY));
+};
 
 // 🔧 正确导入mapbox-gl-shadow-simulator
 declare global {
@@ -46,13 +89,120 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
   const shadeMapRef = useRef<any>(null);
   const shadowCalculatorRef = useRef<SmartShadowCalculator | null>(null);
   const shadowSyncRef = useRef<MapboxShadowSync | null>(null);
+  const weatherRequestRef = useRef<Promise<void> | null>(null);
+  const lastWeatherKeyRef = useRef<string | null>(null);
+  const lastReportedCloudRef = useRef<number | null>(null);
   
+  const shadowStore = useShadowMapStore();
   const {
     mapSettings,
+    shadowSettings: shadowSettingsState,
     currentDate,
     addStatusMessage,
     setMapView,
-  } = useShadowMapStore();
+    currentWeather,
+    setCurrentWeather,
+  } = shadowStore;
+
+  const ensureCloudOverlay = (map: mapboxgl.Map) => {
+    if (map.getSource(CLOUD_SOURCE_ID)) {
+      return;
+    }
+
+    map.addSource(CLOUD_SOURCE_ID, {
+      type: 'geojson',
+      data: WORLD_CLOUD_MASK,
+    });
+
+    map.addLayer({
+      id: CLOUD_LAYER_ID,
+      type: 'fill',
+      source: CLOUD_SOURCE_ID,
+      paint: {
+        'fill-color': '#000000',
+        'fill-opacity': 0,
+      },
+      layout: {
+        visibility: 'visible',
+      },
+    });
+  };
+
+  const updateCloudLayerOpacity = (cloudCover: number | null | undefined) => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    ensureCloudOverlay(map);
+
+    if (map.getLayer(CLOUD_LAYER_ID)) {
+      map.setPaintProperty(CLOUD_LAYER_ID, 'fill-opacity', calculateCloudOverlayOpacity(cloudCover ?? null));
+    }
+  };
+
+  const refreshWeatherData = (reason: string) => {
+    if (!mapRef.current) return;
+    if (!shadowSettingsState.autoCloudAttenuation) {
+      return;
+    }
+
+    const now = Date.now();
+    const center = mapRef.current.getCenter();
+    const cacheKey = weatherService.buildCacheKey(center.lat, center.lng, currentDate);
+
+    const lastFetched = currentWeather.fetchedAt ? currentWeather.fetchedAt.getTime() : 0;
+    if (lastWeatherKeyRef.current === cacheKey && now - lastFetched < WEATHER_REFRESH_THROTTLE_MS) {
+      return;
+    }
+
+    if (weatherRequestRef.current) {
+      return;
+    }
+
+    weatherRequestRef.current = (async () => {
+      try {
+        const { snapshot } = await weatherService.getCurrentWeather(center.lat, center.lng, currentDate);
+        const fetchedAt = snapshot.fetchedAt ?? new Date();
+
+        setCurrentWeather({
+          cloudCover: snapshot.cloudCover,
+          sunlightFactor: snapshot.sunlightFactor,
+          fetchedAt,
+          raw: snapshot.raw ?? null,
+        });
+
+        lastWeatherKeyRef.current = cacheKey;
+
+        const previousCloud = lastReportedCloudRef.current;
+        if (snapshot.cloudCover != null) {
+          if (previousCloud === null || Math.abs(snapshot.cloudCover - previousCloud) >= 0.05) {
+            const cloudPct = Math.round(snapshot.cloudCover * 100);
+            const sunlightPct = Math.round(snapshot.sunlightFactor * 100);
+            addStatusMessage(`☁️ 云量约 ${cloudPct}% ，日照系数 ${sunlightPct}%`, 'info');
+            lastReportedCloudRef.current = snapshot.cloudCover;
+          }
+        } else if (previousCloud !== null) {
+          addStatusMessage('☀️ 云量数据缺失，使用默认晴空值', 'warning');
+          lastReportedCloudRef.current = null;
+        }
+      } catch (error) {
+        console.warn(`⚠️ 获取云量失败 (${reason}):`, error);
+
+        if (!currentWeather.fetchedAt || now - lastFetched > WEATHER_REFRESH_THROTTLE_MS) {
+          addStatusMessage('⚠️ 云量数据获取失败，使用默认晴空值', 'warning');
+          setCurrentWeather({
+            cloudCover: null,
+            sunlightFactor: 1,
+            fetchedAt: new Date(),
+            raw: null,
+          });
+          lastReportedCloudRef.current = null;
+        }
+      } finally {
+        weatherRequestRef.current = null;
+        lastWeatherKeyRef.current = cacheKey;
+      }
+    })();
+  };
 
   // 初始化Mapbox地图
   useEffect(() => {
@@ -82,6 +232,9 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
       
       // 初始化智能阴影计算器
       initSmartShadowCalculator(map);
+      ensureCloudOverlay(map);
+      updateCloudLayerOpacity(currentWeather.cloudCover);
+      refreshWeatherData('map-load');
       
       // 添加地图事件监听
       map.on('click', handleMapClick);
@@ -107,6 +260,8 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
             'move'
           );
         }
+
+        refreshWeatherData('move');
       });
       
       // 处理缩放事件
@@ -126,6 +281,8 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
             'zoom'
           );
         }
+
+        refreshWeatherData('zoom');
       });
     });
 
@@ -167,7 +324,7 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
 
       // 🎨 获取当前zoom级别的阴影质量配置
       const currentZoom = map.getZoom();
-      const shadowSettings = mapSettings.enableDynamicQuality
+      const qualitySettings = mapSettings.enableDynamicQuality
         ? shadowQualityController.getOptimizedShadowSettings(currentZoom)
         : {
             opacity: mapSettings.shadowOpacity,
@@ -176,7 +333,7 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
             antiAliasing: true,
           };
       
-      console.log(`🎨 阴影质量配置: zoom=${currentZoom.toFixed(1)}, 透明度=${shadowSettings.opacity}, 颜色=${shadowSettings.color}`);
+      console.log(`🎨 阴影质量配置: zoom=${currentZoom.toFixed(1)}, 透明度=${qualitySettings.opacity}, 颜色=${qualitySettings.color}`);
 
       // 🔧 直接修复：确保阴影模拟器与Mapbox使用完全相同的坐标系
       console.log('🎯 配置阴影模拟器与Mapbox坐标系完全同步...');
@@ -194,8 +351,8 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
       
       const shadeMap = new window.ShadeMap({
         date: currentDate,
-        color: shadowSettings.color,        
-        opacity: shadowSettings.opacity,    
+        color: qualitySettings.color,        
+        opacity: qualitySettings.opacity,    
         apiKey: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Imp3dTkyM0Bjb25uZWN0LmhrdXN0LWd6LmVkdS5jbiIsImNyZWF0ZWQiOjE3NTcyNDMxNzAxMzIsImlhdCI6MTc1NzI0MzE3MH0.Z7ejYmxcuKL3Le1Ydil1uRbP_EOS_wtLA6rsSewDUoA',
         terrainSource: {
           maxZoom: 15,
@@ -242,8 +399,8 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
           demFormat: 'auto-detect', // 自动检测DEM格式
         },
         // 🔧 阴影质量配置
-        shadowResolution: shadowSettings.resolution,
-        antiAliasing: shadowSettings.antiAliasing,
+        shadowResolution: qualitySettings.resolution,
+        antiAliasing: qualitySettings.antiAliasing,
         getFeatures: async () => {
           const rawBuildings = await getCurrentViewBuildings(map);
           const currentMapZoom = map.getZoom();
@@ -420,16 +577,34 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
         }
         
         // 🔧 动态更新阴影设置
+        const activeSunlightFactor = shadowSettingsState.autoCloudAttenuation
+          ? (currentWeather.sunlightFactor ?? 1)
+          : shadowSettingsState.manualSunlightFactor;
+
         if (mapSettings.enableDynamicQuality) {
-            const shadowSettings = shadowQualityController.getOptimizedShadowSettings(currentZoom);
+            const dynamicSettings = shadowQualityController.getOptimizedShadowSettings(currentZoom);
             if (typeof shadeMapRef.current.setOpacity === 'function') {
-                shadeMapRef.current.setOpacity(shadowSettings.opacity);
+                shadeMapRef.current.setOpacity(
+                  computeEffectiveShadowOpacity(
+                    dynamicSettings.opacity,
+                    activeSunlightFactor,
+                    shadowSettingsState.autoCloudAttenuation
+                  )
+                );
             }
             if (typeof shadeMapRef.current.setColor === 'function') {
-                shadeMapRef.current.setColor(shadowSettings.color);
+                shadeMapRef.current.setColor(dynamicSettings.color);
             }
+        } else if (typeof shadeMapRef.current.setOpacity === 'function') {
+            shadeMapRef.current.setOpacity(
+              computeEffectiveShadowOpacity(
+                mapSettings.shadowOpacity,
+                activeSunlightFactor,
+                shadowSettingsState.autoCloudAttenuation
+              )
+            );
         }
-        
+
         // 更新建筑物数据到阴影模拟器
         if (typeof shadeMapRef.current.updateBuildings === 'function') {
           shadeMapRef.current.updateBuildings(processedBuildings);
@@ -781,40 +956,57 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
 
   // 监听阴影设置变化
   useEffect(() => {
-    if (shadeMapRef.current) {
-      console.log(`🎨 更新阴影设置: 显示=${mapSettings.showShadowLayer}, 透明度=${mapSettings.shadowOpacity}, 颜色=${mapSettings.shadowColor}`);
-      
-      try {
-        if (mapSettings.showShadowLayer) {
-          // 尝试多种API方法设置透明度
-          if (typeof shadeMapRef.current.setOpacity === 'function') {
-            shadeMapRef.current.setOpacity(mapSettings.shadowOpacity);
-          } else if (shadeMapRef.current.options) {
-            shadeMapRef.current.options.opacity = mapSettings.shadowOpacity;
-          }
-          
-          // 强制重新渲染
-          if (typeof shadeMapRef.current.redraw === 'function') {
-            shadeMapRef.current.redraw();
-          }
-          
-          console.log(`✅ 阴影图层已显示 (透明度: ${mapSettings.shadowOpacity})`);
-        } else {
-          if (typeof shadeMapRef.current.setOpacity === 'function') {
-            shadeMapRef.current.setOpacity(0);
-          }
-          console.log('✅ 阴影图层已隐藏 (透明度: 0)');
-        }
-        
-        // 设置颜色
-        if (typeof shadeMapRef.current.setColor === 'function') {
-          shadeMapRef.current.setColor(mapSettings.shadowColor);
-        }
-      } catch (error) {
-        console.warn('更新阴影设置失败:', error);
-      }
+    if (!shadeMapRef.current) {
+      return;
     }
-  }, [mapSettings.shadowColor, mapSettings.shadowOpacity, mapSettings.showShadowLayer]);
+
+    const sunlightFactor = shadowSettingsState.autoCloudAttenuation
+      ? (currentWeather.sunlightFactor ?? 1)
+      : shadowSettingsState.manualSunlightFactor;
+    const effectiveOpacity = mapSettings.showShadowLayer
+      ? computeEffectiveShadowOpacity(
+          mapSettings.shadowOpacity,
+          sunlightFactor,
+          shadowSettingsState.autoCloudAttenuation
+        )
+      : 0;
+
+    console.log(
+      `🎨 更新阴影设置: 显示=${mapSettings.showShadowLayer}, ` +
+      `基础透明度=${mapSettings.shadowOpacity}, 天气系数=${sunlightFactor.toFixed(2)}, ` +
+      `实际透明度=${effectiveOpacity.toFixed(2)}`
+    );
+    
+    try {
+      if (typeof shadeMapRef.current.setOpacity === 'function') {
+        shadeMapRef.current.setOpacity(effectiveOpacity);
+      } else if (shadeMapRef.current.options) {
+        shadeMapRef.current.options.opacity = effectiveOpacity;
+      }
+      
+      if (typeof shadeMapRef.current.redraw === 'function') {
+        shadeMapRef.current.redraw();
+      }
+      
+      if (typeof shadeMapRef.current.setColor === 'function') {
+        shadeMapRef.current.setColor(mapSettings.shadowColor);
+      }
+    } catch (error) {
+      console.warn('更新阴影设置失败:', error);
+    }
+  }, [
+    mapSettings.shadowColor,
+    mapSettings.shadowOpacity,
+    mapSettings.showShadowLayer,
+    currentWeather.sunlightFactor,
+    shadowSettingsState.autoCloudAttenuation,
+    shadowSettingsState.manualSunlightFactor
+  ]);
+
+  useEffect(() => {
+    const effectiveCover = shadowSettingsState.autoCloudAttenuation ? currentWeather.cloudCover : null;
+    updateCloudLayerOpacity(effectiveCover);
+  }, [currentWeather.cloudCover, shadowSettingsState.autoCloudAttenuation]);
 
   // 监听日期变化 - 使用智能计算器
   useEffect(() => {
@@ -837,6 +1029,8 @@ export const MapboxMapComponent: React.FC<MapboxMapComponentProps> = ({ classNam
       // 降级处理：如果智能计算器不可用，直接更新
       shadeMapRef.current.setDate(currentDate);
     }
+
+    refreshWeatherData('date');
   }, [currentDate]);
 
   return (
