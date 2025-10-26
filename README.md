@@ -4,7 +4,7 @@ ShadowMap visualises urban building shadows and sunlight exposure. The repositor
 
 ## Feature Highlights
 
-- **Mapbox-first experience** – default Clean 3D layout with optional WFS / legacy toggles while consolidation is in progress.
+- **Mapbox-first experience** – Clean 3D layout built on ShadeMap + Mapbox GL.
 - **Shadow analysis** – calculates building shadows and daylight hours based on date/time.
 - **Multiple data sources** – WFS, cached datasets, DEM elevation tiles with fallbacks.
 - **Weather-aware shading** – GFS-derived cloud attenuation with local caching.
@@ -34,7 +34,7 @@ pnpm run dev        # development
 pnpm run build      # production build
 ```
 
-The Clean 3D mode loads by default; Mapbox/WFS/Leaflet toggles remain available during the consolidation effort (`REQ-CLEAN-05`).
+The Clean 3D mode is now the sole experience; legacy Mapbox/WFS/Leaflet toggles were removed in `feature/clean-mode-consolidation`.
 
 ### Backend
 
@@ -50,7 +50,7 @@ Copy `.env.example` to `.env` and provide WFS / Mongo / cache credentials before
 ## Current Focus
 
 1. Fix the remaining TypeScript errors in the frontend and restore a clean build.
-2. Finalise the Clean-only viewport consolidation and retire legacy toggles.
+2. Maintain the Clean-only viewport and continue polishing the consolidated UI.
 3. Keep structure/plan/docs up to date to make collaboration predictable.
 
 See `DEVELOPMENT_PLAN.md` for the sprint plan and task status.
