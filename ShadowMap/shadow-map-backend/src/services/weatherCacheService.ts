@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { Schema, Document } from 'mongoose';
-import axios from 'axios';
+import { gfsCloudService } from './gfsCloudService';
 
 // 天气数据接口
 export interface IWeatherData extends Document {
@@ -72,7 +72,7 @@ const WeatherCacheSchema = new Schema<IWeatherData>({
   source: { 
     type: String, 
     required: true,
-    enum: ['nullschool.net', 'openweather', 'manual']
+    enum: ['nullschool.net', 'openweather', 'manual', 'gfs_nomads']
   },
   expires_at: { 
     type: Date, 
@@ -103,6 +103,7 @@ export interface WeatherQueryOptions {
   timestamp?: Date;
   radius?: number; // 查询半径（米）
   maxAge?: number; // 最大缓存年龄（毫秒）
+  skipCache?: boolean; // 跳过缓存
 }
 
 /**
@@ -127,13 +128,15 @@ export class WeatherCacheService {
    */
   public async getWeatherData(options: WeatherQueryOptions): Promise<IWeatherData['data']> {
     try {
-      const { location, timestamp = new Date(), maxAge = this.defaultTTL } = options;
+      const { location, timestamp = new Date(), maxAge = this.defaultTTL, skipCache = false } = options;
       
       // 1. 尝试从缓存获取
-      const cached = await this.getCachedWeatherData(location, timestamp, maxAge);
-      if (cached) {
-        console.log(`📊 从缓存获取天气数据: ${location.lat.toFixed(2)}, ${location.lng.toFixed(2)}`);
-        return cached.data;
+      if (!skipCache) {
+        const cached = await this.getCachedWeatherData(location, timestamp, maxAge);
+        if (cached) {
+          console.log(`📊 从缓存获取天气数据: ${location.lat.toFixed(2)}, ${location.lng.toFixed(2)}`);
+          return cached.data;
+        }
       }
 
       // 2. 从外部API获取
@@ -332,24 +335,18 @@ export class WeatherCacheService {
     timestamp: Date
   ): Promise<IWeatherData['data']> {
     try {
-      // TODO: 集成实际的天气API
-      // 这里是模拟实现，实际需要调用nullschool.net或其他天气API
-      
-      // 模拟API延迟
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // 返回模拟数据
-      return {
-        temperature: 20 + Math.random() * 15, // 20-35°C
-        humidity: 40 + Math.random() * 40, // 40-80%
-        cloud_cover: Math.random(), // 0-1
-        uv_index: Math.random() * 10, // 0-10
-        wind_speed: Math.random() * 10, // 0-10 m/s
-        wind_direction: Math.random() * 360, // 0-360°
-        visibility: 5000 + Math.random() * 15000, // 5-20km
-        precipitation: Math.random() < 0.2 ? Math.random() * 5 : 0, // 20%概率有雨
-        pressure: 1000 + Math.random() * 50 // 1000-1050 hPa
-      };
+      const defaultWeather = this.getDefaultWeatherData();
+
+      try {
+        const cloudResult = await gfsCloudService.getCloudCover(location.lat, location.lng, timestamp);
+        defaultWeather.cloud_cover = cloudResult.cloudCoverRatio;
+        console.log(`[weather] GFS 云量 ${cloudResult.cloudCoverRatio.toFixed(3)} @ f${cloudResult.forecastHour} (run ${cloudResult.runTimestamp.toISOString()})`);
+      } catch (cloudError) {
+        console.warn('⚠️ GFS 云量获取失败，使用默认值:', cloudError);
+      }
+
+      // TODO: temperature/humidity等应使用真实数据源，目前保留默认值
+      return defaultWeather;
 
     } catch (error) {
       console.error('❌ 从API获取天气数据失败:', error);
@@ -377,7 +374,7 @@ export class WeatherCacheService {
         grid_cell: gridCell,
         timestamp,
         data,
-        source: 'nullschool.net',
+        source: 'gfs_nomads',
         expires_at: expiresAt,
         created_at: new Date()
       });

@@ -9,7 +9,7 @@ const router = express.Router();
  */
 router.get('/current', async (req, res) => {
   try {
-    const { lat, lng, timestamp } = req.query;
+    const { lat, lng, timestamp, refresh } = req.query;
     
     // 验证参数
     if (!lat || !lng) {
@@ -42,7 +42,8 @@ router.get('/current', async (req, res) => {
     
     const weatherData = await weatherCacheService.getWeatherData({
       location: { lng: longitude, lat: latitude },
-      timestamp: queryTimestamp
+      timestamp: queryTimestamp,
+      skipCache: refresh === '1' || refresh === 'true'
     });
 
     res.json({
@@ -313,7 +314,8 @@ router.get('/info', async (req, res) => {
         cleanup: '/api/weather/cache/cleanup'
       },
       data_sources: [
-        'nullschool.net',
+        'NOAA GFS (NOMADS OPeNDAP)',
+        'nullschool.net (legacy fallback)',
         'openweather (planned)',
         'local weather stations (planned)'
       ]
