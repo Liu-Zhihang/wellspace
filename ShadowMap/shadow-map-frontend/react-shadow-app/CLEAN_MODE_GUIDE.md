@@ -1,119 +1,60 @@
-# Clean 3D 模式使用指南
+# Clean 3D Mode Guide
 
-## 概述
+## Overview
 
-Clean 3D 模式是基于成功的测试页面经验开发的简洁优雅的阴影计算界面。它解决了之前复杂UI的问题，提供了直观易用的用户体验。
+Clean 3D is the primary Shadow Map experience. It combines the new ShadeMap viewport, weather-aware shadow attenuation, and a minimal UI inspired by the prototype build. Other modes remain available only for comparison while we execute `REQ-CLEAN-05`.
 
-## 主要特性
+## Feature Highlights
 
-### ✅ 已修复的问题
-- **API Key 配置**：正确使用 Mapbox access token 作为阴影模拟器的 API Key
-- **初始化顺序**：确保建筑物数据完全加载后再初始化阴影模拟器
-- **错误处理**：添加了重试机制和详细的错误信息
-- **阴影颜色**：使用灰色阴影 (#808080) 替代之前的紫色
+- **Shared viewport** – ShadeMap + Mapbox GL with DEM tiles served from the backend.
+- **Weather integration** – Auto-refreshes sunlight factor via `/api/weather/current`.
+- **Status toasts** – Inline feedback for building loads, weather pulls, and simulator updates.
+- **Compact controls** – Left toolbar (uploads, quick toggles) and bottom timeline for animation.
 
-### 🎨 UI 设计改进
-- **简洁控制面板**：参考测试页面的设计，提供清晰的状态指示
-- **直观操作**：大按钮和清晰的状态反馈
-- **响应式布局**：适配不同屏幕尺寸
-- **毛玻璃效果**：现代化的视觉设计
+## How to Launch
 
-## 使用方法
-
-### 1. 启动应用
 ```bash
-cd react-shadow-app
-npm run dev
+cd ShadowMap/shadow-map-frontend/react-shadow-app
+pnpm install
+pnpm run dev
 ```
 
-### 2. 选择 Clean 3D 模式
-- 在顶部标题栏中点击 "Clean 3D" 按钮
-- 系统会自动加载地图和阴影模拟器库
+1. Confirm the backend (`npm run dev` in `shadow-map-backend`) is running.
+2. Open http://localhost:5173 and select **Clean 3D** (default choice in the header toggle).
+3. Wait for the logs: `🗺️ Initialising Mapbox GL viewport…`, `✅ ShadeMap initialised`, `☁️ Cloud cover …`.
 
-### 3. 自动初始化流程
-1. **地图加载**：显示北京地区的 3D 地图
-2. **库加载**：自动加载 mapbox-gl-shadow-simulator
-3. **WFS连接测试**：验证后端服务连接
-4. **建筑物加载**：获取当前视图区域的建筑数据
-5. **阴影初始化**：启动阴影模拟器并显示灰色阴影
+## UI Walkthrough
 
-### 4. 控制功能
+| Area | Description |
+| --- | --- |
+| Top banner | Mode toggle + status chip (shows “Clean 3D”). |
+| Left toolbar | Quick tests (reload buildings, trigger WFS checks, upload mobility traces). |
+| Bottom timeline | Time scrubber + play controls; syncs with `shadowMapStore`. |
+| Status toasts | Appear in the lower-right corner with emoji prefixes for success/warnings/errors. |
 
-#### 时间控制
-- 在右上角的时间输入框中调整阴影时间
-- 支持日期和时间选择
-- 实时更新阴影位置
+## Weather & Shadows
 
-#### 重新计算
-- 点击 "🌅 重新计算阴影" 按钮
-- 用于修复阴影显示问题或重新初始化
+- Fetch cadence is throttled (5 min TTL per `(lat, lng, hour)`).
+- Auto mode uses the sunlight factor to scale shadow opacity while ensuring a minimum darkness.
+- Disable auto attenuation in the Shadow panel to switch to manual control.
+- Cloud overlay appears as a subtle global tint when opacity > 0; the layer is only added after the Mapbox style finishes loading.
 
-#### 状态监控
-- 左下角显示实时状态信息
-- 包括：当前状态、建筑物加载状态、阴影启用状态
+## Troubleshooting
 
-## 技术实现
+1. **ShadeMap plugin missing** – Confirm the UMD script is loaded (see console error). The app logs `✅ ShadeMap (window) available` on success.
+2. **Buildings not visible** – Use the quick actions to reload buildings; inspect `/api/wfs-buildings/bounds` responses.
+3. **Weather failures** – Backend log will show GFS errors; the frontend falls back to manual sunlight (100%).
+4. **Map re-renders repeatedly** – Ensure only one Clean viewport is mounted (legacy modes should be inactive).
 
-### 核心组件
-- `CleanShadowMap.tsx`：主要的地图和阴影计算组件
-- `CleanControlPanel.tsx`：简洁的控制面板组件
+## Development Tips
 
-### 关键修复
-```typescript
-// 正确的 API Key 配置
-apiKey: mapboxgl.accessToken
+- `shadowMapStore` keeps weather, shadows, and map settings in sync; prefer selectors rather than direct state mutation.
+- `weatherService` caches aggressively; call `weatherService.clearCache()` in tests to avoid stale data.
+- Wrap ShadeMap manipulations with guards (methods are optional on older builds).
+- Use `pnpm run lint` and `pnpm run typecheck` before opening a PR; ESLint is configured for strict React + TS rules.
 
-// 灰色阴影颜色
-color: '#808080'
+## Next Steps for REQ-CLEAN-05
 
-// 确保数据加载完成后再初始化
-setTimeout(() => {
-  initShadowSimulator();
-}, 2000);
-```
-
-### 错误处理
-- 自动重试机制
-- 详细的状态消息
-- 优雅的降级处理
-
-## 故障排除
-
-### 常见问题
-
-1. **阴影不显示**
-   - 检查后端服务是否运行 (`http://localhost:3001`)
-   - 查看浏览器控制台的错误信息
-   - 点击"重新计算阴影"按钮
-
-2. **建筑物不加载**
-   - 确认WFS连接测试成功
-   - 检查网络连接
-   - 尝试刷新页面
-
-3. **地图不显示**
-   - 检查 Mapbox access token 是否有效
-   - 确认网络连接正常
-
-### 调试信息
-- 打开浏览器开发者工具查看控制台日志
-- 所有关键步骤都有详细的状态消息
-- 错误信息包含具体的失败原因
-
-## 性能优化
-
-- **延迟加载**：阴影模拟器在建筑物数据准备好后才初始化
-- **缓存机制**：避免重复加载相同数据
-- **优化渲染**：使用高效的3D渲染设置
-
-## 下一步改进
-
-- [ ] 添加更多地图样式选择
-- [ ] 实现阴影透明度实时调节
-- [ ] 添加建筑物高度调节功能
-- [ ] 支持多城市数据切换
-- [ ] 添加阴影分析工具
-
----
-
-**注意**：Clean 3D 模式是默认推荐模式，提供了最佳的用户体验和稳定性。
+1. Replace the header mode toggle with variant styling (Clean-only).
+2. Fold Mapbox-specific logic into reusable hooks/services.
+3. Update docs and screenshots once the single-mode layout ships.

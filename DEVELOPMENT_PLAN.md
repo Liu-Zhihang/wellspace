@@ -13,6 +13,8 @@
 | REQ-TS-01 | Fix remaining TypeScript errors in map components | In Progress | Focus on `Mapbox3DComponent`, `Wfs3DShadowMap`, `OptimizedMapboxComponent`, and timeout typings |
 | REQ-CLEAN-02 | Remove unused UI/Control components | Done | Legacy panels removed; verify no stale imports remain |
 | REQ-DOC-03 | Establish structure + plan docs | Done | `CODEBASE_STRUCTURE.md` and this file created |
+| REQ-CLOUD-04 | Integrate GFS cloud attenuation & weather cache | Done | Weather service live; Clean/WFS modes consume sunlight factor |
+| REQ-CLEAN-05 | Consolidate map modes around Clean 3D | Planned | Scope next iteration (remove legacy toggles, migrate UI) |
 
 ## Next Steps
 
@@ -21,8 +23,11 @@
    - Replace accesses to private Mapbox internals (`_data`, `_loaded`) with safe helpers.
    - Normalise timeout types to the browser-safe `number`.
    - Re-run `pnpm exec tsc -b` and `pnpm run build`.
-2. After TS build is green, run a quick bundle report to confirm no missing imports.
-3. Decide on performance follow-up (lazy loading / chunk split) once the build is stable.
+2. Draft the mode consolidation plan (`REQ-CLEAN-05`)
+   - Decide which components survive the Clean-only layout.
+   - Extract shared viewport logic into a single entrypoint.
+   - Update UI copy / docs once toggles are removed.
+3. After TS build and consolidation plan, run bundle report to confirm no missing imports and size regressions.
 
 ## Risks / Blockers
 

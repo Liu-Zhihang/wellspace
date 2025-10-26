@@ -1,12 +1,13 @@
 # ShadowMap Project Overview
 
-ShadowMap visualises urban building shadows and sunlight exposure. The repository contains both the React frontend (Mapbox-focused) and the TypeScript backend services.
+ShadowMap visualises urban building shadows and sunlight exposure. The repository contains both the React frontend (multiple Mapbox-based modes) and the TypeScript backend services.
 
 ## Feature Highlights
 
-- **Mapbox-first experience** – default 2D/3D rendering with optional WFS and “Clean” modes.
+- **Mapbox-first experience** – default Clean 3D layout with optional WFS / legacy toggles while consolidation is in progress.
 - **Shadow analysis** – calculates building shadows and daylight hours based on date/time.
 - **Multiple data sources** – WFS, cached datasets, DEM elevation tiles with fallbacks.
+- **Weather-aware shading** – GFS-derived cloud attenuation with local caching.
 - **Performance helpers** – multi-level cache, smart shadow scheduler, debounced updates.
 
 ## Repository Layout
@@ -33,7 +34,7 @@ pnpm run dev        # development
 pnpm run build      # production build
 ```
 
-Mapbox mode loads by default; other engines (WFS / Clean) can be toggled via the header buttons.
+The Clean 3D mode loads by default; Mapbox/WFS/Leaflet toggles remain available during the consolidation effort (`REQ-CLEAN-05`).
 
 ### Backend
 
@@ -49,7 +50,7 @@ Copy `.env.example` to `.env` and provide WFS / Mongo / cache credentials before
 ## Current Focus
 
 1. Fix the remaining TypeScript errors in the frontend and restore a clean build.
-2. Remove legacy components/scripts that are no longer referenced.
+2. Finalise the Clean-only viewport consolidation and retire legacy toggles.
 3. Keep structure/plan/docs up to date to make collaboration predictable.
 
 See `DEVELOPMENT_PLAN.md` for the sprint plan and task status.

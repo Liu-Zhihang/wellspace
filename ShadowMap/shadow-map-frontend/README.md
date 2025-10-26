@@ -1,118 +1,70 @@
-# Shadow Map Frontend Test
+# Shadow Map Frontend
 
-## 📋 项目说明
+## Overview
 
-这是Shadow Map项目的前端测试页面，用于验证后端API的功能和进行前端开发调试。
+`react-shadow-app` is a Vite + React + TypeScript client that renders several map experiences (Clean 3D, Mapbox baseline, WFS demo, Leaflet legacy). The current sprint keeps all modes for regression purposes while `REQ-CLEAN-05` refactors them onto a unified Clean layout.
 
-## 🚀 快速开始
+## Getting Started
 
-### 1. 确保后端服务运行
 ```bash
-cd ../shadow-map-backend
-npm run dev
+cd ShadowMap/shadow-map-frontend/react-shadow-app
+pnpm install          # or npm install
+pnpm run dev          # launches Vite on http://localhost:5173
 ```
 
-### 2. 打开测试页面
-在浏览器中打开 `index.html` 文件，或通过Live Server扩展运行。
+Prerequisites:
+- Backend running on http://localhost:3001 (`npm run dev` from `shadow-map-backend`)
+- Mapbox access token configured (see `.env` or injected at runtime)
+- Weather service enabled (GFS proxy in backend)
 
-## 🧪 测试功能
+## Build & Preview
 
-### ✅ 已实现功能
-- **地图基础显示** - 使用Leaflet显示OpenStreetMap
-- **DEM瓦片集成** - 加载自定义DEM瓦片服务
-- **后端状态检查** - 实时检测API服务状态
-- **交互控件** - 时间选择、透明度调节等
-- **API测试** - 一键测试后端接口
-
-### 🔄 开发中功能
-- **阴影模拟** - 集成leaflet-shadow-simulator
-- **实时阴影更新** - 基于时间变化的阴影计算
-- **建筑物数据** - 3D建筑物显示
-- **用户交互优化** - 更丰富的地图交互
-
-## 🌐 API端点
-
-- **后端地址**: http://localhost:3001
-- **健康检查**: `/api/health`
-- **DEM瓦片**: `/api/dem/{z}/{x}/{y}.png`
-- **DEM信息**: `/api/dem/info`
-
-## 🎯 测试步骤
-
-1. **后端连接测试**
-   - 查看状态指示器是否为绿色
-   - 点击"测试API"按钮
-
-2. **地图功能测试**
-   - 地图是否正常显示
-   - 可以拖拽和缩放
-   - DEM瓦片是否加载
-
-3. **交互控件测试**
-   - 时间选择器
-   - 透明度滑块
-   - 重置视图按钮
-
-4. **DEM数据测试**
-   - 点击地图查看位置信息
-   - 调整DEM层透明度
-   - 检查瓦片加载状态
-
-## 🔧 开发注意事项
-
-### CORS设置
-后端已配置CORS允许前端访问：
-```javascript
-app.use(cors({
-  origin: 'http://localhost:3000',
-  credentials: true
-}));
+```bash
+pnpm run build        # output to dist/
+pnpm run preview      # serve the production bundle locally
+pnpm run lint         # eslint with TypeScript + React configs
 ```
 
-### 浏览器安全限制
-如果直接打开HTML文件，可能遇到CORS限制。建议：
-1. 使用VS Code Live Server扩展
-2. 或使用简单的HTTP服务器：
-   ```bash
-   python -m http.server 8000
-   # 然后访问 http://localhost:8000
-   ```
+## Key Directories
 
-## 📝 下一步开发计划
+| Path | Description |
+| --- | --- |
+| `src/App.tsx` | Mode switcher (Clean / WFS 3D / Mapbox / Leaflet) |
+| `src/components/Map/CleanShadowMap.tsx` | Clean experience with ShadeMap + weather-aware opacity |
+| `src/components/Map/MapboxMapComponent.tsx` | Legacy Mapbox viewport |
+| `src/components/Map/Wfs3DShadowMapFixed.tsx` | WFS showcase |
+| `src/services/weatherService.ts` | Fetches cached weather snapshots from `/api/weather/current` |
+| `src/store/shadowMapStore.ts` | Zustand store for map, shadow, and weather state |
+| `src/components/UI` | Clean + reference toolbars, timelines, search, etc. |
 
-1. **集成leaflet-shadow-simulator**
-   ```bash
-   npm install leaflet-shadow-simulator
-   ```
+## Mode Guide (temporary)
 
-2. **添加React组件化**
-   ```bash
-   npm create react-app shadow-map-react
-   ```
+- **Clean 3D** – Default mode, uses ShadeMap with DEM + weather attenuation. Includes the left toolbar, timeline, and status toasts.
+- **WFS 3D** – Proxy demo for GeoServer buildings; useful when validating tile coverage.
+- **Mapbox** – Old combined viewport (to be replaced).
+- **Leaflet** – Minimal legacy implementation; retained only for comparison.
 
-3. **实现阴影计算**
-   - 配置terrainSource指向自己的API
-   - 添加时间控制功能
-   - 实现实时阴影更新
+During `REQ-CLEAN-05`, the goal is to retire the mode toggle, promote Clean 3D as the only viewport, and migrate shared UI pieces.
 
-4. **优化用户体验**
-   - 加载状态提示
-   - 错误处理
-   - 响应式设计
+## Environment Variables
 
-## 🐛 故障排除
+```
+VITE_MAPBOX_ACCESS_TOKEN=pk.XXXX
+VITE_SHADOW_SIMULATOR_API_KEY=...
+VITE_BACKEND_BASE_URL=http://localhost:3001
+```
 
-### DEM瓦片不显示
-1. 检查后端服务是否运行 (npm run dev)
-2. 检查控制台是否有CORS错误
-3. 验证API端点是否正确响应
+If not provided, the app falls back to defaults defined in `config/runtime.ts`.
 
-### 地图加载缓慢
-1. 检查网络连接
-2. 尝试更换地图瓦片源
-3. 减少同时加载的图层数量
+## Debug Tips
 
-### API测试失败
-1. 确认后端端口3001正确
-2. 检查防火墙设置
-3. 查看后端日志输出
+- DevTools → Console should show ShadeMap + weather logs (`☁️`, `💡` status toasts).
+- Check the Network tab for `/api/weather/current` – expect 200 with `cloudCover` and `sunlightFactor`.
+- Use the top-right toggle to reproduce issues specific to legacy modes before they are removed.
+- `pnpm run lint` and `pnpm run typecheck` (if configured) help catch regressions during the consolidation.
+
+## Future Work
+
+- Collapse all map modes into the Clean layout and remove redundant components.
+- Break up the monolithic Zustand store into focused slices.
+- Add visual regression coverage for the Clean viewport once the mode toggle is gone.

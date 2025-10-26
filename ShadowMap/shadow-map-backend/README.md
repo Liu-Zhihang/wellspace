@@ -1,127 +1,106 @@
 # Shadow Map Backend
 
-## 🚀 快速开始
+## Quick Start
 
-### 1. 安装依赖
-```bash
-npm install
-```
+1. Install dependencies  
+   ```bash
+   npm install
+   ```
+2. Configure environment variables  
+   ```bash
+   cp .env.example .env
+   # Populate WFS, MongoDB/cache, and optional weather service credentials
+   ```
+3. Launch the development server  
+   ```bash
+   npm run dev
+   ```
+4. Smoke test the API  
+   - Health check: http://localhost:3001/api/health  
+   - DEM info: http://localhost:3001/api/dem/info  
+   - Sample DEM tile: http://localhost:3001/api/dem/10/512/384.png  
+   - Weather snapshot: http://localhost:3001/api/weather/current?lat=22.3193&lng=114.1694
 
-### 2. 配置环境变量
-```bash
-cp .env.example .env
-# 根据需要修改 .env 文件中的配置
-```
+## Key Services
 
-### 3. 启动开发服务器
-```bash
-npm run dev
-```
+- **DEM tiles** – Terrarium-style PNG tiles exposed from `/api/dem/:z/:x/:y.png`
+- **Building tile/catalog APIs** – Local datasets, WFS proxies, and cache warmers
+- **Weather & cloud attenuation** – GFS-backed sunlight factor with in-memory caching
+- **Health & diagnostics** – Basic and detailed health endpoints
 
-### 4. 验证服务
-打开浏览器访问：
-- 健康检查: http://localhost:3001/api/health
-- DEM服务信息: http://localhost:3001/api/dem/info
-- 测试瓦片: http://localhost:3001/api/dem/10/512/384.png
+## Available Scripts
 
-## 🌐 WFS Tile 配置
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the server with hot reload (ts-node / nodemon) |
+| `npm run build` | Compile TypeScript to `dist/` |
+| `npm start` | Serve the compiled build |
+| `npm run lint` | Lint the TypeScript sources |
 
-- 使用 `./config/buildingTiles.json` 维护所有可用的 `tile_id`，每个条目包含经纬度范围、区域说明等。示例内容：
-  ```json
-  [
-    {
-      "tileId": "e110_n20_e115_n25",
-      "minLon": 110.0,
-      "minLat": 20.0,
-      "maxLon": 115.0,
-      "maxLat": 25.0,
-      "region": "East Asia"
-    }
-  ]
-  ```
-- 通过 `.env` 控制：
-  - `BUILDING_WFS_TILE_CATALOG_PATH`：tile catalog 文件路径（默认 `./config/buildingTiles.json`）。
-  - `BUILDING_WFS_TILE_STRATEGY`：`optional`（默认）表示未匹配到 tile 时仍按 BBOX 查询；`required` 表示必须匹配，未命中直接返回空结果。
-  - 可选 `BUILDING_WFS_TILE_ID`：在 catalog 未匹配时使用的兜底 tile。
-- 后端会根据前端传入的 bounds 自动解析需要的 `tile_id` 列表，并在向 GeoServer 发起请求时附带 `BBOX(...) AND tile_id IN (...)` 的过滤条件；响应的 `metadata.tilesQueried` 字段会回传实际命中的 tile，方便排查和扩展。
+## Environment Variables (highlights)
 
-## 📋 可用脚本
+| Variable | Description |
+| --- | --- |
+| `PORT` | HTTP port (defaults to `3001`) |
+| `BUILDING_WFS_TILE_CATALOG_PATH` | Path to GeoServer tile catalogue JSON |
+| `BUILDING_WFS_TILE_STRATEGY` | `optional` (default) or `required` for strict tile matching |
+| `BUILDING_WFS_BASE_URL` | GeoServer base URL for WFS queries |
+| `GFS_API_BASE_URL` | Upstream endpoint for weather snapshots (defaults to NOAA GFS proxy) |
+| `WEATHER_CACHE_TTL_MINUTES` | Cache window for weather responses |
 
-- `npm run dev` - 启动开发服务器 (带热重载)
-- `npm run build` - 构建生产版本
-- `npm start` - 启动生产服务器
-- `npm test` - 运行测试 (暂未实现)
+(`.env.example` documents the full list.)
 
-## 🛠️ API端点
+## WFS Tile Catalogue
 
-### 健康检查
-- `GET /api/health` - 基础健康检查
-- `GET /api/health/detailed` - 详细系统信息 (仅开发环境)
+Keep `./config/buildingTiles.json` in sync with GeoServer coverage. Each entry is a bounding box with metadata:
 
-### DEM瓦片服务
-- `GET /api/dem/:z/:x/:y.png` - 获取DEM瓦片
-- `GET /api/dem/info` - 获取DEM服务信息
-
-### 使用示例
-```javascript
-// 在leaflet-shadow-simulator中使用
-const terrainSource = {
-  tileSize: 256,
-  maxZoom: 15,
-  getSourceUrl: ({ x, y, z }) => {
-    return `http://localhost:3001/api/dem/${z}/${x}/${y}.png`;
-  },
-  getElevation: ({ r, g, b, a }) => {
-    return (r * 256 + g + b / 256) - 32768;
+```json
+[
+  {
+    "tileId": "e110_n20_e115_n25",
+    "minLon": 110.0,
+    "minLat": 20.0,
+    "maxLon": 115.0,
+    "maxLat": 25.0,
+    "region": "East Asia"
   }
-};
+]
 ```
 
-## 📁 项目结构
+When the frontend posts a bounding box to `/api/wfs-buildings/bounds`, the service determines the intersecting tile IDs, applies `BBOX(...) AND tile_id IN (...)`, and returns both GeoJSON and metadata (including `tilesQueried`) for debugging.
+
+## API Overview
+
+- `GET /api/health` – Basic status check  
+- `GET /api/health/detailed` – Dev-only diagnostics  
+- `GET /api/dem/:z/:x/:y.png` – Height tile (Terrarium)  
+- `GET /api/dem/info` – Service metadata  
+- `POST /api/buildings/bounds` – Query buildings for a bounding box  
+- `POST /api/wfs-buildings/bounds` – GeoServer proxy with tile filtering  
+- `GET /api/weather/current` – Weather snapshot (`lat`, `lng`, `timestamp` query params)
+
+## Project Structure
 
 ```
 src/
-├── app.ts              # Express应用配置
-├── server.ts           # 服务器启动文件
-├── routes/             # API路由
-│   ├── health.ts       # 健康检查路由
-│   └── dem.ts          # DEM瓦片路由
-├── services/           # 业务逻辑服务
-│   └── demService.ts   # DEM数据处理服务
-└── utils/              # 工具函数
+├── app.ts                  # Express wiring, middleware, static assets
+├── server.ts               # Production entry point
+├── routes/                 # REST endpoints (DEM, buildings, weather, health…)
+├── services/               # Business logic (GFS, caches, local datasets, WFS proxy)
+├── utils/                  # Shared helpers (logging, bounds math, tiling)
+└── config/                 # Typed configuration loaders
 ```
 
-## 🔧 开发注意事项
+## Development Notes
 
-### 当前状态 (MVP阶段)
-- ✅ 基础Express服务器
-- ✅ DEM瓦片服务 (模拟数据)
-- ✅ 健康检查端点
-- ✅ TypeScript配置
-- ✅ 开发环境配置
+- Helmet + compression are configured with permissive defaults; tighten CSP/CORS before public deployment.
+- DEM tiles currently serve pre-generated samples; update `config/dem.json` when swapping datasets.
+- Weather service caches responses per `(lat, lng, hour)` bucket; adjust TTL via env vars if needed.
+- Static assets fall back to `shadow-map-frontend` prototypes when the Vite build is missing.
 
-### 下一步开发
-- [ ] 集成Sharp库进行真正的PNG编码
-- [ ] 实现真实DEM数据获取
-- [ ] 添加Redis缓存
-- [ ] 数据库集成
-- [ ] 错误处理优化
-- [ ] 单元测试
+## Future Work
 
-### 性能优化 TODO
-- [ ] 实现瓦片缓存机制
-- [ ] 添加压缩中间件
-- [ ] 优化内存使用
-- [ ] 添加请求限制
-
-## 🐛 已知问题
-
-1. 当前DEM服务返回的是测试数据，不是真正的PNG格式
-2. 需要集成图像处理库 (Sharp) 进行真正的PNG编码
-3. 缓存机制尚未实现
-
-## 📚 相关资源
-
-- [Leaflet Shadow Simulator](https://www.npmjs.com/package/leaflet-shadow-simulator)
-- [Terrarium格式说明](https://github.com/tilezen/joerd/blob/master/docs/formats.md#terrarium)
-- [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/)
+- Replace sample DEM data with production-grade tiles + optional on-the-fly encoding.
+- Introduce a persistent cache layer (Redis/Upstash) for weather + building responses.
+- Harden error handling and add integration tests for WFS + weather fallbacks.
+- Monitor and rate-limit heavy endpoints before exposing the API publicly.

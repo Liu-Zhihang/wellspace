@@ -1,78 +1,54 @@
-# React应用调试指南
+# Debug Checklist (React Client)
 
-## 问题诊断
+Use this quick playbook whenever the map UI or Clean 3D controls fail.
 
-您反映看不到控制按钮，可能的原因：
+## 1. Runtime Basics
 
-### 1. 开发服务器状态
-- ✅ 开发服务器正在运行 (端口 5173)
-- ✅ CleanShadowMap组件已正确导入和配置
+- Vite should print `Local: http://localhost:5173/` in the terminal.
+- Backend (`npm run dev` from `shadow-map-backend`) must be running on port 3001.
+- `.env` (or `VITE_*` env vars) should expose a valid Mapbox token and ShadeMap API key.
 
-### 2. 可能的问题
+## 2. Console Verification
 
-#### A. 浏览器缓存问题
-```bash
-# 清除浏览器缓存并强制刷新
-Ctrl + Shift + R (Windows)
-Cmd + Shift + R (Mac)
-```
+Open DevTools → Console and look for:
 
-#### B. 组件渲染问题
-- 检查浏览器开发者工具的控制台是否有JavaScript错误
-- 检查Network标签页是否有资源加载失败
+- `🗺️ Initialising Mapbox GL viewport…`
+- `✅ ShadeMap initialised` or `✅ Fallback ShadeMap import detected`
+- Weather toasts: `☁️ Cloud cover …`
 
-#### C. CSS样式问题
-- 按钮可能被其他元素遮挡
-- z-index层级问题
+If you only see errors:
 
-### 3. 调试步骤
+- `ShadeMap plugin not loaded` → Verify the UMD script tag or bundle.
+- `Style is not done loading` → Mapbox style failed; check network panel.
+- `Weather request failed` → backend GFS proxy down; try manual sunlight mode.
 
-#### 步骤1: 检查组件是否加载
-1. 打开浏览器开发者工具 (F12)
-2. 在Console中查看是否有错误信息
-3. 检查是否有"CleanShadowMap组件已加载"的日志
+## 3. DOM & Styling
 
-#### 步骤2: 检查元素渲染
-1. 在Elements标签页中搜索 "测试WFS连接"
-2. 如果找不到，说明组件没有正确渲染
+DevTools → Elements:
 
-#### 步骤3: 检查网络请求
-1. 在Network标签页中查看是否有失败的请求
-2. 特别关注mapbox-gl和阴影模拟器库的加载
+- The root `<div class="shadow-map-header">` contains the mode toggle.
+- Clean toolbar buttons live under `.pointer-events-auto` within `<main>`.
+- If elements exist but are hidden, inspect `z-index` and `pointer-events`.
 
-### 4. 临时解决方案
+## 4. Network Calls
 
-如果问题持续存在，可以尝试：
+Filter by `weather` and `wfs`:
 
-#### 方案A: 直接使用测试页面
-- 打开 `shadow-calculator-test.html`
-- 这个页面已经确认可以正常工作
+- `/api/weather/current` should return 200 with `cloudCover` and `sunlightFactor`.
+- `/api/wfs-buildings/bounds` should return GeoJSON; failures indicate GeoServer/downstream issues.
+- ShadeMap UMD script should load without 404 (check the CDN URL).
 
-#### 方案B: 强制刷新React应用
-- 访问 `http://localhost:5173`
-- 清除浏览器缓存后重新访问
+## 5. Quick Recovery
 
-#### 方案C: 检查组件导入
-- 确认App.tsx中CleanShadowMap组件被正确导入
-- 确认默认模式设置为'clean'
+- Click “Reload buildings” in the Left toolbar to refresh GeoJSON.
+- Toggle “Auto cloud attenuation” off/on inside the Shadow panel to reset opacity.
+- Switch to “Mapbox” mode, then back to “Clean 3D” to force a full remount.
 
-### 5. 预期看到的界面
+## 6. When Filing an Issue
 
-如果一切正常，您应该看到：
+Include:
 
-1. **顶部标题栏**: 显示"Clean 3D"模式
-2. **右上角控制按钮**:
-   - 🔍 测试WFS连接 (蓝色)
-   - 🏢 加载建筑物 (绿色)
-   - 🌅 初始化阴影模拟器 (紫色)
-   - 时间控制面板
-3. **左下角状态面板**:
-   - 状态信息
-   - 操作指南
-
-### 6. 联系信息
-
-如果问题仍然存在，请提供：
-- 浏览器控制台的错误信息
-- 当前显示的界面截图
-- 使用的浏览器版本
+- Console log excerpt (errors + warning lines).
+- Network screenshot for failing requests.
+- Browser + OS details.
+- Git commit hash (`git rev-parse HEAD`).
