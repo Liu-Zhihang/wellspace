@@ -8,7 +8,6 @@ import mapboxgl from 'mapbox-gl';
 import type { GeoJSONSourceRaw } from 'mapbox-gl';
 import type { BuildingFeature, BuildingFeatureCollection } from '../../types/index.ts';
 import { useShadowMapStore } from '../../store/shadowMapStore';
-import { localFirstBuildingService } from '../../services/localFirstBuildingService';
 import { wfsBuildingService } from '../../services/wfsBuildingService';
 
 interface BuildingLayerManagerProps {
@@ -67,82 +66,27 @@ export const BuildingLayerManager = ({ map }: BuildingLayerManagerProps) => {
 
       // 获取当前视图的建筑物数据
       const bounds = map.getBounds();
-      const zoom = map.getZoom();
-      
-      console.log(`📍 当前视图: zoom=${zoom}, bounds=${JSON.stringify({
+      console.log(`📍 当前视图: zoom=${map.getZoom()}, bounds=${JSON.stringify({
         north: bounds.getNorth(),
         south: bounds.getSouth(),
         east: bounds.getEast(),
         west: bounds.getWest()
       })}`);
       
-      // 首先尝试使用WFS数据
       console.log('🏢 尝试获取WFS建筑数据...');
-      let buildingData: BuildingFeatureCollection | null = null;
-      
-      try {
-        const wfsResponse = await wfsBuildingService.getWfsBuildings({
-          north: bounds.getNorth(),
-          south: bounds.getSouth(),
-          east: bounds.getEast(),
-          west: bounds.getWest()
-        }, 2000);
-        
-        buildingData = wfsResponse.data;
-        console.log(`✅ WFS 数据获取成功: ${buildingData.features.length} 个建筑物`);
-        
-      } catch (wfsError) {
-        console.log('⚠️ WFS 数据获取失败，回退到本地数据:', wfsError);
-        
-        // 回退到本地数据
-        const localData = await localFirstBuildingService.getBuildingData({
-          north: bounds.getNorth(),
-          south: bounds.getSouth(),
-          east: bounds.getEast(),
-          west: bounds.getWest()
-        }, zoom);
-        buildingData = {
-          type: 'FeatureCollection',
-          features: (localData.features as BuildingFeature[]) ?? [],
-        };
-        console.log(`📊 本地数据: ${buildingData.features.length} 个建筑物`);
+      const wfsResponse = await wfsBuildingService.getWfsBuildings({
+        north: bounds.getNorth(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        west: bounds.getWest()
+      }, 2000);
 
-        if (buildingData.features.length === 0) {
-          console.log('📭 当前区域无建筑物数据，尝试获取北京示例建筑数据...');
-          
-          try {
-            const beijingSampleResponse = await wfsBuildingService.getBeijingSampleBuildings();
-            buildingData = beijingSampleResponse.data;
-            console.log(`🏙️ 北京示例数据: ${buildingData.features.length} 个建筑物`);
-          } catch (beijingError) {
-            console.log('❌ 北京示例数据也获取失败，尝试本地北京数据:', beijingError);
-            
-            // 最后尝试本地北京数据
-            const beijingBounds = {
-              north: 40.2,
-              south: 39.4,
-              east: 117.4,
-              west: 115.7
-            };
-            
-            const beijingData = await localFirstBuildingService.getBuildingData(beijingBounds, zoom);
-            console.log(`🏙️ 本地北京数据: ${beijingData.features.length} 个建筑物`);
-            
-            if (beijingData.features.length === 0) {
-              console.log('❌ 所有数据源都无建筑物数据');
-              return;
-            }
-            
-            buildingData = {
-              type: 'FeatureCollection',
-              features: (beijingData.features as BuildingFeature[]) ?? [],
-            };
-          }
-        }
-      }
+      const buildingData: BuildingFeatureCollection = wfsResponse.data;
+      console.log(`✅ WFS 数据获取成功: ${buildingData.features.length} 个建筑物`);
 
-      if (!buildingData) {
-        console.warn('⚠️ 未获取到任何建筑数据，终止渲染流程');
+      if (!buildingData.features.length) {
+        console.warn('⚠️ 当前区域未返回建筑数据');
+        removeBuildingLayer();
         return;
       }
 

@@ -124,57 +124,6 @@ export const CacheControls: React.FC = () => {
         </button>
         
         <button
-          onClick={async () => {
-            try {
-              addStatusMessage('正在检查MongoDB状态...', 'info');
-              const response = await fetch('http://localhost:3500/api/buildings/info');
-              if (response.ok) {
-                const info = await response.json();
-                console.log('🗄️ MongoDB状态信息:', info);
-                const dbStatus = info.database?.status || 'unknown';
-                const buildingCount = info.statistics?.totalBuildings || 0;
-                const tilesCount = info.statistics?.totalTiles || 0;
-                
-                if (dbStatus === 'healthy') {
-                  addStatusMessage(`✅ MongoDB连接正常 (${buildingCount}个建筑, ${tilesCount}个瓦片)`, 'info');
-                } else {
-                  addStatusMessage(`⚠️ MongoDB状态: ${dbStatus}`, 'warning');
-                }
-              } else {
-                addStatusMessage(`MongoDB检查失败: ${response.status}`, 'error');
-              }
-            } catch (error) {
-              addStatusMessage(`MongoDB检查失败: ${error}`, 'error');
-            }
-          }}
-          className="w-full py-2.5 px-4 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg transition-colors"
-        >
-          🗄️ 检查MongoDB状态
-        </button>
-        
-        <button
-          onClick={async () => {
-            try {
-              addStatusMessage('正在诊断建筑物API...', 'info');
-              const response = await fetch('http://localhost:3500/api/buildings/debug');
-              if (response.ok) {
-                const debug = await response.json();
-                console.log('🔍 建筑物API诊断结果:', debug);
-                const successCount = debug.testResults.filter((r: any) => r.status === 'success').length;
-                addStatusMessage(`API诊断完成: ${successCount}/${debug.testResults.length} 成功`, successCount > 0 ? 'info' : 'error');
-              } else {
-                addStatusMessage(`API诊断失败: ${response.status}`, 'error');
-              }
-            } catch (error) {
-              addStatusMessage(`API诊断失败: ${error}`, 'error');
-            }
-          }}
-          className="w-full py-2.5 px-4 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-lg transition-colors"
-        >
-          🔍 诊断建筑物API
-        </button>
-        
-        <button
           onClick={updateCacheStats}
           className="w-full py-2.5 px-4 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg transition-colors"
         >

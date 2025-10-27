@@ -9,8 +9,8 @@ Maintainer: ShadowMap dev team
 
 | Path | Purpose |
 | --- | --- |
-| `shadow-map-frontend/react-shadow-app/` | React + TypeScript client (Mapbox focus) |
-| `shadow-map-backend/` | Express + TypeScript API services (WFS, cache, DEM) |
+| `shadow-map-frontend/react-shadow-app/` | React + TypeScript client (Clean Mapbox viewport) |
+| `shadow-map-backend/` | Express + TypeScript API (WFS proxy, DEM, weather) |
 | `prototypes/` | Stand-alone HTML/JS experiments (kept for reference only) |
 | `scripts/` | Maintenance and data preparation scripts |
 | `Chinese documents/` | Reference notes (中文) |
@@ -21,13 +21,13 @@ Maintainer: ShadowMap dev team
 
 ```
 src/
-├── App.tsx                   # Mode switch, map shell
+├── App.tsx                   # Clean 3D shell + React Query setup
 ├── components/
-│   ├── Map/                  # Map engines (Mapbox, WFS 3D, Clean mode)
+│   ├── Map/                  # ShadeMap viewport + building overlays
 │   ├── UI/                   # Panels, toolbars, controls
-│   └── Controls/             # Legacy controls (some pending cleanup)
+│   └── Controls/             # Timeline, cache utilities, etc.
 ├── hooks/                    # Shadow analysis, map state helpers
-├── services/                 # Data fetchers (WFS, cache, DEM, base maps)
+├── services/                 # Data fetchers (buildings, DEM, weather)
 ├── store/                    # Zustand store for map + analysis state
 ├── types/                    # Shared TypeScript types (geo + map)
 └── utils/                    # Caching, performance, diagnostics helpers
@@ -35,11 +35,10 @@ src/
 
 Key entry points:
 
-- `components/Map/MapboxMapComponent.tsx` – default interactive map.
-- `components/Map/Wfs3DShadowMap.tsx` – WFS-driven 3D shadow renderer.
-- `components/Map/CleanShadowMap.tsx` – experimental clean UI mode.
+- `components/Map/ShadowMapViewport.tsx` – ShadeMap + Mapbox GL viewport.
+- `components/UI/CleanControlPanel.tsx` – time/shadow/style controls.
 - `hooks/useShadowMap.ts` – orchestrates map store, ShadeMap integration.
-- `services/wfsBuildingService.ts` – main gateway to backend WFS APIs.
+- `services/wfsBuildingService.ts` – helpers for the building WFS proxy.
 
 Build tooling: Vite + pnpm (`pnpm run dev`, `pnpm run build`).
 
@@ -50,16 +49,14 @@ Build tooling: Vite + pnpm (`pnpm run dev`, `pnpm run build`).
 ```
 src/
 ├── app.ts                    # Express app setup
-├── routes/                   # REST endpoints (buildings, DEM, weather, etc.)
-├── services/                 # Business logic (caching, WFS, Mongo, TUM data)
-├── models/                   # TypeORM / Mongoose style models
-├── scripts/                  # Data loaders
-└── utils/                    # Validation, logging helpers
+├── routes/                   # REST endpoints (buildings, DEM, weather, health)
+├── services/                 # DEM tiles, WFS proxy helpers, GFS integration
+└── config/                   # Environment configuration
 ```
 
 Key endpoints:
 
-- `routes/buildings.ts` – live WFS/TUM building fetch.
+- `routes/buildings.ts` – serves tiles via WFS proxy.
 - `routes/dem.ts` – digital elevation tiles.
 - `routes/health.ts` – service health probe.
 
@@ -71,6 +68,6 @@ Build/run: `npm run dev` (nodemon), `npm run build && npm start` for prod.
 
 - TypeScript strict mode on both frontend and backend.
 - Zustand store exposes map state (`src/store/shadowMapStore.ts`).
-- Multi-layer caching lives in `src/utils/multiLevelCache.ts` (frontend) and `shadow-map-backend/src/services/*Cache*.ts`.
+- Frontend caching utilities in `src/utils/multiLevelCache.ts`; backend目前依赖 WFS 代理与 GFS 查询。
 
 Keep this document updated whenever directories move, major files are added, or responsibilities change.

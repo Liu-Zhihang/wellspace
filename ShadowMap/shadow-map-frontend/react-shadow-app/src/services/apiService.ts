@@ -58,10 +58,25 @@ export class ApiService {
       }
       
       const data = await response.json();
-      
-      // 验证数据格式
+
       if (!data || typeof data !== 'object') {
         throw new Error('Invalid response format');
+      }
+
+      if (!data.tileInfo) {
+        data.tileInfo = { z, x, y };
+      }
+      if (!data.bbox) {
+        const n = Math.pow(2, z);
+        const west = (x / n) * 360 - 180;
+        const east = ((x + 1) / n) * 360 - 180;
+        const tileToLat = (ty: number) => {
+          const rad = Math.PI - (2 * Math.PI * ty) / n;
+          return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(rad) - Math.exp(-rad)));
+        };
+        const south = tileToLat(y + 1);
+        const north = tileToLat(y);
+        data.bbox = [west, south, east, north];
       }
       
       // 存入高级缓存
@@ -159,29 +174,13 @@ export class ApiService {
   }
 
   // 预加载建筑物区域
-  static async preloadBuildingsArea(bounds: {
+  static async preloadBuildingsArea(_bounds: {
     north: number;
     south: number;
     east: number;
     west: number;
-  }, zoom: number): Promise<void> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/buildings/preload`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ bounds, zoom }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to preload buildings: ${response.statusText}`);
-      }
-      
-      console.log(`🔄 已预加载建筑物数据，缩放级别: ${zoom}`);
-    } catch (error) {
-      console.warn('预加载建筑物数据失败:', error);
-    }
+  }, _zoom: number): Promise<void> {
+    console.log('🔄 preloadBuildingsArea noop (WFS proxy mode)');
   }
 
   // 获取建筑物服务信息

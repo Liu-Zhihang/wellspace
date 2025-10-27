@@ -228,11 +228,11 @@ export const useShadowMap = () => {
         west: bounds.getWest(),
       };
 
-      // 智能瓦片限制策略（MongoDB缓存后可以更激进）
+      // 智能瓦片限制策略（后端WFS代理 + 缓存）
       const maxZoom = Math.min(zoom, 17);
       const tiles = GeoUtils.getTilesInBounds(mapBounds, maxZoom);
       
-      // MongoDB缓存优化：可以加载更多瓦片
+      // 高缩放级别在本地缓存足够数据后可适度放宽
       let maxTiles = 9;  // 基础瓦片数提升
       if (zoom >= 15) maxTiles = 6;  // 高缩放级别加载更多
       if (zoom >= 16) maxTiles = 4;  // 极高缩放级别仍然限制

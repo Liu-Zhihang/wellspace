@@ -8,13 +8,8 @@ import fs from 'fs';
 import demRoutes from './routes/dem';
 import healthRoutes from './routes/health';
 import buildingRoutes from './routes/buildings';
-import dataPreloadRoutes from './routes/dataPreload';
-import tileDebugRoutes from './routes/tileDebug';
-import buildingOptRoutes from './routes/buildingOptimization';
-import coordValidateRoutes from './routes/coordinateValidation';
 import buildingWfsRoutes from './routes/buildingWfs';
-import localBuildingDatasetRoutes from './routes/localBuildingDataset';
-import localBuildingDataRoutes from './routes/localBuildingData';
+import weatherRoutes from './routes/weather';
 
 const app = express();
 
@@ -57,13 +52,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/health', healthRoutes);
 app.use('/api/dem', demRoutes);
 app.use('/api/buildings', buildingRoutes);
-app.use('/api/preload', dataPreloadRoutes);
-app.use('/api/debug', tileDebugRoutes);
-app.use('/api/building-opt', buildingOptRoutes);
-app.use('/api/coord-validate', coordValidateRoutes);
 app.use('/api/wfs-buildings', buildingWfsRoutes);
-app.use('/api/local-datasets', localBuildingDatasetRoutes);
-app.use('/api/local-buildings', localBuildingDataRoutes);
+app.use('/api/weather', weatherRoutes);
 
 // Static file service - prefer the built React app, fall back to prototypes
 const reactDistPath = path.join(__dirname, '../../shadow-map-frontend/react-shadow-app/dist');
@@ -88,19 +78,8 @@ app.get('/', (req, res) => {
         tile: 'POST /api/wfs-buildings/tile - fetch buildings for a tile',
         sample: 'GET /api/wfs-buildings/sample/beijing - sample dataset check'
       },
-      preload: {
-        cities: 'POST /api/preload/cities - warm frequently used city tiles',
-        location: 'POST /api/preload/location - warm cache for a coordinate radius',
-        status: 'GET /api/preload/status - inspect ongoing preload jobs',
-        cleanup: 'POST /api/preload/cleanup - clear stale preload entries',
-        cityList: 'GET /api/preload/cities - list supported preset cities'
-      },
-      localDatasets: {
-        status: 'GET /api/local-datasets/status - inspect local dataset availability',
-        load: 'POST /api/local-datasets/load - load local dataset into memory',
-        query: 'POST /api/local-datasets/query - query buildings from local dataset',
-        stats: 'GET /api/local-datasets/stats - data statistics',
-        info: 'GET /api/local-datasets/info - metadata about the local dataset service'
+      weather: {
+        current: '/api/weather/current'
       },
       docs: '/api/docs'
     }

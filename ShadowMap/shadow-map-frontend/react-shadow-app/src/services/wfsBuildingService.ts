@@ -155,54 +155,11 @@ export async function getWfsBuildingsByTile(
   }
 }
 
-export async function compareBuildingCoverage(
-  bounds: BoundingBox
-): Promise<{
-  wfs: { count: number; success: boolean; error?: string };
-  osm: { count: number; success: boolean; error?: string };
-}> {
-  console.log('[WFS] Comparing coverage between WFS and OSM');
-
-  const result = {
-    wfs: { count: 0, success: false, error: undefined as string | undefined },
-    osm: { count: 0, success: false, error: undefined as string | undefined }
-  };
-
-  try {
-    const wfsResponse = await getWfsBuildings(bounds, 1000);
-    result.wfs.count = wfsResponse.data.features.length;
-    result.wfs.success = true;
-    console.log('[WFS] Coverage result', result.wfs.count);
-  } catch (error) {
-    result.wfs.error = error instanceof Error ? error.message : 'Unknown error';
-    console.warn('[WFS] Coverage query failed', result.wfs.error);
-  }
-
-  try {
-    const osmResponse = await fetch(
-      `${API_BASE}/buildings/${Math.floor(bounds.north * 1000)}/${Math.floor(bounds.west * 1000)}.json`
-    );
-
-    if (osmResponse.ok) {
-      const osmData = await osmResponse.json();
-      result.osm.count = osmData.features?.length ?? 0;
-      result.osm.success = true;
-    } else {
-      result.osm.error = `HTTP ${osmResponse.status}`;
-    }
-  } catch (error) {
-    result.osm.error = error instanceof Error ? error.message : 'Unknown error';
-  }
-
-  return result;
-}
-
 export const wfsBuildingService = {
   testWfsConnection,
   getWfsBuildings,
   getBeijingSampleBuildings,
-  getWfsBuildingsByTile,
-  compareBuildingCoverage
+  getWfsBuildingsByTile
 };
 
 export default wfsBuildingService;

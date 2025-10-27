@@ -45,7 +45,7 @@ npm run dev         # development (nodemon)
 npm run build && npm start   # production
 ```
 
-Copy `.env.example` to `.env` and provide WFS / Mongo / cache credentials before starting the API.
+Copy `.env.example` to `.env` and provide WFS credentials before starting the API.
 
 ## Current Focus
 

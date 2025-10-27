@@ -9,7 +9,7 @@
 2. Configure environment variables  
    ```bash
    cp .env.example .env
-   # Populate WFS, MongoDB/cache, and optional weather service credentials
+   # Populate WFS (optional) and weather service credentials
    ```
 3. Launch the development server  
    ```bash
@@ -24,7 +24,7 @@
 ## Key Services
 
 - **DEM tiles** – Terrarium-style PNG tiles exposed from `/api/dem/:z/:x/:y.png`
-- **Building tile/catalog APIs** – Local datasets, WFS proxies, and cache warmers
+- **Building tiles** – Local dataset fallback with optional WFS proxy lookup
 - **Weather & cloud attenuation** – GFS-backed sunlight factor with in-memory caching
 - **Health & diagnostics** – Basic and detailed health endpoints
 
@@ -42,11 +42,10 @@
 | Variable | Description |
 | --- | --- |
 | `PORT` | HTTP port (defaults to `3001`) |
-| `BUILDING_WFS_TILE_CATALOG_PATH` | Path to GeoServer tile catalogue JSON |
+| `BUILDING_WFS_TILE_CATALOG_PATH` | Path to GeoServer tile catalogue JSON (optional) |
 | `BUILDING_WFS_TILE_STRATEGY` | `optional` (default) or `required` for strict tile matching |
 | `BUILDING_WFS_BASE_URL` | GeoServer base URL for WFS queries |
 | `GFS_API_BASE_URL` | Upstream endpoint for weather snapshots (defaults to NOAA GFS proxy) |
-| `WEATHER_CACHE_TTL_MINUTES` | Cache window for weather responses |
 
 (`.env.example` documents the full list.)
 
@@ -75,8 +74,8 @@ When the frontend posts a bounding box to `/api/wfs-buildings/bounds`, the servi
 - `GET /api/health/detailed` – Dev-only diagnostics  
 - `GET /api/dem/:z/:x/:y.png` – Height tile (Terrarium)  
 - `GET /api/dem/info` – Service metadata  
-- `POST /api/buildings/bounds` – Query buildings for a bounding box  
-- `POST /api/wfs-buildings/bounds` – GeoServer proxy with tile filtering  
+- `POST /api/buildings/bounds` – Query buildings via GeoServer WFS  
+- `POST /api/wfs-buildings/bounds` – GeoServer proxy with tile filtering (optional)  
 - `GET /api/weather/current` – Weather snapshot (`lat`, `lng`, `timestamp` query params)
 
 ## Project Structure
@@ -86,21 +85,20 @@ src/
 ├── app.ts                  # Express wiring, middleware, static assets
 ├── server.ts               # Production entry point
 ├── routes/                 # REST endpoints (DEM, buildings, weather, health…)
-├── services/               # Business logic (GFS, caches, local datasets, WFS proxy)
-├── utils/                  # Shared helpers (logging, bounds math, tiling)
-└── config/                 # Typed configuration loaders
+├── services/               # Business logic (DEM tiles, WFS proxy, GFS integration)
+└── config/                 # Environment configuration helpers
 ```
 
 ## Development Notes
 
 - Helmet + compression are configured with permissive defaults; tighten CSP/CORS before public deployment.
 - DEM tiles currently serve pre-generated samples; update `config/dem.json` when swapping datasets.
-- Weather service caches responses per `(lat, lng, hour)` bucket; adjust TTL via env vars if needed.
+- Weather service pulls live cloud attenuation from NOAA GFS; consider adding caching if usage grows.
 - Static assets fall back to `shadow-map-frontend` prototypes when the Vite build is missing.
 
 ## Future Work
 
 - Replace sample DEM data with production-grade tiles + optional on-the-fly encoding.
-- Introduce a persistent cache layer (Redis/Upstash) for weather + building responses.
+- Add a lightweight in-memory cache for weather/building responses if usage increases.
 - Harden error handling and add integration tests for WFS + weather fallbacks.
 - Monitor and rate-limit heavy endpoints before exposing the API publicly.
