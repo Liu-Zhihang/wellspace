@@ -1,5 +1,15 @@
 import { create } from 'zustand';
-import type { MapSettings, ShadowAnalysisResult, SunPosition, ShadowSettings, DataLayer, DataLayerType, WeatherSnapshot } from '../types/index.ts';
+import type {
+  MapSettings,
+  ShadowAnalysisResult,
+  SunPosition,
+  ShadowSettings,
+  DataLayer,
+  DataLayerType,
+  WeatherSnapshot,
+  UploadedGeometry,
+  GeometryAnalysis
+} from '../types/index.ts';
 
 export interface MobilityTracePoint {
   coordinates: [number, number];
@@ -54,6 +64,18 @@ interface ShadowMapState {
   addStatusMessage: (message: string, type?: 'info' | 'warning' | 'error') => void;
   removeStatusMessage: (id: string) => void;
   clearStatusMessages: () => void;
+
+  // Uploaded geometries & analysis
+  uploadedGeometries: UploadedGeometry[];
+  addUploadedGeometry: (geometry: UploadedGeometry) => void;
+  removeUploadedGeometry: (geometryId: string) => void;
+  clearUploadedGeometries: () => void;
+  selectedGeometryId: string | null;
+  selectGeometry: (geometryId: string | null) => void;
+  geometryAnalyses: Record<string, GeometryAnalysis>;
+  setGeometryAnalysis: (analysis: GeometryAnalysis) => void;
+  clearGeometryAnalyses: (geometryId?: string) => void;
+  exportGeometryAnalysis: (geometryId: string, format: 'json' | 'csv') => void;
 
   // Mobility trace
   mobilityTrace: MobilityTracePoint[];
@@ -262,6 +284,108 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   removeStatusMessage: (id: string) => 
     set(state => ({ statusMessages: state.statusMessages.filter(msg => msg.id !== id) })),
   clearStatusMessages: () => set({ statusMessages: [] }),
+  uploadedGeometries: [],
+  addUploadedGeometry: (geometry: UploadedGeometry) => {
+    set(state => ({
+      uploadedGeometries: [...state.uploadedGeometries, geometry],
+      selectedGeometryId: geometry.id,
+    }));
+    get().addStatusMessage?.(`✅ Uploaded geometry “${geometry.name}”`, 'info');
+  },
+  removeUploadedGeometry: (geometryId: string) => {
+    set(state => {
+      const remaining = state.uploadedGeometries.filter(item => item.id !== geometryId);
+      const { [geometryId]: _removed, ...restAnalyses } = state.geometryAnalyses;
+      const nextSelected = state.selectedGeometryId === geometryId ? (remaining[0]?.id ?? null) : state.selectedGeometryId;
+      return {
+        uploadedGeometries: remaining,
+        selectedGeometryId: nextSelected,
+        geometryAnalyses: restAnalyses,
+      };
+    });
+  },
+  clearUploadedGeometries: () => {
+    set({ uploadedGeometries: [], selectedGeometryId: null, geometryAnalyses: {} });
+  },
+  selectedGeometryId: null,
+  selectGeometry: (geometryId: string | null) => {
+    set({ selectedGeometryId: geometryId });
+  },
+  geometryAnalyses: {},
+  setGeometryAnalysis: (analysis: GeometryAnalysis) => {
+    set(state => ({
+      geometryAnalyses: {
+        ...state.geometryAnalyses,
+        [analysis.geometryId]: analysis,
+      },
+    }));
+  },
+  clearGeometryAnalyses: (geometryId?: string) => {
+    if (!geometryId) {
+      set({ geometryAnalyses: {} });
+      return;
+    }
+    set(state => {
+      const { [geometryId]: _removed, ...rest } = state.geometryAnalyses;
+      return { geometryAnalyses: rest };
+    });
+  },
+  exportGeometryAnalysis: (geometryId: string, format: 'json' | 'csv') => {
+    const state = get();
+    const analysis = state.geometryAnalyses[geometryId];
+    const geometry = state.uploadedGeometries.find(item => item.id === geometryId);
+
+    if (!analysis || !geometry) {
+      state.addStatusMessage?.('⚠️ No analysis data available for export.', 'warning');
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const filenameBase = (geometry.name || 'geometry').replace(/\s+/g, '_').toLowerCase();
+
+    if (format === 'json') {
+      const payload = {
+        geometry: geometry.feature,
+        stats: analysis.stats,
+        samples: analysis.samples ?? [],
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filenameBase}-analysis.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      state.addStatusMessage?.('📄 Exported analysis as JSON.', 'info');
+      return;
+    }
+
+    const samples = analysis.samples ?? [];
+    if (!samples.length) {
+      state.addStatusMessage?.('⚠️ No sample data available for CSV export.', 'warning');
+      return;
+    }
+
+    const header = 'lat,lng,shadowPercent,hoursOfSun\n';
+    const rows = samples
+      .map(sample => `${sample.lat},${sample.lng},${sample.shadowPercent},${sample.hoursOfSun}`)
+      .join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filenameBase}-analysis.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    state.addStatusMessage?.('📄 Exported analysis as CSV.', 'info');
+  },
   
   // 数据层管理方法实现
   toggleDataLayer: (layerId: DataLayerType) => {

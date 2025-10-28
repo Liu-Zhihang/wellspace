@@ -25,14 +25,14 @@ export const CleanControlPanel: React.FC<CleanControlPanelProps> = ({ className 
     { id: 'style', label: 'Map style', icon: <GlobeAltIcon className="h-5 w-5" />, content: <MapStylePanel /> },
     {
       id: 'upload',
-      label: 'Upload mobility trace',
+      label: 'Upload GeoJSON',
       icon: <ArrowUpTrayIcon className="h-5 w-5" />,
       content: (
         <div className="w-64 space-y-3">
           <div>
-            <h3 className="text-sm font-semibold text-gray-800">Upload mobility trace</h3>
+            <h3 className="text-sm font-semibold text-gray-800">Upload GeoJSON</h3>
             <p className="text-xs text-gray-500">
-              Provide a GeoJSON FeatureCollection with timestamped points or a LineString so the simulator can replay the route.
+              Import mobility traces (Point/LineString) or area geometries (Polygon/MultiPolygon) to analyse movement and sunlight coverage.
             </p>
           </div>
           <button
@@ -46,9 +46,9 @@ export const CleanControlPanel: React.FC<CleanControlPanelProps> = ({ className 
             Select GeoJSON file…
           </button>
           <ul className="space-y-1 text-xs text-gray-500">
-            <li>• Supports Point, MultiPoint, or LineString geometries</li>
-            <li>• Each point must include a timestamp (ISO string or milliseconds)</li>
-            <li>• Playback will interpolate map view and shadow time for each waypoint</li>
+            <li>• Supports Feature / FeatureCollection (GeoJSON)</li>
+            <li>• Points & lines replay traces; polygons feed shadow analysis</li>
+            <li>• Additional formats coming soon</li>
           </ul>
         </div>
       ),

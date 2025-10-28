@@ -10,6 +10,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useShadowMapStore } from '../../store/shadowMapStore'
 import type { MobilityTracePoint } from '../../store/shadowMapStore'
+import type { Feature, Geometry } from 'geojson'
 
 type PanelId = 'time' | 'shadow' | 'style' | 'upload' | null;
 
@@ -38,6 +39,9 @@ export const LeftIconToolbar: React.FC = () => {
     setMobilityTrace,
     clearMobilityTrace,
     setTracePlaying,
+    addUploadedGeometry,
+    selectGeometry,
+    uploadedGeometries,
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
@@ -85,8 +89,101 @@ export const LeftIconToolbar: React.FC = () => {
       reader.readAsText(file);
     });
 
-  const parseMobilityTraceGeoJson = (raw: string): MobilityTracePoint[] => {
-    const json = JSON.parse(raw);
+  const generateGeometryId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `geom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  };
+
+  const isPolygonGeometry = (geometry: any): geometry is Geometry => {
+    if (!geometry || typeof geometry !== 'object') return false;
+    return geometry.type === 'Polygon' || geometry.type === 'MultiPolygon';
+  };
+
+  const computeFeatureBbox = (feature: Feature<Geometry>): [number, number, number, number] => {
+    const coords: Array<[number, number]> = [];
+
+    const collect = (geometry: any) => {
+      if (!geometry) return;
+      if (geometry.type === 'GeometryCollection') {
+        geometry.geometries?.forEach(collect);
+        return;
+      }
+
+      const recurse = (value: any) => {
+        if (!Array.isArray(value)) return;
+        if (typeof value[0] === 'number' && typeof value[1] === 'number') {
+          coords.push([value[0], value[1]]);
+        } else {
+          value.forEach(recurse);
+        }
+      };
+
+      recurse(geometry.coordinates);
+    };
+
+    collect(feature.geometry);
+
+    if (!coords.length) {
+      return [0, 0, 0, 0];
+    }
+
+    const lons = coords.map(([lon]) => lon);
+    const lats = coords.map(([, lat]) => lat);
+
+    return [
+      Math.min(...lons),
+      Math.min(...lats),
+      Math.max(...lons),
+      Math.max(...lats),
+    ];
+  };
+
+  const extractPolygonFeatures = (geojson: any): Feature<Geometry>[] => {
+    const features: Feature<Geometry>[] = [];
+
+    const pushFeature = (feature: any) => {
+      if (!feature || typeof feature !== 'object') return;
+      if (feature.type === 'Feature' && feature.geometry && isPolygonGeometry(feature.geometry)) {
+        features.push({
+          type: 'Feature',
+          geometry: feature.geometry,
+          properties: feature.properties ?? {},
+        });
+        return;
+      }
+
+      if (isPolygonGeometry(feature)) {
+        features.push({ type: 'Feature', geometry: feature, properties: {} });
+      }
+    };
+
+    if (!geojson || typeof geojson !== 'object') {
+      return features;
+    }
+
+    if (geojson.type === 'FeatureCollection' && Array.isArray(geojson.features)) {
+      geojson.features.forEach(pushFeature);
+      return features;
+    }
+
+    if (geojson.type === 'Feature') {
+      pushFeature(geojson);
+      return features;
+    }
+
+    if (geojson.type === 'GeometryCollection' && Array.isArray(geojson.geometries)) {
+      geojson.geometries.forEach(pushFeature);
+      return features;
+    }
+
+    pushFeature(geojson);
+    return features;
+  };
+
+  const parseMobilityTraceGeoJson = (raw: string | unknown): MobilityTracePoint[] => {
+    const json = typeof raw === 'string' ? JSON.parse(raw) : raw;
     const points: MobilityTracePoint[] = [];
 
     const pushPoint = (coordinates: unknown, timestampValue: unknown) => {
@@ -142,16 +239,19 @@ export const LeftIconToolbar: React.FC = () => {
       }
     };
 
-    if (json.type === 'FeatureCollection' && Array.isArray(json.features)) {
-      json.features.forEach(processFeature);
-    } else if (json.type === 'Feature') {
-      processFeature(json);
-    } else if (json.type === 'LineString') {
-      json.coordinates?.forEach((coords: unknown, idx: number) => {
-        pushPoint(coords, json.timestamps ? json.timestamps[idx] : undefined);
-      });
-    } else if (json.type === 'Point') {
-      pushPoint(json.coordinates, json.timestamp ?? json.time ?? json.datetime);
+    if (json && typeof json === 'object') {
+      const geo = json as any;
+      if (geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
+        geo.features.forEach(processFeature);
+      } else if (geo.type === 'Feature') {
+        processFeature(geo);
+      } else if (geo.type === 'LineString') {
+        geo.coordinates?.forEach((coords: unknown, idx: number) => {
+          pushPoint(coords, geo.timestamps ? geo.timestamps[idx] : undefined);
+        });
+      } else if (geo.type === 'Point') {
+        pushPoint(geo.coordinates, geo.timestamp ?? geo.time ?? geo.datetime);
+      }
     }
 
     if (!points.length) {
@@ -166,6 +266,25 @@ export const LeftIconToolbar: React.FC = () => {
     return points;
   };
 
+  const createUploadedGeometry = (feature: Feature<Geometry>, sourceName: string, orderIndex: number): string => {
+    const nameFromProps = feature.properties?.name ?? feature.properties?.id;
+    const fallbackName = `Geometry ${orderIndex + 1}`;
+    const bbox = computeFeatureBbox(feature);
+
+    const geometryId = generateGeometryId();
+
+    addUploadedGeometry({
+      id: geometryId,
+      name: String(nameFromProps ?? fallbackName),
+      feature,
+      bbox,
+      uploadedAt: new Date(),
+      sourceFile: sourceName,
+    });
+
+    return geometryId;
+  };
+
   const handleFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
@@ -176,7 +295,7 @@ export const LeftIconToolbar: React.FC = () => {
     });
 
     if (!geoJsonFile) {
-      addStatusMessage?.('Please select a GeoJSON trace file.', 'warning');
+      addStatusMessage?.('Please select a GeoJSON file.', 'warning');
       event.target.value = '';
       return;
     }
@@ -184,12 +303,32 @@ export const LeftIconToolbar: React.FC = () => {
     try {
       setTracePlaying(false);
       const raw = await readFileAsText(geoJsonFile);
-      const tracePoints = parseMobilityTraceGeoJson(raw);
-      setMobilityTrace(tracePoints);
-      addStatusMessage?.(`Mobility trace ready (${tracePoints.length} points)`, 'info');
-      setOpenPanel(null);
+      const parsed = JSON.parse(raw);
+
+      const polygonFeatures = extractPolygonFeatures(parsed);
+
+      if (polygonFeatures.length > 0) {
+        const baseOffset = uploadedGeometries.length;
+        const createdIds = polygonFeatures.map((feature, index) =>
+          createUploadedGeometry(feature, geoJsonFile.name, baseOffset + index)
+        );
+
+        if (createdIds[0]) {
+          selectGeometry(createdIds[0]);
+        }
+
+        clearMobilityTrace();
+
+        addStatusMessage?.(`✅ Uploaded ${polygonFeatures.length} polygon feature(s) for analysis.`, 'info');
+        setOpenPanel(null);
+      } else {
+        const tracePoints = parseMobilityTraceGeoJson(parsed);
+        setMobilityTrace(tracePoints);
+        addStatusMessage?.(`Mobility trace ready (${tracePoints.length} points)`, 'info');
+        setOpenPanel(null);
+      }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to parse mobility trace';
+      const message = error instanceof Error ? error.message : 'Failed to parse GeoJSON';
       clearMobilityTrace();
       addStatusMessage?.(message, 'error');
     } finally {

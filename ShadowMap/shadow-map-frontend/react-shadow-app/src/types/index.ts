@@ -169,3 +169,34 @@ export type WeatherSnapshot = {
   source?: string;
   raw?: WeatherMetrics | null;
 };
+
+export type UploadedGeometry = {
+  id: string;
+  name: string;
+  feature: Feature<Geometry>;
+  bbox: [number, number, number, number];
+  area?: number;
+  uploadedAt: Date;
+  sourceFile?: string;
+};
+
+export type GeometryAnalysisSample = {
+  lat: number;
+  lng: number;
+  shadowPercent: number;
+  hoursOfSun: number;
+};
+
+export type GeometryAnalysisStats = {
+  shadedRatio: number;
+  avgSunlightHours: number;
+  sampleCount: number;
+  generatedAt: Date;
+  notes?: string;
+};
+
+export type GeometryAnalysis = {
+  geometryId: string;
+  stats: GeometryAnalysisStats;
+  samples?: GeometryAnalysisSample[];
+};

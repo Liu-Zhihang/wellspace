@@ -1,0 +1,61 @@
+{
+  "type": "FeatureCollection",
+  "name": "ShadowMap Sample Geometries",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "EPSG:4326"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Harbour Promenade Plaza",
+        "notes": "Compact rooftop space near Central Ferry Pier for sun & shade checks."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [114.160693, 22.286427],
+            [114.160960, 22.286418],
+            [114.160965, 22.286610],
+            [114.160698, 22.286621],
+            [114.160693, 22.286427]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Exchange Square Terraces",
+        "notes": "Multi-patch footprint to test MultiPolygon ingestion."
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [114.158998, 22.284861],
+              [114.159201, 22.284846],
+              [114.159209, 22.284990],
+              [114.159010, 22.285001],
+              [114.158998, 22.284861]
+            ]
+          ],
+          [
+            [
+              [114.159374, 22.284676],
+              [114.159532, 22.284667],
+              [114.159539, 22.284810],
+              [114.159382, 22.284820],
+              [114.159374, 22.284676]
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

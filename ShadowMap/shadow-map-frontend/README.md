@@ -2,7 +2,7 @@
 
 ## Overview
 
-`react-shadow-app` is a Vite + React + TypeScript client that powers the Clean 3D Shadow Map experience. Legacy Mapbox/WFS/Leaflet demos have been removed as part of `REQ-CLEAN-05`, so the codebase now focuses exclusively on the Clean viewport.
+`react-shadow-app` is a Vite + React + TypeScript client that powers the Clean 3D Shadow Map experience. Legacy Mapbox/WFS/Leaflet demos have been removed as part of `REQ-CLEAN-05`, so the codebase now focuses exclusively on the Clean viewport. The next milestone (`REQ-ANALYSIS-01`) extends the upload workflow so GeoJSON polygons can be analysed for shadow coverage and sunlight hours.
 
 ## Getting Started
 
@@ -65,3 +65,4 @@ If not provided, the app falls back to defaults defined in `config/runtime.ts`. 
 - Break up the monolithic Zustand store into focused slices.
 - Add visual regression coverage / screenshot testing for the Clean viewport.
 - Document presets and mobility trace workflows in the user guide.
+- Ship the geometry analysis module (merged upload UI, ShadeMap sampling, exportable summaries).

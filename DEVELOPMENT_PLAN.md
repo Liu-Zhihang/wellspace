@@ -14,6 +14,7 @@
 | REQ-CLEAN-02 | Remove unused UI/Control components | Done | Legacy panels removed; verify no stale imports remain |
 | REQ-DOC-03 | Establish structure + plan docs | Done | `CODEBASE_STRUCTURE.md` and this file created |
 | REQ-CLEAN-04 | Consolidate frontend map modes | Done | Mapbox viewport shared; Clean UI retained as styling |
+| REQ-ANALYSIS-01 | Extend upload workflow for geometry-based analysis | Planned | Merge upload UX, compute shadow coverage & sunlight stats, export results |
 
 ## Next Steps
 
@@ -22,8 +23,11 @@
    - Replace accesses to private Mapbox internals (`_data`, `_loaded`) with safe helpers.
    - Normalise timeout types to the browser-safe `number`.
    - Re-run `pnpm exec tsc -b` and `pnpm run build`.
-2. After TS build is green, run a quick bundle report to confirm no missing imports.
-3. Decide on performance follow-up (lazy loading / chunk split) once the build is stable.
+2. Kick off `REQ-ANALYSIS-01`
+   - Merge trace upload into a generic GeoJSON uploader (Clean control + left toolbar).
+   - Extend `shadowMapStore` to manage uploaded geometries, analysis results, exports.
+   - Prototype sampling + ShadeMap integration for shadow coverage / sunlight hours.
+3. After TS build and analysis prototype, run bundle report to confirm no missing imports and size regressions.
 
 ## Risks / Blockers
 

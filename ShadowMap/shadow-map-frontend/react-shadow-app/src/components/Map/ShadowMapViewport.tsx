@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { CleanControlPanel } from '../UI/CleanControlPanel';
-import type { Feature } from 'geojson';
+import type { Feature, Polygon, MultiPolygon, FeatureCollection } from 'geojson';
 import { getWfsBuildings } from '../../services/wfsBuildingService';
 import { buildingCache } from '../../cache/buildingCache';
 import { useShadowMapStore } from '../../store/shadowMapStore';
@@ -22,6 +22,98 @@ const computeEffectiveShadowOpacity = (
     : sunlightFactor;
   return Math.max(0, Math.min(1, baseOpacity * factor));
 };
+
+const isPointInRing = (point: [number, number], ring: number[][]): boolean => {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0];
+    const yi = ring[i][1];
+    const xj = ring[j][0];
+    const yj = ring[j][1];
+
+    const intersect = yi > point[1] !== yj > point[1] &&
+      point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi + 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+const pointInPolygonGeometry = (point: [number, number], geometry: Polygon | MultiPolygon): boolean => {
+  if (geometry.type === 'Polygon') {
+    const [outer, ...holes] = geometry.coordinates;
+    if (!outer || !isPointInRing(point, outer)) {
+      return false;
+    }
+    for (const hole of holes) {
+      if (hole && isPointInRing(point, hole)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.some((polygon) => {
+      const [outer, ...holes] = polygon;
+      if (!outer || !isPointInRing(point, outer)) {
+        return false;
+      }
+      for (const hole of holes) {
+        if (hole && isPointInRing(point, hole)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  return false;
+};
+
+const SAMPLE_MIN = 40;
+const SAMPLE_MAX = 180;
+
+const generateSamplePointsForGeometry = (
+  geometry: Polygon | MultiPolygon,
+  bbox: [number, number, number, number]
+): Array<[number, number]> => {
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  const lonSpan = Math.max(1e-6, maxLng - minLng);
+  const latSpan = Math.max(1e-6, maxLat - minLat);
+  const approxArea = Math.abs(lonSpan * latSpan);
+  const targetSamples = Math.min(SAMPLE_MAX, Math.max(SAMPLE_MIN, Math.round(approxArea * 4000)));
+  const gridSize = Math.max(6, Math.ceil(Math.sqrt(targetSamples)));
+  const stepLng = lonSpan / (gridSize + 1);
+  const stepLat = latSpan / (gridSize + 1);
+
+  const points: Array<[number, number]> = [];
+
+  for (let i = 1; i <= gridSize; i++) {
+    for (let j = 1; j <= gridSize; j++) {
+      const lng = minLng + stepLng * i;
+      const lat = minLat + stepLat * j;
+      if (pointInPolygonGeometry([lng, lat], geometry)) {
+        points.push([lng, lat]);
+      }
+      if (points.length >= SAMPLE_MAX) {
+        break;
+      }
+    }
+    if (points.length >= SAMPLE_MAX) {
+      break;
+    }
+  }
+
+  if (!points.length) {
+    points.push([(minLng + maxLng) / 2, (minLat + maxLat) / 2]);
+  }
+
+  return points;
+};
+
+const UPLOADED_SOURCE_ID = 'uploaded-geometry-source';
+const UPLOADED_FILL_LAYER_ID = 'uploaded-geometry-fill';
+const UPLOADED_OUTLINE_LAYER_ID = 'uploaded-geometry-outline';
 
 // 声明全局ShadeMap类型
 declare global {
@@ -48,6 +140,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const tracePlaybackRef = useRef<number | null>(null);
   const weatherRequestRef = useRef<Promise<void> | null>(null);
   const lastWeatherKeyRef = useRef<string | null>(null);
+  const analysisInFlightRef = useRef(false);
+  const lastFitGeometryRef = useRef<string | null>(null);
+  const analysisKeyRef = useRef<string | null>(null);
   
   // Connect to Zustand store
   const {
@@ -61,6 +156,10 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     isTracePlaying,
     setTracePlaying,
     advanceTraceIndex,
+    uploadedGeometries,
+    selectedGeometryId,
+    setGeometryAnalysis,
+    addStatusMessage,
   } = useShadowMapStore();
   const actionButtonBase =
     'flex w-full h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60';
@@ -137,6 +236,230 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   useEffect(() => {
     refreshWeatherData(shadowSettingsState.autoCloudAttenuation ? 'auto-on' : 'manual-mode');
   }, [refreshWeatherData, shadowSettingsState.autoCloudAttenuation, currentDate]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const updateSource = () => {
+      const featureCollection: FeatureCollection = {
+        type: 'FeatureCollection',
+        features: uploadedGeometries.map((item) => ({
+          ...item.feature,
+          properties: {
+            ...(item.feature.properties ?? {}),
+            __geometryId: item.id,
+          },
+        })),
+      };
+
+      const existingSource = map.getSource(UPLOADED_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+
+      if (existingSource) {
+        existingSource.setData(featureCollection as any);
+        return;
+      }
+
+      map.addSource(UPLOADED_SOURCE_ID, {
+        type: 'geojson',
+        data: featureCollection,
+      });
+
+      map.addLayer({
+        id: UPLOADED_FILL_LAYER_ID,
+        type: 'fill',
+        source: UPLOADED_SOURCE_ID,
+        paint: {
+          'fill-color': '#2563eb',
+          'fill-opacity': 0.12,
+        },
+      });
+
+      map.addLayer({
+        id: UPLOADED_OUTLINE_LAYER_ID,
+        type: 'line',
+        source: UPLOADED_SOURCE_ID,
+        paint: {
+          'line-color': '#2563eb',
+          'line-width': 1.2,
+        },
+      });
+    };
+
+    if (map.isStyleLoaded()) {
+      updateSource();
+      return;
+    }
+
+    const handleStyle = () => {
+      updateSource();
+    };
+    map.once('styledata', handleStyle);
+    return () => {
+      map.off('styledata', handleStyle);
+    };
+  }, [uploadedGeometries]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (map.getLayer(UPLOADED_FILL_LAYER_ID)) {
+      map.setPaintProperty(UPLOADED_FILL_LAYER_ID, 'fill-opacity', [
+        'case',
+        ['==', ['get', '__geometryId'], selectedGeometryId ?? ''],
+        0.35,
+        0.12,
+      ]);
+    }
+
+    if (map.getLayer(UPLOADED_OUTLINE_LAYER_ID)) {
+      map.setPaintProperty(UPLOADED_OUTLINE_LAYER_ID, 'line-color', [
+        'case',
+        ['==', ['get', '__geometryId'], selectedGeometryId ?? ''],
+        '#1d4ed8',
+        '#94a3b8',
+      ]);
+      map.setPaintProperty(UPLOADED_OUTLINE_LAYER_ID, 'line-width', [
+        'case',
+        ['==', ['get', '__geometryId'], selectedGeometryId ?? ''],
+        2.4,
+        1.2,
+      ]);
+    }
+
+    if (selectedGeometryId) {
+      const target = uploadedGeometries.find((geometry) => geometry.id === selectedGeometryId);
+      if (target) {
+        const [minLng, minLat, maxLng, maxLat] = target.bbox;
+        try {
+          const bounds = new mapboxgl.LngLatBounds([minLng, minLat], [maxLng, maxLat]);
+          // Avoid repeated fit
+          if (lastFitGeometryRef.current !== selectedGeometryId) {
+            map.fitBounds(bounds, { padding: 80, maxZoom: Math.max(map.getZoom(), 17) });
+            lastFitGeometryRef.current = selectedGeometryId;
+          }
+        } catch (error) {
+          console.warn('Failed to fit bounds for geometry', error);
+        }
+      }
+    }
+  }, [selectedGeometryId, uploadedGeometries]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const shadeMap = shadeMapRef.current;
+
+    if (!map || !shadeMap || !shadowLoaded) {
+      return;
+    }
+
+    if (!selectedGeometryId) {
+      return;
+    }
+
+    const geometryEntry = uploadedGeometries.find((item) => item.id === selectedGeometryId);
+    if (!geometryEntry) {
+      return;
+    }
+
+    const geometry = geometryEntry.feature.geometry;
+    if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) {
+      return;
+    }
+
+    if (!shadowSettingsState.showSunExposure) {
+      addStatusMessage?.('⚠️ 请先开启“🌈 太阳热力图”以计算日照时长。', 'warning');
+      return;
+    }
+
+    if (analysisInFlightRef.current) {
+      return;
+    }
+
+    const analysisKey = `${selectedGeometryId}|${currentDate.toISOString()}|${shadowSettingsState.showSunExposure ? '1' : '0'}`;
+    if (analysisKeyRef.current === analysisKey) {
+      return;
+    }
+
+    let cancelled = false;
+    analysisInFlightRef.current = true;
+
+    try {
+      const samples = generateSamplePointsForGeometry(geometry, geometryEntry.bbox);
+
+      const results: { lat: number; lng: number; shadowPercent: number; hoursOfSun: number }[] = [];
+
+      samples.forEach((samplePoint) => {
+        if (cancelled) return;
+        const projected = map.project({ lng: samplePoint[0], lat: samplePoint[1] });
+        let hoursOfSun = 0;
+
+        try {
+          if (typeof shadeMap.getHoursOfSun === 'function') {
+            const value = shadeMap.getHoursOfSun(projected.x, projected.y);
+            if (typeof value === 'number' && !Number.isNaN(value)) {
+              hoursOfSun = Math.max(0, value);
+            }
+          }
+        } catch (error) {
+          console.warn('getHoursOfSun failed', error);
+        }
+
+        const shadowPercent = hoursOfSun <= 0.1 ? 1 : 0;
+        results.push({
+          lat: samplePoint[1],
+          lng: samplePoint[0],
+          shadowPercent,
+          hoursOfSun,
+        });
+      });
+
+      const shadedCount = results.filter((item) => item.shadowPercent >= 1).length;
+      const sumSunlight = results.reduce((acc, item) => acc + item.hoursOfSun, 0);
+
+      const stats = {
+        shadedRatio: results.length ? shadedCount / results.length : 0,
+        avgSunlightHours: results.length ? sumSunlight / results.length : 0,
+        sampleCount: results.length,
+        generatedAt: new Date(),
+      };
+
+      if (!cancelled) {
+        setGeometryAnalysis({
+          geometryId: selectedGeometryId,
+          stats,
+          samples: results,
+        });
+        analysisKeyRef.current = analysisKey;
+        addStatusMessage?.('✅ 阴影分析完成。', 'info');
+      }
+    } catch (error) {
+      if (!cancelled) {
+        console.error('Geometry analysis failed', error);
+        addStatusMessage?.('❌ 阴影分析失败。', 'error');
+      }
+    } finally {
+      analysisInFlightRef.current = false;
+    }
+
+    return () => {
+      cancelled = true;
+      analysisInFlightRef.current = false;
+    };
+  }, [
+    selectedGeometryId,
+    uploadedGeometries,
+    currentDate,
+    shadowSettingsState.showSunExposure,
+    shadowLoaded,
+    addStatusMessage,
+    setGeometryAnalysis,
+  ]);
 
   // Load the shadow simulator script on demand
   const loadShadowSimulator = useCallback(() => {

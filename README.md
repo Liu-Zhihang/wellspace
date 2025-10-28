@@ -9,6 +9,7 @@ ShadowMap visualises urban building shadows and sunlight exposure. The repositor
 - **Multiple data sources** – WFS, cached datasets, DEM elevation tiles with fallbacks.
 - **Weather-aware shading** – GFS-derived cloud attenuation with local caching.
 - **Performance helpers** – multi-level cache, smart shadow scheduler, debounced updates.
+- **Geometry analysis (in progress)** – upcoming ability to upload GeoJSON polygons for shadow coverage & sunlight statistics (`REQ-ANALYSIS-01`).
 
 ## Repository Layout
 
@@ -51,7 +52,8 @@ Copy `.env.example` to `.env` and provide WFS credentials before starting the AP
 
 1. Fix the remaining TypeScript errors in the frontend and restore a clean build.
 2. Maintain the Clean-only viewport and continue polishing the consolidated UI.
-3. Keep structure/plan/docs up to date to make collaboration predictable.
+3. Design and implement the new geometry-upload analysis module (`REQ-ANALYSIS-01`).
+4. Keep structure/plan/docs up to date to make collaboration predictable.
 
 See `DEVELOPMENT_PLAN.md` for the sprint plan and task status.
 

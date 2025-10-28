@@ -38,7 +38,11 @@ Key entry points:
 - `components/Map/ShadowMapViewport.tsx` – ShadeMap + Mapbox GL viewport.
 - `components/UI/CleanControlPanel.tsx` – time/shadow/style controls.
 - `hooks/useShadowMap.ts` – orchestrates map store, ShadeMap integration.
+- `hooks/useShadowAnalysis.ts` – prototype shadow/sunlight sampling helpers.
+- `components/Analysis/AnalysisPanel.tsx` – right sidebar summary for analysis output.
 - `services/wfsBuildingService.ts` – helpers for the building WFS proxy.
+
+> Upcoming (`REQ-ANALYSIS-01`): extend the upload workflow so GeoJSON polygons feed the analysis hooks and panel, with exportable summaries.
 
 Build tooling: Vite + pnpm (`pnpm run dev`, `pnpm run build`).
 
