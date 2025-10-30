@@ -391,10 +391,10 @@ export const LeftIconToolbar: React.FC = () => {
   const renderPanelContent = (panelId: Exclude<PanelId, null>): React.ReactNode => {
     if (panelId === 'time') {
       return (
-        <div className="w-64 space-y-3">
+        <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-gray-800">Date & Time</span>
-            <span className="text-xs text-gray-500">{formattedDate}</span>
+            <span className="text-sm font-semibold text-slate-900">Date & time</span>
+            <span className="text-xs text-slate-400">{formattedDate}</span>
           </div>
           <div className="grid grid-cols-3 gap-2">
             {presetHours.map((preset) => (
@@ -402,7 +402,7 @@ export const LeftIconToolbar: React.FC = () => {
                 key={preset.hour}
                 size="small"
                 type="text"
-                className="rounded-lg bg-slate-100 hover:bg-slate-200 text-gray-700"
+                className="h-9 rounded-lg border border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200"
                 onClick={() => setPresetHour(preset.hour)}
               >
                 {preset.label}
@@ -412,6 +412,7 @@ export const LeftIconToolbar: React.FC = () => {
           <div className="flex items-center justify-between">
             <Button
               type={isAnimating ? 'default' : 'primary'}
+              className="h-10 rounded-lg px-4"
               icon={
                 isAnimating ? (
                   <PauseCircleIcon className="h-4 w-4" />
@@ -423,7 +424,7 @@ export const LeftIconToolbar: React.FC = () => {
             >
               {isAnimating ? 'Pause' : 'Animate'}
             </Button>
-            <span className="text-xs text-gray-500">Timeline playback</span>
+            <span className="text-xs text-slate-400">Timeline playback</span>
           </div>
         </div>
       );
@@ -431,9 +432,9 @@ export const LeftIconToolbar: React.FC = () => {
 
     if (panelId === 'shadow') {
       return (
-        <div className="w-64 space-y-4">
+        <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-gray-800">Shadow Layer</span>
+            <span className="text-sm font-semibold text-slate-900">Shadow layer</span>
             <Switch
               size="small"
               checked={mapSettings.showShadowLayer}
@@ -442,7 +443,7 @@ export const LeftIconToolbar: React.FC = () => {
           </div>
 
           <div>
-            <div className="flex items-center justify-between text-xs text-gray-500">
+            <div className="flex items-center justify-between text-xs text-slate-400">
               <span>Opacity</span>
               <span>{Math.round(mapSettings.shadowOpacity * 100)}%</span>
             </div>
@@ -457,7 +458,7 @@ export const LeftIconToolbar: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500">Color</span>
+            <span className="text-xs text-slate-400">Color</span>
             <input
               type="color"
               value={mapSettings.shadowColor}
@@ -482,9 +483,12 @@ export const LeftIconToolbar: React.FC = () => {
         : 'Not loaded';
 
       return (
-        <div className="w-64 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-gray-800">Building data</span>
+        <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Building data</p>
+              <p className="text-xs text-slate-400">Manage cached footprints for this view</p>
+            </div>
             <span className={`text-xs font-medium ${statusClass}`}>{statusLabel}</span>
           </div>
 
@@ -492,6 +496,7 @@ export const LeftIconToolbar: React.FC = () => {
             type="primary"
             icon={<BuildingOfficeIcon className="h-4 w-4" />}
             block
+            className="h-11 rounded-xl"
             loading={isLoadingBuildings}
             disabled={!viewportActions.loadBuildings}
             onClick={() =>
@@ -504,7 +509,7 @@ export const LeftIconToolbar: React.FC = () => {
             {buildingsLoaded ? 'Reload buildings' : 'Load buildings'}
           </Button>
 
-          <div className="flex items-center justify-between text-xs text-gray-600">
+          <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">
             <span>Auto-load after map move</span>
             <Switch
               size="small"
@@ -517,6 +522,7 @@ export const LeftIconToolbar: React.FC = () => {
             danger
             icon={<TrashIcon className="h-4 w-4" />}
             block
+            className="h-11 rounded-xl"
             disabled={
               !viewportActions.clearBuildings || (!buildingsLoaded && !shadowSimulatorReady)
             }
@@ -534,10 +540,10 @@ export const LeftIconToolbar: React.FC = () => {
             Clear building & shadow data
           </Button>
 
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-gray-500">
-            Building footprints are refreshed for the current viewport. Toggle auto-load if you
-            prefer manual control while exploring the map.
-          </div>
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            Building footprints refresh for the active viewport. Disable auto-load if you prefer
+            manual requests while exploring the map.
+          </p>
         </div>
       );
     }
@@ -546,9 +552,12 @@ export const LeftIconToolbar: React.FC = () => {
       const readyClass = shadowSimulatorReady ? 'text-emerald-600' : 'text-gray-500';
 
       return (
-        <div className="w-64 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-gray-800">Shadow simulator</span>
+        <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Shadow simulator</p>
+              <p className="text-xs text-slate-400">Control exposure heatmap and recalculation</p>
+            </div>
             <span className={`text-xs font-medium ${readyClass}`}>
               {shadowSimulatorReady ? 'Ready' : 'Idle'}
             </span>
@@ -567,6 +576,7 @@ export const LeftIconToolbar: React.FC = () => {
             type="primary"
             icon={<BoltIcon className="h-4 w-4" />}
             block
+            className="h-11 rounded-xl"
             loading={isInitialisingShadow}
             disabled={!viewportActions.initShadowSimulator || !buildingsLoaded}
             onClick={() =>
@@ -583,18 +593,42 @@ export const LeftIconToolbar: React.FC = () => {
             {shadowSimulatorReady ? 'Recalculate shadows' : 'Initialise shadows'}
           </Button>
 
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-gray-500">
-            Enable the sun exposure layer to populate geometry analytics. Initialisation may take a
-            few seconds for dense urban scenes.
+          <div className="grid gap-2">
+            <Button
+              block
+              className="h-10 rounded-lg border border-blue-200 text-sm font-semibold text-blue-600 hover:border-blue-300"
+              onClick={() => {
+                toggleSunExposureSetting(true);
+                updateMapSettings({ showShadowLayer: false });
+                addStatusMessage?.('Sun exposure heatmap highlighted while shadows are hidden.', 'info');
+              }}
+            >
+              Highlight exposure heatmap
+            </Button>
+            <Button
+              block
+              className="h-10 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:border-slate-300"
+              onClick={() => {
+                updateMapSettings({ showShadowLayer: true });
+                addStatusMessage?.('Shadow layer restored. Adjust exposure toggle as needed.', 'info');
+              }}
+            >
+              Restore shadow layer
+            </Button>
           </div>
+
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            Enable the sun exposure heatmap to populate geometry analytics. Initialisation can take a
+            few seconds for dense urban scenes.
+          </p>
         </div>
       );
     }
 
     if (panelId === 'style') {
       return (
-        <div className="w-64 space-y-2">
-          <span className="text-sm font-semibold text-gray-800">Base Map</span>
+        <div className="w-72 max-w-xs space-y-3 px-4 py-3 text-slate-700">
+          <span className="text-sm font-semibold text-slate-900">Base map</span>
           {baseMapPresets.map((preset) => (
             <Button
               key={preset.id}
@@ -602,7 +636,7 @@ export const LeftIconToolbar: React.FC = () => {
               className={`text-left normal-case flex items-start justify-between rounded-xl border transition-colors ${
                 selectedBaseMap === preset.id
                   ? 'border-blue-400 bg-blue-50 text-blue-700'
-                  : 'border-transparent bg-slate-100 text-gray-700 hover:bg-slate-200'
+                  : 'border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
               onClick={() => handleBaseMapChange(preset.id)}
             >
@@ -621,22 +655,22 @@ export const LeftIconToolbar: React.FC = () => {
     }
 
     return (
-      <div className="w-60 space-y-3">
+      <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
         <div>
-          <span className="text-sm font-semibold text-gray-800">Add file to map</span>
-          <p className="text-xs text-gray-500">Supported: .tif .tiff .gpx .kml .json .geojson</p>
+          <span className="text-sm font-semibold text-slate-900">Add file to map</span>
+          <p className="text-xs text-slate-400">Supported: .tif .tiff .gpx .kml .json .geojson</p>
         </div>
         <Button
           type="primary"
           icon={<ArrowUpTrayIcon className="h-4 w-4" />}
           onClick={handleUploadClick}
-          className="w-full"
+          className="h-11 w-full rounded-xl"
         >
           Choose files
         </Button>
-        <div className="rounded-lg bg-slate-50 p-3 text-[11px] text-gray-500">
-          Drag & drop support and on-map placement tools are planned. For now we will auto-align the uploaded layer to the current viewport.
-        </div>
+        <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Drag & drop support and on-map placement tools are coming soon. For now, uploaded layers align to the current viewport.
+        </p>
       </div>
     );
   };
@@ -671,28 +705,14 @@ export const LeftIconToolbar: React.FC = () => {
     { id: 'upload', label: 'Add file to map', icon: <ArrowUpTrayIcon className="h-5 w-5" /> },
   ];
 
+  const baseButtonClasses =
+    'flex h-12 w-12 items-center justify-center rounded-xl border transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white shadow-lg';
+  const activeButtonClasses = 'border-blue-500 bg-blue-600 text-white shadow-xl focus:ring-blue-300';
+  const inactiveButtonClasses = 'border-transparent bg-white text-slate-600 hover:bg-slate-100 focus:ring-blue-200';
+
   return (
-    <div
-      className="inline-flex flex-col gap-4"
-      style={{
-        position: 'fixed',
-        zIndex: 300,
-        left: '1.5rem',
-        bottom: '6rem',
-        width: 'fit-content',
-        pointerEvents: 'none',
-      }}
-    >
-      <div
-        className="rounded-2xl border border-white/40 bg-white/95 p-3 shadow-2xl"
-        style={{
-          borderRadius: '1rem',
-          border: '1px solid rgba(255,255,255,0.4)',
-          background: 'rgba(255,255,255,0.95)',
-          boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25)',
-          pointerEvents: 'auto',
-        }}
-      >
+    <div className="pointer-events-none fixed left-6 bottom-24 z-40 flex flex-col gap-4">
+      <div className="pointer-events-auto rounded-2xl border border-white/40 bg-white/95 p-3 shadow-2xl backdrop-blur">
         <div className="flex flex-col gap-4">
           {toolbarItems.map((item) => (
             <Popover
@@ -700,7 +720,7 @@ export const LeftIconToolbar: React.FC = () => {
               trigger="click"
               placement="right"
               overlayClassName="shadow-map-toolbar-popover"
-              overlayStyle={{ zIndex: 1400, maxWidth: 320 }}
+              overlayStyle={{ zIndex: 1400 }}
               open={openPanel === item.id}
               onOpenChange={(open) => handleOpenChange(item.id, open)}
               content={renderPanelContent(item.id)}
@@ -709,24 +729,8 @@ export const LeftIconToolbar: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleOpenChange(item.id, openPanel !== item.id)}
-                  className={`flex h-12 w-12 items-center justify-center rounded-xl border transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-white ${
-                    openPanel === item.id
-                      ? 'border-blue-400 bg-blue-600 text-white shadow-xl focus:ring-blue-300'
-                      : 'border-transparent bg-white text-slate-600 shadow-lg hover:bg-slate-100 focus:ring-blue-200'
-                  }`}
+                  className={`${baseButtonClasses} ${openPanel === item.id ? activeButtonClasses : inactiveButtonClasses}`}
                   aria-pressed={openPanel === item.id}
-                  style={{
-                    height: '3rem',
-                    width: '3rem',
-                    borderRadius: '0.75rem',
-                    border: openPanel === item.id ? '1px solid #60a5fa' : '1px solid rgba(148, 163, 184, 0.25)',
-                    background: openPanel === item.id ? '#2563eb' : 'rgba(255, 255, 255, 0.95)',
-                    color: openPanel === item.id ? '#ffffff' : '#475569',
-                    boxShadow: openPanel === item.id
-                      ? '0 14px 32px rgba(37, 99, 235, 0.35)'
-                      : '0 10px 28px rgba(15, 23, 42, 0.18)',
-                    transition: 'all 0.18s ease',
-                  }}
                 >
                   {item.icon}
                 </button>

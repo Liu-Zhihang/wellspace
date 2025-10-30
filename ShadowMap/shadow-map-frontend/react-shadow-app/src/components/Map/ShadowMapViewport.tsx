@@ -131,7 +131,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const shadeMapRef = useRef<any>(null);
-  const [statusMessage, setStatusMessage] = useState('Preparing…');
+  const [, setStatusMessage] = useState('Preparing…');
   const loadBuildingsRef = useRef<(() => Promise<void>) | undefined>(undefined); // Preserve latest loader for debounced callbacks
   const moveEndTimeoutRef = useRef<number | null>(null); // Debounce timer used by moveend handler
   const tracePlaybackRef = useRef<number | null>(null);
@@ -1210,6 +1210,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     const map = mapRef.current;
     const buildingLayerId = 'clean-buildings-extrusion';
+    const sunExposureActive = mapSettings.showSunExposure || shadowSettingsState.showSunExposure;
 
     console.log('👁️ Updating layer visibility:', {
       buildings: mapSettings.showBuildingLayer,
@@ -1232,8 +1233,11 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         // Shadow simulator doesn't have a direct visibility method, 
         // but we can control it via opacity
         if (typeof shadeMapRef.current.setOpacity === 'function') {
-          const effectiveOpacity = mapSettings.showShadowLayer 
-            ? getEffectiveOpacity(mapSettings.shadowOpacity)
+          const adjustedShadowOpacity = sunExposureActive
+            ? mapSettings.shadowOpacity * 0.25
+            : mapSettings.shadowOpacity;
+          const effectiveOpacity = mapSettings.showShadowLayer
+            ? getEffectiveOpacity(adjustedShadowOpacity)
             : 0;
           shadeMapRef.current.setOpacity(effectiveOpacity);
           console.log(`🌑 Shadow layer: ${mapSettings.showShadowLayer ? 'visible' : 'hidden'}`);
@@ -1242,7 +1246,14 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         console.error('❌ Error controlling shadow visibility:', error);
       }
     }
-  }, [mapSettings.showBuildingLayer, mapSettings.showShadowLayer, mapSettings.shadowOpacity, getEffectiveOpacity]);
+  }, [
+    mapSettings.showBuildingLayer,
+    mapSettings.showShadowLayer,
+    mapSettings.shadowOpacity,
+    mapSettings.showSunExposure,
+    shadowSettingsState.showSunExposure,
+    getEffectiveOpacity,
+  ]);
 
   useEffect(() => {
     const shadeMap = shadeMapRef.current;
@@ -1387,8 +1398,15 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     mapRef.current = map;
 
+    const handleResize = () => {
+      if (mapRef.current) {
+        mapRef.current.resize();
+      }
+    };
+
     const handleLoad = async () => {
       console.log('✅ Map load complete');
+      map.resize();
 
       try {
         const shadowLoader = loadShadowSimulatorRef.current ?? loadShadowSimulator;
@@ -1425,12 +1443,14 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     map.on('load', handleLoad);
     map.on('moveend', handleMoveEnd);
+    window.addEventListener('resize', handleResize);
 
     return () => {
       if (moveEndTimeoutRef.current) {
         window.clearTimeout(moveEndTimeoutRef.current);
         moveEndTimeoutRef.current = null;
       }
+      window.removeEventListener('resize', handleResize);
       map.off('load', handleLoad);
       map.off('moveend', handleMoveEnd);
       if (mapRef.current) {
@@ -1456,56 +1476,8 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         }
       `}</style>
       {/* Map container */}
-      <div ref={mapContainerRef} className="w-full h-full" />
+      <div ref={mapContainerRef} className="h-full w-full" />
       <GeometryAnalysisOverlay />
-      {/* Status block */}
-      <div
-        className="absolute bottom-4 left-6 z-30"
-        style={{
-          position: 'absolute',
-          left: '1.5rem',
-          bottom: '1.5rem',
-          zIndex: 200,
-        }}
-      >
-        <div
-          className="bg-white/90 backdrop-blur-md rounded-lg shadow-lg border border-white/20 px-4 py-3"
-          style={{
-            borderRadius: '0.75rem',
-            background: 'rgba(255, 255, 255, 0.9)',
-            padding: '0.75rem 1rem',
-            boxShadow: '0 18px 40px rgba(15, 23, 42, 0.18)',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-          }}
-        >
-          <div className="text-sm text-gray-700 space-y-1">
-            <div className="flex items-center">
-              <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-              Status: {statusMessage}
-            </div>
-            <div className="flex items-center">
-              <div
-                className={`w-2 h-2 rounded-full mr-2 ${isLoadingBuildings
-                  ? 'bg-amber-500'
-                  : buildingsLoaded
-                  ? 'bg-green-500'
-                  : 'bg-gray-400'}`}
-              ></div>
-              Buildings: {isLoadingBuildings ? 'Loading…' : buildingsLoaded ? 'Loaded' : 'Not loaded'}
-            </div>
-            <div className="flex items-center">
-              <div
-                className={`w-2 h-2 rounded-full mr-2 ${isInitialisingShadow
-                  ? 'bg-amber-500'
-                  : shadowSimulatorReady
-                  ? 'bg-green-500'
-                  : 'bg-gray-400'}`}
-              ></div>
-              Shadows: {isInitialisingShadow ? 'Initialising…' : shadowSimulatorReady ? 'Ready' : 'Not ready'}
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

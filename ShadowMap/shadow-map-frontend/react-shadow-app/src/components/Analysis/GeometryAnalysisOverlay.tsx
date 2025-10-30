@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { SunIcon } from '@heroicons/react/24/outline';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 
 export const GeometryAnalysisOverlay: React.FC = () => {
@@ -11,6 +12,7 @@ export const GeometryAnalysisOverlay: React.FC = () => {
     mapSettings,
     viewportActions,
     addStatusMessage,
+    updateMapSettings,
   } = useShadowMapStore();
 
   const selectedGeometry = useMemo(
@@ -23,146 +25,94 @@ export const GeometryAnalysisOverlay: React.FC = () => {
   }
 
   const analysis = selectedGeometryId ? geometryAnalyses[selectedGeometryId] : undefined;
-  const hasHeatmapEnabled = mapSettings.showSunExposure;
+  const heatmapEnabled = mapSettings.showSunExposure;
 
   const handleRunAnalysis = async () => {
     if (!viewportActions.initShadowSimulator) {
-      addStatusMessage?.('地图尚未准备好重算，请稍候再试。', 'warning');
+      addStatusMessage?.('Map viewport is not ready to run the analysis yet.', 'warning');
       return;
     }
 
     try {
-      addStatusMessage?.(`开始重新分析「${selectedGeometry.name}」的曝光情况…`, 'info');
+      addStatusMessage?.(`Re-running exposure analysis for "${selectedGeometry.name}"...`, 'info');
       await viewportActions.initShadowSimulator();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      addStatusMessage?.(`重新分析失败：${message}`, 'error');
+      addStatusMessage?.(`Exposure analysis failed: ${message}`, 'error');
     }
   };
 
+  const handleShowHeatmap = () => {
+    updateMapSettings({ showSunExposure: true, showShadowLayer: false });
+    addStatusMessage?.('Sun exposure heatmap enabled. Shadow layer dimmed for clarity.', 'info');
+  };
+
+  const simulatorStatus = shadowSimulatorReady
+    ? 'Shadow simulator ready'
+    : isInitialisingShadow
+    ? 'Initialising shadow simulator...'
+    : 'Load buildings to initialise shadows';
+
   return (
-    <aside
-      style={{
-        position: 'fixed',
-        right: '1.5rem',
-        top: '6rem',
-        width: '320px',
-        zIndex: 260,
-        pointerEvents: 'auto',
-      }}
-    >
-      <div
-        style={{
-          borderRadius: '16px',
-          padding: '18px 20px',
-          background: 'rgba(15, 23, 42, 0.85)',
-          color: '#f8fafc',
-          boxShadow: '0 18px 38px rgba(15, 23, 42, 0.36)',
-          backdropFilter: 'blur(12px)',
-        }}
-      >
-        <header style={{ marginBottom: '12px' }}>
-          <div style={{ fontSize: '12px', letterSpacing: '0.08em', opacity: 0.8 }}>SELECTED AREA</div>
-          <div style={{ fontSize: '18px', fontWeight: 600, marginTop: '4px' }}>{selectedGeometry.name}</div>
+    <aside className="pointer-events-none fixed right-6 top-24 z-40 w-80 max-w-xs">
+      <div className="pointer-events-auto rounded-3xl bg-slate-950/85 p-6 text-slate-100 shadow-2xl backdrop-blur">
+        <header className="mb-4">
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Selected geometry</p>
+          <h3 className="mt-2 text-lg font-semibold text-slate-50">{selectedGeometry.name}</h3>
         </header>
 
-        <section style={{ fontSize: '13px', lineHeight: 1.6, opacity: 0.92 }}>
-          <div>
-            状态：
-            {shadowSimulatorReady
-              ? '阴影模拟已就绪'
-              : isInitialisingShadow
-              ? '正在初始化阴影模拟…'
-              : '等待阴影模拟准备'}
+        <section className="space-y-2 text-sm text-slate-200/90">
+          <div className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
+            <div>
+              <p className="font-medium text-slate-100">{simulatorStatus}</p>
+              <p className="text-xs text-slate-300">
+                Sun exposure heatmap {heatmapEnabled ? 'is visible' : 'is currently hidden'}.
+              </p>
+            </div>
           </div>
-          <div>日照热力：{hasHeatmapEnabled ? '已开启' : '未开启（会自动启用）'}</div>
-          <div>控制按钮：左侧工具栏「☀️」可以随时开启/关闭</div>
         </section>
 
         {analysis ? (
-          <section
-            style={{
-              marginTop: '14px',
-              padding: '12px 14px',
-              borderRadius: '12px',
-              background: 'rgba(96, 165, 250, 0.18)',
-            }}
-          >
-            <div style={{ fontSize: '12px', letterSpacing: '0.08em', opacity: 0.8, marginBottom: '6px' }}>
-              ANALYSIS SNAPSHOT
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span>平均日照小时</span>
-              <span style={{ fontWeight: 600 }}>
-                {analysis.stats.avgSunlightHours.toFixed(2)} h
-              </span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span>阴影覆盖率</span>
-              <span style={{ fontWeight: 600 }}>
-                {(analysis.stats.shadedRatio * 100).toFixed(1)}%
-              </span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', opacity: 0.82 }}>
-              <span>采样点</span>
-              <span>{analysis.stats.sampleCount}</span>
-            </div>
+          <section className="mt-5 rounded-2xl bg-blue-500/15 p-4 text-sm text-slate-100">
+            <p className="mb-3 text-[11px] uppercase tracking-[0.2em] text-slate-200/70">Exposure snapshot</p>
+            <dl className="space-y-2">
+              <div className="flex items-center justify-between">
+                <dt className="text-slate-200/80">Average sunlight hours</dt>
+                <dd className="font-semibold text-slate-50">{analysis.stats.avgSunlightHours.toFixed(2)} h</dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt className="text-slate-200/80">Shadow coverage</dt>
+                <dd className="font-semibold text-slate-50">{(analysis.stats.shadedRatio * 100).toFixed(1)}%</dd>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <dt className="text-slate-300">Sample count</dt>
+                <dd className="text-slate-100">{analysis.stats.sampleCount}</dd>
+              </div>
+            </dl>
           </section>
         ) : (
-          <section
-            style={{
-              fontSize: '13px',
-              marginTop: '14px',
-              padding: '10px 12px',
-              borderRadius: '12px',
-              background: 'rgba(148, 163, 184, 0.12)',
-              lineHeight: 1.6,
-            }}
-          >
-            上传的多边形准备就绪，开启日照热力图后点击下方按钮即可生成曝光分析。
+          <section className="mt-5 rounded-2xl border border-slate-700/60 bg-slate-900/60 p-4 text-sm text-slate-200/80">
+            Upload a polygon and enable the Sun Exposure toggle to generate an exposure snapshot for this area.
           </section>
         )}
 
-        <footer style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
+        <footer className="mt-5 flex items-center gap-3">
           <button
             type="button"
             onClick={handleRunAnalysis}
             disabled={isInitialisingShadow}
-            style={{
-              flex: 1,
-              height: '40px',
-              borderRadius: '12px',
-              border: 'none',
-              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-              color: '#fff',
-              fontWeight: 600,
-              letterSpacing: '0.02em',
-              cursor: isInitialisingShadow ? 'not-allowed' : 'pointer',
-              opacity: isInitialisingShadow ? 0.6 : 1,
-              transition: 'transform 0.15s ease',
-            }}
+            className="flex-1 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:from-blue-600 hover:to-indigo-600 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {analysis ? '重新分析' : '开始分析'}
+            {analysis ? 'Refresh Analysis' : 'Run Exposure Analysis'}
           </button>
           <button
             type="button"
-            onClick={() => {
-              addStatusMessage?.('若看不到热力图，可在左侧 ☀️ 面板检查是否已开启 Sun Exposure。', 'info');
-            }}
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '12px',
-              border: '1px solid rgba(148, 163, 184, 0.4)',
-              background: 'rgba(15, 23, 42, 0.35)',
-              color: '#e2e8f0',
-              fontSize: '18px',
-              cursor: 'pointer',
-              transition: 'background 0.2s ease',
-            }}
-            title="帮助"
+            onClick={handleShowHeatmap}
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-600/70 bg-slate-900/70 text-slate-200 transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            aria-label="Ensure heatmap is visible"
           >
-            ?
+            <SunIcon className="h-5 w-5" />
           </button>
         </footer>
       </div>
