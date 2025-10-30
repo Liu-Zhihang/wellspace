@@ -67,11 +67,11 @@ export type ShadowAnalysisResult = {
     minShadowPercent: number;
     stdDev: number;
     shadowLevels: {
-      无阴影: number;
-      轻微阴影: number;
-      中等阴影: number;
-      重度阴影: number;
-      极重阴影: number;
+      noShadow: number;
+      lightShadow: number;
+      moderateShadow: number;
+      heavyShadow: number;
+      extremeShadow: number;
     };
   };
   metadata: {

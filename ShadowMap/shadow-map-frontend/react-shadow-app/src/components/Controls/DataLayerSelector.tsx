@@ -31,7 +31,7 @@ export const DataLayerSelector = () => {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
       <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-        🗂️ 数据层控制
+        🗂️ Data Layers
       </h3>
       
       <div className="space-y-3">
@@ -65,14 +65,14 @@ export const DataLayerSelector = () => {
                     onChange={(e) => syncLayerState(layer.id, e.target.checked)}
                     className="mr-2 h-4 w-4 text-blue-600 rounded border-gray-300"
                   />
-                  <span className="text-xs text-gray-500">{isEnabled ? '开启' : '关闭'}</span>
+                  <span className="text-xs text-gray-500">{isEnabled ? 'Enabled' : 'Disabled'}</span>
                 </label>
               </div>
 
               {isEnabled && (
                 <div className="space-y-2 border-t border-gray-200 pt-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-600">透明度</span>
+                    <span className="text-xs text-gray-600">Opacity</span>
                     <span className="text-xs text-gray-500">{Math.round(layer.opacity * 100)}%</span>
                   </div>
                   <input
@@ -87,7 +87,7 @@ export const DataLayerSelector = () => {
 
                   {layer.color && (
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-600">颜色</span>
+                      <span className="text-xs text-gray-600">Color</span>
                       <input
                         type="color"
                         value={layer.color}
@@ -98,11 +98,11 @@ export const DataLayerSelector = () => {
                   )}
 
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-600">渲染模式</span>
+                    <span className="text-xs text-gray-600">Render mode</span>
                     <span className="text-xs px-2 py-1 bg-gray-100 rounded text-gray-600">
-                      {layer.renderMode === 'overlay' && '🎭 覆盖层'}
-                      {layer.renderMode === 'heatmap' && '🌈 热力图'}
-                      {layer.renderMode === 'vector' && '📐 矢量'}
+                      {layer.renderMode === 'overlay' && '🎭 Overlay'}
+                      {layer.renderMode === 'heatmap' && '🌈 Heatmap'}
+                      {layer.renderMode === 'vector' && '📐 Vector'}
                     </span>
                   </div>
                 </div>
@@ -120,7 +120,7 @@ export const DataLayerSelector = () => {
             }}
             className="flex-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
           >
-            全部启用
+            Enable all
           </button>
           <button
             onClick={() => {
@@ -128,18 +128,18 @@ export const DataLayerSelector = () => {
             }}
             className="flex-1 px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
           >
-            全部禁用
+            Disable all
           </button>
         </div>
       </div>
       
       <div className="mt-3 p-2 bg-gray-50 rounded text-xs text-gray-600">
         <div className="flex items-center justify-between">
-          <span>当前活跃层:</span>
+          <span>Active layer:</span>
           <span className="font-medium">{dataLayers[activeDataLayer].icon} {dataLayers[activeDataLayer].name}</span>
         </div>
         <div className="flex items-center justify-between mt-1">
-          <span>启用层数:</span>
+          <span>Enabled layers:</span>
           <span className="font-medium">{layers.filter((layer) => getLayerEnabled(layer, mapSettings)).length}/{layers.length}</span>
         </div>
       </div>

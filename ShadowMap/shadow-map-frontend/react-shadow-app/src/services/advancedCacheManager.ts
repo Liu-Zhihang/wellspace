@@ -2,7 +2,6 @@ import type { BuildingTileData } from '../types/index.ts';
 
 const API_BASE_URL = 'http://localhost:3500/api';
 
-// 缓存配置
 export interface CacheStats {
   memorySize: number;
   storageSize: number;
@@ -15,39 +14,37 @@ export interface CacheStats {
 }
 
 interface CacheConfig {
-  maxMemorySize: number;     // 内存缓存最大条目数
-  maxStorageSize: number;    // 本地存储最大条目数
-  memoryTTL: number;         // 内存缓存TTL
-  storageTTL: number;        // 本地存储TTL
-  preloadDistance: number;   // 预加载距离（瓦片数量）
-  compressionEnabled: boolean; // 是否启用压缩
+  maxMemorySize: number;     // Maximum in-memory items
+  maxStorageSize: number;    // Maximum persisted items
+  memoryTTL: number;         // In-memory TTL
+  storageTTL: number;        // Persistent TTL
+  preloadDistance: number;   // Preload distance in tiles
+  compressionEnabled: boolean; // Enable compression
 }
 
 const CACHE_CONFIG: CacheConfig = {
-  maxMemorySize: 500,        // 内存缓存500个瓦片
-  maxStorageSize: 2000,      // 本地存储2000个瓦片
-  memoryTTL: 10 * 60 * 1000, // 内存缓存10分钟
-  storageTTL: 24 * 60 * 60 * 1000, // 本地存储24小时
-  preloadDistance: 2,        // 预加载周围2圈瓦片
-  compressionEnabled: true,  // 启用数据压缩
+  maxMemorySize: 500,        // 500 tiles in memory
+  maxStorageSize: 2000,      // 2000 tiles persisted
+  memoryTTL: 10 * 60 * 1000, // 10 minutes in memory
+  storageTTL: 24 * 60 * 60 * 1000, // 24 hours on disk
+  preloadDistance: 2,        // Preload two surrounding rings
+  compressionEnabled: true,  // 
 };
 
-// 缓存条目接口
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
   expiry: number;
-  size: number;              // 数据大小（字节）
-  compressed?: boolean;      // 是否压缩
-  accessCount: number;       // 访问次数
-  lastAccess: number;        // 最后访问时间
+  size: number;              // （）
+  compressed?: boolean;      // 
+  accessCount: number;       // 
+  lastAccess: number;        // 
 }
 
-// LRU缓存管理器
 class AdvancedCacheManager {
   private memoryCache = new Map<string, CacheEntry<any>>();
   private storageCache = new Map<string, CacheEntry<any>>();
-  private accessOrder = new Map<string, number>(); // LRU跟踪
+  private accessOrder = new Map<string, number>(); // LRU
   private hitCount = 0;
   private missCount = 0;
   private totalSize = 0;
@@ -58,7 +55,6 @@ class AdvancedCacheManager {
     this.loadFromLocalStorage();
   }
 
-  // 设置缓存数据
   async set<T>(key: string, data: T, ttl?: number, forceMemory = false): Promise<void> {
     const size = this.estimateSize(data);
     const entry: CacheEntry<T> = {
@@ -70,28 +66,22 @@ class AdvancedCacheManager {
       lastAccess: Date.now(),
     };
 
-    // 压缩大数据
     if (this.config.compressionEnabled && size > 10000) {
       entry.data = this.compress(data);
       entry.compressed = true;
     }
 
-    // 优先存储到内存缓存
     if (forceMemory || this.memoryCache.size < this.config.maxMemorySize) {
       this.setMemoryCache(key, entry);
     } else {
-      // 内存满了，使用LRU策略
       this.evictLRU();
       this.setMemoryCache(key, entry);
     }
 
-    // 同时存储到本地缓存（异步）
     this.setStorageCache(key, entry);
   }
 
-  // 获取缓存数据
   async get<T>(key: string): Promise<T | null> {
-    // 1. 首先检查内存缓存
     let entry = this.memoryCache.get(key);
     if (entry && !this.isExpired(entry)) {
       this.updateAccess(key, entry);
@@ -99,10 +89,8 @@ class AdvancedCacheManager {
       return this.getData<T>(entry);
     }
 
-    // 2. 检查本地存储缓存
     entry = this.storageCache.get(key);
     if (entry && !this.isExpired(entry)) {
-      // 提升到内存缓存
       this.promoteToMemory(key, entry);
       this.hitCount++;
       return this.getData<T>(entry);
@@ -112,11 +100,10 @@ class AdvancedCacheManager {
     return null;
   }
 
-  // 预加载瓦片数据
   async preloadTiles(centerZ: number, centerX: number, centerY: number): Promise<void> {
     const tilesToPreload = this.getTilesInRadius(centerZ, centerX, centerY, this.config.preloadDistance);
     
-    console.log(`🔄 预加载 ${tilesToPreload.length} 个瓦片`);
+    console.log(`🔄  ${tilesToPreload.length} `);
     
     const preloadPromises = tilesToPreload.map(async (tile) => {
       const key = `building-${tile.z}-${tile.x}-${tile.y}`;
@@ -125,7 +112,7 @@ class AdvancedCacheManager {
           const data = await this.fetchBuildingTile(tile.z, tile.x, tile.y);
           this.set(key, data, this.config.storageTTL);
         } catch (error) {
-          console.warn(`预加载瓦片 ${tile.z}/${tile.x}/${tile.y} 失败:`, error);
+          console.warn(` ${tile.z}/${tile.x}/${tile.y} :`, error);
         }
       }
     });
@@ -133,7 +120,6 @@ class AdvancedCacheManager {
     await Promise.allSettled(preloadPromises);
   }
 
-  // 智能清理过期数据
   cleanup(): number {
     const initialMemorySize = this.memoryCache.size;
     const initialStorageSize = this.storageCache.size;
@@ -141,7 +127,6 @@ class AdvancedCacheManager {
     const memoryKeys = Array.from(this.memoryCache.keys());
     const storageKeys = Array.from(this.storageCache.keys());
 
-    // 清理内存缓存
     memoryKeys.forEach(key => {
       const entry = this.memoryCache.get(key);
       if (entry && this.isExpired(entry)) {
@@ -151,7 +136,6 @@ class AdvancedCacheManager {
       }
     });
 
-    // 清理本地存储缓存
     storageKeys.forEach(key => {
       const entry = this.storageCache.get(key);
       if (entry && this.isExpired(entry)) {
@@ -161,11 +145,10 @@ class AdvancedCacheManager {
 
     this.saveToLocalStorage();
     const removedCount = (initialMemorySize - this.memoryCache.size) + (initialStorageSize - this.storageCache.size);
-    console.log(`🧹 缓存清理完成，内存: ${this.memoryCache.size}, 存储: ${this.storageCache.size}，清理了 ${removedCount} 项`);
+    console.log(`🧹 ，: ${this.memoryCache.size}, : ${this.storageCache.size}， ${removedCount} `);
     return removedCount;
   }
 
-  // 清空所有缓存
   clearAll(): void {
     this.memoryCache.clear();
     this.storageCache.clear();
@@ -174,18 +157,16 @@ class AdvancedCacheManager {
     this.hitCount = 0;
     this.missCount = 0;
     
-    // 清空localStorage
     try {
       localStorage.removeItem('shadow-cache-data');
       localStorage.removeItem('shadow-cache-meta');
     } catch (error) {
-      console.warn('无法清空localStorage缓存:', error);
+      console.warn('localStorage:', error);
     }
     
-    console.log('🗑️ 所有缓存已清空');
+    console.log('🗑️ ');
   }
 
-  // 获取缓存统计信息
   getStats(): CacheStats {
     const total = this.hitCount + this.missCount;
     const hitRate = total > 0 ? (this.hitCount / total) * 100 : 0;
@@ -202,12 +183,10 @@ class AdvancedCacheManager {
     };
   }
 
-  // 清空所有缓存
   async clear(): Promise<void> {
     this.clearAll();
   }
 
-  // 私有方法
   private setMemoryCache<T>(key: string, entry: CacheEntry<T>): void {
     this.memoryCache.set(key, entry);
     this.accessOrder.set(key, Date.now());
@@ -216,7 +195,6 @@ class AdvancedCacheManager {
 
   private setStorageCache<T>(key: string, entry: CacheEntry<T>): void {
     if (this.storageCache.size >= this.config.maxStorageSize) {
-      // 删除最旧的条目
       const oldestKey = this.getOldestStorageKey();
       if (oldestKey) {
         this.storageCache.delete(oldestKey);
@@ -232,7 +210,6 @@ class AdvancedCacheManager {
   private evictLRU(): void {
     if (this.accessOrder.size === 0) return;
     
-    // 找到最久未访问的key
     let oldestKey = '';
     let oldestTime = Date.now();
     
@@ -278,12 +255,10 @@ class AdvancedCacheManager {
   }
 
   private compress(data: any): any {
-    // 简单的JSON压缩（实际应用中可以使用pako等库）
     return JSON.stringify(data);
   }
 
   private decompress(data: any): any {
-    // 解压缩
     if (typeof data === 'string') {
       try {
         return JSON.parse(data);
@@ -340,10 +315,10 @@ class AdvancedCacheManager {
       if (stored) {
         const data = JSON.parse(stored);
         this.storageCache = new Map(data.storageCache || []);
-        console.log(`📦 从本地存储加载 ${this.storageCache.size} 个缓存条目`);
+        console.log(`📦  ${this.storageCache.size} `);
       }
     } catch (error) {
-      console.warn('加载本地缓存失败:', error);
+      console.warn(':', error);
     }
   }
 
@@ -355,7 +330,7 @@ class AdvancedCacheManager {
       };
       localStorage.setItem('shadowmap-cache', JSON.stringify(data));
     } catch (error) {
-      console.warn('保存本地缓存失败:', error);
+      console.warn(':', error);
     }
   }
 
@@ -368,12 +343,10 @@ class AdvancedCacheManager {
   }
 }
 
-// 创建高级缓存管理器实例
 const advancedCacheManager = new AdvancedCacheManager(CACHE_CONFIG);
 
-// 定期清理缓存
 setInterval(() => {
   advancedCacheManager.cleanup();
-}, 5 * 60 * 1000); // 每5分钟清理一次
+}, 5 * 60 * 1000); // 5
 
 export { advancedCacheManager };

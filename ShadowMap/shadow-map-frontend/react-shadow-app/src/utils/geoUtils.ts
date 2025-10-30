@@ -3,7 +3,6 @@ import type { SunPosition } from '../types/index.ts';
 
 export class GeoUtils {
   /**
-   * 计算指定时间和位置的太阳位置
    */
   static getSunPosition(date: Date, lat: number, lng: number): SunPosition {
     const sunPosition = SunCalc.getPosition(date, lat, lng);
@@ -14,7 +13,6 @@ export class GeoUtils {
   }
 
   /**
-   * 将经纬度转换为瓦片坐标
    */
   static latLngToTile(lat: number, lng: number, zoom: number): { x: number; y: number } {
     const n = Math.pow(2, zoom);
@@ -24,7 +22,6 @@ export class GeoUtils {
   }
 
   /**
-   * 将瓦片坐标转换为经纬度范围
    */
   static tileToBounds(x: number, y: number, zoom: number): {
     north: number;
@@ -42,7 +39,6 @@ export class GeoUtils {
   }
 
   /**
-   * 计算边界框内的瓦片列表
    */
   static getTilesInBounds(bounds: {
     north: number;
@@ -61,15 +57,13 @@ export class GeoUtils {
       }
     }
     
-    // 限制最大瓦片数量防止过多请求
     return tiles.slice(0, 20);
   }
 
   /**
-   * 计算两点之间的距离（米）
    */
   static calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
-    const R = 6371000; // 地球半径（米）
+    const R = 6371000;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLng = ((lng2 - lng1) * Math.PI) / 180;
     const a =
@@ -83,7 +77,6 @@ export class GeoUtils {
   }
 
   /**
-   * 格式化坐标显示
    */
   static formatCoordinate(value: number, isLatitude: boolean): string {
     const direction = isLatitude 
@@ -93,13 +86,12 @@ export class GeoUtils {
   }
 
   /**
-   * 计算阴影覆盖等级分布
    */
   static categorizeShadeLevel(shadowPercent: number): string {
-    if (shadowPercent < 10) return '无阴影';
-    if (shadowPercent < 25) return '轻微阴影';
-    if (shadowPercent < 50) return '中等阴影';
-    if (shadowPercent < 75) return '重度阴影';
-    return '极重阴影';
+    if (shadowPercent < 10) return 'No Shadow';
+    if (shadowPercent < 25) return 'Light Shadow';
+    if (shadowPercent < 50) return 'Moderate Shadow';
+    if (shadowPercent < 75) return 'Heavy Shadow';
+    return 'Extreme Shadow';
   }
 }

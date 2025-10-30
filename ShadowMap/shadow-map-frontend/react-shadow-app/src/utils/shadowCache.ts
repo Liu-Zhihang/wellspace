@@ -1,6 +1,4 @@
 /**
- * 阴影计算智能缓存系统
- * 解决相同区域重复计算问题
  */
 
 interface CacheItem {
@@ -31,8 +29,8 @@ interface CacheStats {
 
 export class ShadowCache {
   private cache = new Map<string, CacheItem>();
-  private maxSize = 50;           // 最大缓存项数
-  private ttl = 10 * 60 * 1000;   // 10分钟TTL
+  private maxSize = 50;
+  private ttl = 10 * 60 * 1000;
   private stats: CacheStats = {
     hits: 0,
     misses: 0,
@@ -43,7 +41,6 @@ export class ShadowCache {
   };
 
   /**
-   * 生成缓存键 - 基于地理位置、缩放级别和时间
    */
   private generateKey(
     bounds: { north: number; south: number; east: number; west: number },
@@ -62,22 +59,20 @@ export class ShadowCache {
       date.getMonth(),
       date.getDate(),
       date.getHours(),
-      Math.floor(date.getMinutes() / 15) // 15分钟精度
+      Math.floor(date.getMinutes() / 15)
     ].join('_');
   }
 
   /**
-   * 根据缩放级别确定坐标精度
    */
   private getCoordinatePrecision(zoom: number): number {
-    if (zoom >= 18) return 100000;      // 5位小数
-    if (zoom >= 15) return 10000;       // 4位小数
-    if (zoom >= 12) return 1000;        // 3位小数
-    return 100;                         // 2位小数
+    if (zoom >= 18) return 100000;
+    if (zoom >= 15) return 10000;
+    if (zoom >= 12) return 1000;
+    return 100;
   }
 
   /**
-   * 检查两个边界框是否相似
    */
   private isSimilarBounds(
     bounds1: { north: number; south: number; east: number; west: number },
@@ -91,7 +86,6 @@ export class ShadowCache {
   }
 
   /**
-   * 获取缓存数据
    */
   get(
     bounds: { north: number; south: number; east: number; west: number },
@@ -104,10 +98,8 @@ export class ShadowCache {
     const item = this.cache.get(key);
 
     if (!item) {
-      // 尝试查找相似的缓存项
       const similarItem = this.findSimilarCache(bounds, zoom, date);
       if (similarItem) {
-        console.log('🎯 找到相似缓存项');
         this.stats.hits++;
         this.updateStats();
         return similarItem.data;
@@ -118,7 +110,6 @@ export class ShadowCache {
       return null;
     }
 
-    // 检查TTL
     if (Date.now() - item.timestamp > this.ttl) {
       this.cache.delete(key);
       this.stats.misses++;
@@ -126,14 +117,12 @@ export class ShadowCache {
       return null;
     }
 
-    console.log(`🎯 缓存命中: ${key}`);
     this.stats.hits++;
     this.updateStats();
     return item.data;
   }
 
   /**
-   * 查找相似的缓存项
    */
   private findSimilarCache(
     bounds: { north: number; south: number; east: number; west: number },
@@ -145,23 +134,19 @@ export class ShadowCache {
     const targetQuarter = Math.floor(date.getMinutes() / 15);
 
     for (const [key, item] of this.cache.entries()) {
-      // 检查时间是否在有效范围内
       if (Date.now() - item.timestamp > this.ttl) {
         this.cache.delete(key);
         continue;
       }
 
-      // 检查缩放级别
       if (Math.abs(item.zoom - targetZoom) > 1) continue;
 
-      // 检查时间相似性（±15分钟）
       const itemQuarter = Math.floor(item.date.minute / 15);
       if (Math.abs(item.date.hour - targetHour) > 1 ||
           (item.date.hour === targetHour && Math.abs(itemQuarter - targetQuarter) > 1)) {
         continue;
       }
 
-      // 检查地理边界相似性
       if (this.isSimilarBounds(bounds, item.viewBounds, 0.002)) {
         return item;
       }
@@ -171,7 +156,6 @@ export class ShadowCache {
   }
 
   /**
-   * 设置缓存数据
    */
   set(
     bounds: { north: number; south: number; east: number; west: number },
@@ -179,10 +163,8 @@ export class ShadowCache {
     date: Date,
     data: any
   ): void {
-    // 清理过期缓存
     this.cleanup();
 
-    // 检查缓存大小
     if (this.cache.size >= this.maxSize) {
       this.evictOldest();
     }
@@ -203,11 +185,9 @@ export class ShadowCache {
     this.cache.set(key, item);
     this.updateStats();
     
-    console.log(`💾 缓存阴影数据: ${key} (size: ${this.cache.size})`);
   }
 
   /**
-   * 清理过期缓存
    */
   private cleanup(): void {
     const now = Date.now();
@@ -222,12 +202,10 @@ export class ShadowCache {
     keysToDelete.forEach(key => this.cache.delete(key));
     
     if (keysToDelete.length > 0) {
-      console.log(`🗑️ 清理过期缓存: ${keysToDelete.length} 项`);
     }
   }
 
   /**
-   * 清理最旧的缓存项
    */
   private evictOldest(): void {
     let oldestKey = '';
@@ -242,12 +220,10 @@ export class ShadowCache {
 
     if (oldestKey) {
       this.cache.delete(oldestKey);
-      console.log(`♻️ 清理最旧缓存: ${oldestKey}`);
     }
   }
 
   /**
-   * 更新统计信息
    */
   private updateStats(): void {
     this.stats.hitRate = this.stats.totalRequests > 0 ? 
@@ -256,14 +232,12 @@ export class ShadowCache {
   }
 
   /**
-   * 获取缓存统计
    */
   getStats(): CacheStats {
     return { ...this.stats };
   }
 
   /**
-   * 清空所有缓存
    */
   clear(): void {
     this.cache.clear();
@@ -275,11 +249,9 @@ export class ShadowCache {
       cacheSize: 0,
       lastCleanup: Date.now()
     };
-    console.log('🗑️ 清空阴影缓存');
   }
 
   /**
-   * 预热缓存 - 预先计算常用区域
    */
   async preWarm(
     regions: Array<{
@@ -288,10 +260,9 @@ export class ShadowCache {
     }>,
     calculateShadow: (bounds: any, zoom: number, date: Date) => Promise<any>
   ): Promise<void> {
-    console.log(`🔥 开始预热缓存: ${regions.length} 个区域`);
     
     const currentDate = new Date();
-    const hours = [8, 12, 16, 18]; // 常用时间点
+    const hours = [8, 12, 16, 18];
     
     for (const region of regions) {
       for (const hour of hours) {
@@ -302,14 +273,11 @@ export class ShadowCache {
           const shadowData = await calculateShadow(region.bounds, region.zoom, date);
           this.set(region.bounds, region.zoom, date, shadowData);
         } catch (error) {
-          console.warn('预热缓存失败:', error);
         }
       }
     }
     
-    console.log('✅ 缓存预热完成');
   }
 }
 
-// 创建全局缓存实例
 export const shadowCache = new ShadowCache();

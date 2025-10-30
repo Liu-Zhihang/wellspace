@@ -7,12 +7,16 @@ import {
   ArrowUpTrayIcon,
   PlayCircleIcon,
   PauseCircleIcon,
+  BuildingOfficeIcon,
+  SunIcon,
+  BoltIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline'
 import { useShadowMapStore } from '../../store/shadowMapStore'
 import type { MobilityTracePoint } from '../../store/shadowMapStore'
 import type { Feature, Geometry } from 'geojson'
 
-type PanelId = 'time' | 'shadow' | 'style' | 'upload' | null;
+type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'shadowOps' | null;
 
 const presetHours = [
   { hour: 6, label: 'Sunrise' },
@@ -42,6 +46,13 @@ export const LeftIconToolbar: React.FC = () => {
     addUploadedGeometry,
     selectGeometry,
     uploadedGeometries,
+    buildingsLoaded,
+    isLoadingBuildings,
+    shadowSimulatorReady,
+    isInitialisingShadow,
+    autoLoadBuildings,
+    setAutoLoadBuildings,
+    viewportActions,
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
@@ -417,6 +428,128 @@ export const LeftIconToolbar: React.FC = () => {
       );
     }
 
+    if (panelId === 'buildings') {
+      const statusClass = isLoadingBuildings
+        ? 'text-amber-600'
+        : buildingsLoaded
+        ? 'text-emerald-600'
+        : 'text-gray-500';
+      const statusLabel = isLoadingBuildings
+        ? 'Loading…'
+        : buildingsLoaded
+        ? 'Loaded'
+        : 'Not loaded';
+
+      return (
+        <div className="w-64 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-800">Building data</span>
+            <span className={`text-xs font-medium ${statusClass}`}>{statusLabel}</span>
+          </div>
+
+          <Button
+            type="primary"
+            icon={<BuildingOfficeIcon className="h-4 w-4" />}
+            block
+            loading={isLoadingBuildings}
+            disabled={!viewportActions.loadBuildings}
+            onClick={() =>
+              invokeViewportAction(
+                viewportActions.loadBuildings,
+                'Map viewport is not ready to load buildings yet.',
+              )
+            }
+          >
+            {buildingsLoaded ? 'Reload buildings' : 'Load buildings'}
+          </Button>
+
+          <div className="flex items-center justify-between text-xs text-gray-600">
+            <span>Auto-load after map move</span>
+            <Switch
+              size="small"
+              checked={autoLoadBuildings}
+              onChange={(checked) => setAutoLoadBuildings(Boolean(checked))}
+            />
+          </div>
+
+          <Button
+            danger
+            icon={<TrashIcon className="h-4 w-4" />}
+            block
+            disabled={
+              !viewportActions.clearBuildings || (!buildingsLoaded && !shadowSimulatorReady)
+            }
+            onClick={() =>
+              invokeViewportAction(
+                viewportActions.clearBuildings
+                  ? () => {
+                      viewportActions.clearBuildings?.();
+                    }
+                  : undefined,
+                'No building data to clear at the moment.',
+              )
+            }
+          >
+            Clear building & shadow data
+          </Button>
+
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-gray-500">
+            Building footprints are refreshed for the current viewport. Toggle auto-load if you
+            prefer manual control while exploring the map.
+          </div>
+        </div>
+      );
+    }
+
+    if (panelId === 'shadowOps') {
+      const readyClass = shadowSimulatorReady ? 'text-emerald-600' : 'text-gray-500';
+
+      return (
+        <div className="w-64 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-800">Shadow simulator</span>
+            <span className={`text-xs font-medium ${readyClass}`}>
+              {shadowSimulatorReady ? 'Ready' : 'Idle'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-gray-600">
+            <span>Sun exposure heatmap</span>
+            <Switch
+              size="small"
+              checked={mapSettings.showSunExposure}
+              onChange={(checked) => updateMapSettings({ showSunExposure: checked })}
+            />
+          </div>
+
+          <Button
+            type="primary"
+            icon={<BoltIcon className="h-4 w-4" />}
+            block
+            loading={isInitialisingShadow}
+            disabled={!viewportActions.initShadowSimulator || !buildingsLoaded}
+            onClick={() =>
+              invokeViewportAction(
+                buildingsLoaded
+                  ? viewportActions.initShadowSimulator
+                  : undefined,
+                buildingsLoaded
+                  ? 'Shadow simulator is not ready yet.'
+                  : 'Load buildings before initialising shadows.',
+              )
+            }
+          >
+            {shadowSimulatorReady ? 'Recalculate shadows' : 'Initialise shadows'}
+          </Button>
+
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-gray-500">
+            Enable the sun exposure layer to populate geometry analytics. Initialisation may take a
+            few seconds for dense urban scenes.
+          </div>
+        </div>
+      );
+    }
+
     if (panelId === 'style') {
       return (
         <div className="w-64 space-y-2">
@@ -467,13 +600,32 @@ export const LeftIconToolbar: React.FC = () => {
     );
   };
 
+  const invokeViewportAction = async (
+    action: (() => void | Promise<void>) | undefined,
+    fallbackMessage: string,
+  ) => {
+    if (!action) {
+      addStatusMessage?.(fallbackMessage, 'warning');
+      return;
+    }
+
+    try {
+      await action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      addStatusMessage?.(`Action failed: ${message}`, 'error');
+    }
+  };
+
   const toolbarItems: Array<{
     id: Exclude<PanelId, null>;
     label: string;
     icon: React.ReactNode;
   }> = [
     { id: 'time', label: 'Time controls', icon: <ClockIcon className="h-5 w-5" /> },
-    { id: 'shadow', label: 'Shadow settings', icon: <SwatchIcon className="h-5 w-5" /> },
+    { id: 'shadow', label: 'Shadow styling', icon: <SwatchIcon className="h-5 w-5" /> },
+    { id: 'buildings', label: 'Building data', icon: <BuildingOfficeIcon className="h-5 w-5" /> },
+    { id: 'shadowOps', label: 'Shadow simulator', icon: <SunIcon className="h-5 w-5" /> },
     { id: 'style', label: 'Map style', icon: <GlobeAltIcon className="h-5 w-5" /> },
     { id: 'upload', label: 'Add file to map', icon: <ArrowUpTrayIcon className="h-5 w-5" /> },
   ];

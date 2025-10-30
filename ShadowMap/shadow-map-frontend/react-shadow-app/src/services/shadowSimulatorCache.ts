@@ -1,8 +1,6 @@
 /**
  * Shadow Simulator Cache Wrapper
  * 
- * 为mapbox-gl-shadow-simulator添加智能缓存层
- * 解决地图移动导致的重复计算问题
  */
 
 import { shadowCache } from '../utils/shadowCache';
@@ -28,7 +26,6 @@ interface CachedShadowLayer {
 }
 
 /**
- * 带缓存的Shadow Simulator包装器
  */
 export class CachedShadowSimulator {
   private simulator: any = null;
@@ -42,7 +39,6 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 初始化shadow simulator
    */
   async init(
     map: mapboxgl.Map,
@@ -52,27 +48,21 @@ export class CachedShadowSimulator {
     this.map = map;
     this.config = config;
 
-    // 检查缓存
     const bounds = map.getBounds();
     const zoom = map.getZoom();
     const cachedData = this.checkCache(bounds, zoom, config.date);
 
     if (cachedData) {
-      console.log('✅ 使用缓存的阴影数据');
       await this.restoreCachedShadows(cachedData);
       return;
     }
 
-    // 创建新的simulator
-    console.log('🌅 创建新的shadow simulator（无缓存）');
     this.simulator = new ShadeMapClass(config).addTo(map);
 
-    // 监听地图移动，保存缓存
     this.setupMapListeners();
   }
 
   /**
-   * 检查缓存
    */
   private checkCache(
     bounds: mapboxgl.LngLatBounds,
@@ -100,7 +90,6 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 保存到缓存
    */
   private saveToCache(
     bounds: mapboxgl.LngLatBounds,
@@ -125,16 +114,12 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 恢复缓存的阴影
    */
   private async restoreCachedShadows(cachedData: any): Promise<void> {
-    // TODO: 实现从缓存恢复阴影渲染
-    // 这需要直接操作Mapbox图层
     console.log('🔄 Restoring cached shadows:', cachedData);
   }
 
   /**
-   * 设置地图监听器
    */
   private setupMapListeners(): void {
     if (!this.map) return;
@@ -142,7 +127,6 @@ export class CachedShadowSimulator {
     let moveEndTimeout: NodeJS.Timeout;
 
     this.map.on('moveend', () => {
-      // 延迟保存，避免频繁触发
       clearTimeout(moveEndTimeout);
       moveEndTimeout = setTimeout(() => {
         this.onMoveEnd();
@@ -151,7 +135,6 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 地图移动结束后的处理
    */
   private onMoveEnd(): void {
     if (!this.map || !this.config || this.isCalculating) return;
@@ -160,19 +143,15 @@ export class CachedShadowSimulator {
     const zoom = this.map.getZoom();
     const date = this.config.date;
 
-    // 检查是否已有缓存
     const cached = this.checkCache(bounds, zoom, date);
     if (cached) {
-      console.log('✅ 该区域已有缓存，跳过计算');
       return;
     }
 
-    // 提取当前阴影数据并缓存
     this.captureAndCacheShadows(bounds, zoom, date);
   }
 
   /**
-   * 捕获并缓存当前阴影
    */
   private captureAndCacheShadows(
     bounds: mapboxgl.LngLatBounds,
@@ -182,8 +161,6 @@ export class CachedShadowSimulator {
     if (!this.map) return;
 
     try {
-      // 获取shadow图层数据
-      // 注意：这里需要根据mapbox-gl-shadow-simulator的实际实现来提取数据
       const shadowLayers = this.extractShadowLayers();
       
       if (shadowLayers && shadowLayers.length > 0) {
@@ -198,7 +175,6 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 提取阴影图层数据
    */
   private extractShadowLayers(): any[] {
     if (!this.map) return [];
@@ -206,7 +182,6 @@ export class CachedShadowSimulator {
     const shadowLayers: any[] = [];
     const style = this.map.getStyle();
 
-    // 查找shadow相关的图层
     if (style && style.layers) {
       for (const layer of style.layers) {
         if (layer.id.includes('shadow') || layer.id.includes('shade')) {
@@ -214,7 +189,6 @@ export class CachedShadowSimulator {
             id: layer.id,
             type: layer.type,
             source: (layer as any).source,
-            // 保存图层配置...
           });
         }
       }
@@ -224,24 +198,19 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 更新日期
    */
   setDate(date: Date): void {
     if (!this.simulator || !this.map) return;
 
-    // 检查缓存
     const bounds = this.map.getBounds();
     const zoom = this.map.getZoom();
     const cached = this.checkCache(bounds, zoom, date);
 
     if (cached) {
-      console.log('✅ 时间变化 - 使用缓存数据');
       this.restoreCachedShadows(cached);
       return;
     }
 
-    // 无缓存，调用原始方法
-    console.log('🔄 时间变化 - 重新计算阴影');
     this.isCalculating = true;
     
     if (typeof this.simulator.setDate === 'function') {
@@ -252,15 +221,13 @@ export class CachedShadowSimulator {
       this.config.date = date;
     }
 
-    // 计算完成后保存缓存
     setTimeout(() => {
       this.captureAndCacheShadows(bounds, zoom, date);
       this.isCalculating = false;
-    }, 2000); // 等待渲染完成
+    }, 2000);
   }
 
   /**
-   * 更新颜色
    */
   setColor(color: string): void {
     if (this.simulator && typeof this.simulator.setColor === 'function') {
@@ -272,7 +239,6 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 更新透明度
    */
   setOpacity(opacity: number): void {
     if (this.simulator && typeof this.simulator.setOpacity === 'function') {
@@ -284,7 +250,6 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 移除simulator
    */
   remove(): void {
     if (this.simulator && typeof this.simulator.remove === 'function') {
@@ -295,14 +260,12 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 获取缓存统计
    */
   getCacheStats() {
     return shadowCache.getStats();
   }
 
   /**
-   * 清空缓存
    */
   clearCache(): void {
     shadowCache.clear();
@@ -311,7 +274,6 @@ export class CachedShadowSimulator {
   }
 
   /**
-   * 预热缓存
    */
   async preWarmCache(
     regions: Array<{
@@ -321,23 +283,14 @@ export class CachedShadowSimulator {
   ): Promise<void> {
     if (!this.config) return;
 
-    console.log('🔥 开始预热阴影缓存...');
     
-    // 预热常用时间点
     const hours = [8, 10, 12, 14, 16, 18];
     const currentDate = new Date();
 
-    for (const region of regions) {
-      for (const hour of hours) {
-        const date = new Date(currentDate);
-        date.setHours(hour, 0, 0, 0);
+    // Reserved for future cache pre-warming logic
+    void regions; // suppress unused warning until implemented
+    void hours;
+    void currentDate;
 
-        // 这里需要实际触发阴影计算
-        // 具体实现取决于shadow simulator的API
-        console.log(`🔥 预热: 区域 ${JSON.stringify(region.bounds)}, ${hour}:00`);
-      }
-    }
-
-    console.log('✅ 阴影缓存预热完成');
   }
 }

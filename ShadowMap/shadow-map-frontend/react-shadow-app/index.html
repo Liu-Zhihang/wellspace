@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>阴影地图分析系统</title>
+    <title>Shadow Map Analysis Suite</title>
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Mapbox GL CSS -->
@@ -12,35 +12,35 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- 加载 Leaflet -->
+    <!-- Leaflet runtime -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- 加载 Mapbox GL JS -->
+    <!-- Mapbox GL runtime -->
     <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js'></script>
-    <!-- 加载 SunCalc -->
+    <!-- SunCalc runtime -->
     <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
-    <!-- 加载 mapbox-gl-shadow-simulator -->
+    <!-- Mapbox shadow simulator -->
     <script src="https://unpkg.com/mapbox-gl-shadow-simulator/dist/mapbox-gl-shadow-simulator.umd.min.js"></script>
     <script>
-      // 调试信息
+      // Diagnostics
       window.addEventListener('load', function() {
         setTimeout(() => {
-          console.log('页面加载完成，检查插件状态:');
-          console.log('Leaflet:', typeof L !== 'undefined' ? '已加载' : '未加载');
-          console.log('Mapbox GL:', typeof mapboxgl !== 'undefined' ? '已加载' : '未加载');
-          console.log('SunCalc:', typeof SunCalc !== 'undefined' ? '已加载' : '未加载');
-          console.log('Leaflet Shadow Simulator:', typeof L !== 'undefined' && L.shadeMap ? '已加载' : '未加载');
-          console.log('Mapbox Shadow Simulator:', typeof ShadeMap !== 'undefined' ? '已加载' : '未加载');
+          console.log('Page ready, verifying external libraries:');
+          console.log('Leaflet:', typeof L !== 'undefined' ? 'loaded' : 'missing');
+          console.log('Mapbox GL:', typeof mapboxgl !== 'undefined' ? 'loaded' : 'missing');
+          console.log('SunCalc:', typeof SunCalc !== 'undefined' ? 'loaded' : 'missing');
+          console.log('Leaflet Shadow Simulator:', typeof L !== 'undefined' && L.shadeMap ? 'loaded' : 'missing');
+          console.log('Mapbox Shadow Simulator:', typeof ShadeMap !== 'undefined' ? 'loaded' : 'missing');
           
           if (typeof L !== 'undefined') {
-            console.log('L.shadeMap 函数:', L.shadeMap || '未定义');
+            console.log('L.shadeMap function:', L.shadeMap || 'undefined');
             
             if (L.shadeMap) {
-              console.log('✅ Shadow Simulator 已成功加载');
+              console.log('✅ Shadow simulator ready');
             } else {
-              console.log('❌ Shadow Simulator 未加载');
+              console.log('❌ Shadow simulator not available');
             }
           }
-        }, 2000); // 增加延迟确保 React 组件加载完成
+        }, 2000); // Give React components time to mount
       });
     </script>
     <script type="module" src="/src/main.tsx"></script>

@@ -4,39 +4,39 @@ import { advancedCacheManager } from './advancedCacheManager';
 const API_BASE_URL = 'http://localhost:3500/api';
 
 export class ApiService {
-  // 正在进行的请求缓存，避免重复请求
+  // Cache in-flight requests to avoid duplicates
   private static pendingRequests = new Map<string, Promise<BuildingTileData>>();
   
-  // 获取建筑物瓦片数据（带高级缓存和请求去重）
+  // Fetch building tiles with caching & de-duplication
   static async getBuildingTile(z: number, x: number, y: number, retryCount = 0): Promise<BuildingTileData> {
     const cacheKey = `building-${z}-${x}-${y}`;
     
-    // 检查是否有正在进行的请求
+    // Return existing promise if one is already running
     if (this.pendingRequests.has(cacheKey)) {
-      console.log(`⏳ 等待正在进行的请求: ${z}/${x}/${y}`);
+      console.log(`⏳ Awaiting in-flight request: ${z}/${x}/${y}`);
       return this.pendingRequests.get(cacheKey)!;
     }
     
-    // 尝试从高级缓存获取
+    // Try advanced cache first
     const cached = await advancedCacheManager.get<BuildingTileData>(cacheKey);
     if (cached) {
-      console.log(`🎯 从高级缓存获取建筑物瓦片 ${z}/${x}/${y}`);
+      console.log(`🎯 Served building tile ${z}/${x}/${y} from cache`);
       return cached;
     }
 
     const maxRetries = 3;
-    const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000); // 指数退避，最大5秒
+    const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000); // Exponential backoff up to 5s
 
-    // 创建请求 Promise 并缓存
+    // Create request promise and cache it
     const requestPromise = (async (): Promise<BuildingTileData> => {
       try {
-        console.log(`📡 从API获取建筑物瓦片 ${z}/${x}/${y} (尝试 ${retryCount + 1}/${maxRetries + 1})`);
+        console.log(`📡 Fetching building tile ${z}/${x}/${y} (attempt ${retryCount + 1}/${maxRetries + 1})`);
         
         const controller = new AbortController();
       const timeoutId = setTimeout(() => {
-        console.warn(`请求超时，取消瓦片 ${z}/${x}/${y} 的请求`);
+        console.warn(`Request timed out; aborting tile ${z}/${x}/${y}`);
         controller.abort();
-      }, 20000); // 增加到20秒，匹配后端Overpass API的15秒+缓冲
+      }, 20000); // 20s timeout to match backend latency
       
       const response = await fetch(`${API_BASE_URL}/buildings/${z}/${x}/${y}.json`, {
         signal: controller.signal,
@@ -50,7 +50,7 @@ export class ApiService {
       
       if (!response.ok) {
         if (response.status === 500 && retryCount < maxRetries) {
-          console.warn(`服务器错误，${retryDelay}ms 后重试...`);
+          console.warn(`Server error; retrying in ${retryDelay}ms`);
           await new Promise(resolve => setTimeout(resolve, retryDelay));
           return this.getBuildingTile(z, x, y, retryCount + 1);
         }
@@ -79,26 +79,26 @@ export class ApiService {
         data.bbox = [west, south, east, north];
       }
       
-      // 存入高级缓存
+      // Persist in advanced cache
       await advancedCacheManager.set(cacheKey, data);
       
-      console.log(`✅ 成功获取建筑物瓦片 ${z}/${x}/${y} (${data.features?.length || 0} 个建筑物)`);
+      console.log(`✅ Fetched building tile ${z}/${x}/${y} (${data.features?.length || 0} buildings)`);
       return data;
       
     } catch (error) {
-      console.warn(`建筑物瓦片 ${z}/${x}/${y} 获取失败:`, error);
+      console.warn(`Building tile ${z}/${x}/${y} failed:`, error);
       
-      // 如果是网络错误且还有重试次数，则重试
+      // Retry network errors while attempts remain
       if (retryCount < maxRetries && (
-        error instanceof TypeError || // 网络错误
+        error instanceof TypeError ||
         (error instanceof Error && error.message.includes('fetch'))
       )) {
-        console.log(`网络错误，${retryDelay}ms 后重试...`);
+        console.log(`Network error; retrying in ${retryDelay}ms`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
         return this.getBuildingTile(z, x, y, retryCount + 1);
       }
       
-      // 返回空的GeoJSON数据
+      // Return empty GeoJSON if all retries fail
       const emptyData: BuildingTileData = {
         type: 'FeatureCollection',
         features: [],
@@ -106,37 +106,37 @@ export class ApiService {
         tileInfo: { z, x, y }
       };
       
-        // 短暂缓存错误结果，避免重复请求
+        // Cache empty result briefly to avoid repeat fetches
         await advancedCacheManager.set(cacheKey, emptyData);
         
         return emptyData;
       }
     })();
 
-    // 缓存正在进行的请求
+    // Store pending request
     this.pendingRequests.set(cacheKey, requestPromise);
     
     try {
       const result = await requestPromise;
       return result;
     } finally {
-      // 请求完成后移除缓存
+      // Remove pending request after completion
       this.pendingRequests.delete(cacheKey);
     }
   }
 
-  // 批量获取建筑物瓦片（优化并发控制）
+  // Batch building tile fetch with concurrency control
   static async getBuildingTilesBatch(tiles: Array<{z: number, x: number, y: number}>): Promise<BuildingTileData[]> {
-    console.log(`📦 批量获取 ${tiles.length} 个建筑物瓦片`);
+    console.log(`📦 Fetching batch of ${tiles.length} building tiles`);
     
     const startTime = Date.now();
-    const maxConcurrent = 2; // 大幅减少并发数，Overpass API 有严格的速率限制
+    const maxConcurrent = 2; // Limit concurrency for Overpass rate limits
     const results: BuildingTileData[] = [];
     
-    // 分批处理，避免同时发送太多请求
+    // Process tiles in small batches
     for (let i = 0; i < tiles.length; i += maxConcurrent) {
       const batch = tiles.slice(i, i + maxConcurrent);
-      console.log(`🔄 处理批次 ${Math.floor(i/maxConcurrent) + 1}/${Math.ceil(tiles.length/maxConcurrent)} (${batch.length} 个瓦片)`);
+      console.log(`🔄 Processing batch ${Math.floor(i/maxConcurrent) + 1}/${Math.ceil(tiles.length/maxConcurrent)} (${batch.length} tiles)`);
       
       const batchPromises = batch.map(tile => this.getBuildingTile(tile.z, tile.x, tile.y));
       const batchResults = await Promise.allSettled(batchPromises);
@@ -146,7 +146,7 @@ export class ApiService {
           return result.value;
         } else {
           const tile = batch[batchIndex];
-          console.warn(`瓦片 ${tile.z}/${tile.x}/${tile.y} 获取失败:`, result.reason);
+          console.warn(`Tile ${tile.z}/${tile.x}/${tile.y} failed:`, result.reason);
           return {
             type: 'FeatureCollection' as const,
             features: [],
@@ -158,9 +158,9 @@ export class ApiService {
       
       results.push(...batchData);
       
-      // 批次间较长延迟，避免触发 Overpass API 速率限制
+      // Delay between batches to respect Overpass limits
       if (i + maxConcurrent < tiles.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // 增加到1秒延迟
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 1s pause between batches
       }
     }
     
@@ -168,12 +168,12 @@ export class ApiService {
     const successCount = results.filter(r => r.features && r.features.length > 0).length;
     const totalFeatures = results.reduce((sum, r) => sum + (r.features?.length || 0), 0);
     
-    console.log(`✅ 批量获取完成: ${successCount}/${tiles.length} 成功, ${totalFeatures} 个建筑物, 耗时 ${duration}ms`);
+    console.log(`✅ Batch complete: ${successCount}/${tiles.length} success, ${totalFeatures} buildings, ${duration}ms`);
     
     return results;
   }
 
-  // 预加载建筑物区域
+  // Preload building area (noop when proxied)
   static async preloadBuildingsArea(_bounds: {
     north: number;
     south: number;
@@ -183,7 +183,7 @@ export class ApiService {
     console.log('🔄 preloadBuildingsArea noop (WFS proxy mode)');
   }
 
-  // 获取建筑物服务信息
+  // Retrieve building service metadata
   static async getBuildingServiceInfo(): Promise<any> {
     const cacheKey = 'building-service-info';
     const cached = await advancedCacheManager.get(cacheKey);
@@ -203,7 +203,7 @@ export class ApiService {
       
       return data;
     } catch (error) {
-      console.warn('获取建筑物服务信息失败:', error);
+      console.warn('Failed to fetch building service info:', error);
       return { status: 'unavailable' };
     }
   }

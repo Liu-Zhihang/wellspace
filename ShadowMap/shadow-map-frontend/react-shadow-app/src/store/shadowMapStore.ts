@@ -11,6 +11,14 @@ import type {
   GeometryAnalysis
 } from '../types/index.ts';
 
+type ViewportAction = (() => void) | (() => Promise<void>);
+
+interface ViewportActions {
+  loadBuildings?: ViewportAction;
+  initShadowSimulator?: ViewportAction;
+  clearBuildings?: () => void;
+}
+
 export interface MobilityTracePoint {
   coordinates: [number, number];
   time: Date;
@@ -18,27 +26,27 @@ export interface MobilityTracePoint {
 }
 
 interface ShadowMapState {
-  // 当前日期时间
+  // Current date-time state
   currentDate: Date;
   setCurrentDate: (date: Date) => void;
   
-  // 地图设置
+  // Map settings
   mapSettings: MapSettings;
   updateMapSettings: (settings: Partial<MapSettings>) => void;
   
-  // 阴影设置
+  // Shadow settings
   shadowSettings: ShadowSettings;
   updateShadowSettings: (settings: Partial<ShadowSettings>) => void;
   
-  // 太阳位置信息
+  // Sun position
   sunPosition: SunPosition;
   setSunPosition: (position: SunPosition) => void;
   
-  // 阴影分析结果
+  // Legacy shadow analysis result
   analysisResult: ShadowAnalysisResult | null;
   setAnalysisResult: (result: ShadowAnalysisResult | null) => void;
   
-  // 统一的分析结果（兼容性）
+  // Consolidated analysis results (legacy compatibility)
   analysisResults: {
     sunPosition?: SunPosition;
     shadowArea?: number;
@@ -46,20 +54,20 @@ interface ShadowMapState {
   };
   setAnalysisResults: (results: Partial<ShadowMapState['analysisResults']>) => void;
   
-  // 分析半径
+  // Analysis radius
   analysisRadius: number;
   setAnalysisRadius: (radius: number) => void;
   
-  // 时间动画状态
+  // Time animation state
   isAnimating: boolean;
   setIsAnimating: (animating: boolean) => void;
   
-  // 地图中心和缩放
+  // Map view state
   mapCenter: [number, number];
   mapZoom: number;
   setMapView: (center: [number, number], zoom: number) => void;
   
-  // 状态消息
+  // Status messages
   statusMessages: Array<{ id: string; message: string; type: 'info' | 'warning' | 'error'; timestamp: Date }>;
   addStatusMessage: (message: string, type?: 'info' | 'warning' | 'error') => void;
   removeStatusMessage: (id: string) => void;
@@ -87,19 +95,32 @@ interface ShadowMapState {
   setTracePlaying: (playing: boolean) => void;
   advanceTraceIndex: () => void;
   
-  // 数据层管理方法
+  // Data layer helpers
   toggleDataLayer: (layerId: DataLayerType) => void;
   updateDataLayer: (layerId: DataLayerType, updates: Partial<DataLayer>) => void;
   setActiveDataLayer: (layerId: DataLayerType) => void;
   getEnabledLayers: () => DataLayer[];
 
-  // 天气 / 云量信息
+  // Weather snapshot
   currentWeather: WeatherSnapshot;
   setCurrentWeather: (snapshot: Partial<WeatherSnapshot>) => void;
+
+  buildingsLoaded: boolean;
+  setBuildingsLoaded: (loaded: boolean) => void;
+  isLoadingBuildings: boolean;
+  setIsLoadingBuildings: (loading: boolean) => void;
+  shadowSimulatorReady: boolean;
+  setShadowSimulatorReady: (ready: boolean) => void;
+  isInitialisingShadow: boolean;
+  setIsInitialisingShadow: (loading: boolean) => void;
+  autoLoadBuildings: boolean;
+  setAutoLoadBuildings: (enabled: boolean) => void;
+  viewportActions: ViewportActions;
+  setViewportActions: (actions: Partial<ViewportActions>) => void;
 }
 
 export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
-  currentDate: new Date(2024, 0, 1, 12, 0, 0), // 🔧 默认中午12点，避免自动跳转到当前时间
+  currentDate: new Date(), // Default to now; avoids stale weather lookups
   setCurrentDate: (date: Date) => {
     // ✅ Validate date to prevent invalid values
     if (!date || isNaN(date.getTime())) {
@@ -111,7 +132,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   },
   
   mapSettings: {
-    // 传统设置（保持兼容性）
+    // Legacy settings (for compatibility)
     shadowColor: '#01112f',
     shadowOpacity: 0.7,
     showShadowLayer: true,
@@ -119,28 +140,28 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     showDEMLayer: false,
     showCacheStats: false,
     showSunExposure: false,
-    // 🔧 新增：建筑物筛选控制
-    enableBuildingFilter: false, // 默认关闭筛选，显示所有建筑
-    // 🔧 新增：动态质量控制
-    enableDynamicQuality: true, // 默认开启动态质量调整
+    // Building filter controls
+    enableBuildingFilter: false, // Disabled by default; show all buildings
+    // Dynamic quality controls
+    enableDynamicQuality: true, // Enable adaptive quality by default
     autoOptimize: false,
     
-    // 新的数据层系统
+    // Data layer registry
     dataLayers: {
       shadows: {
         id: 'shadows',
-        name: '实时阴影',
-        description: '当前时刻的阴影覆盖情况',
+        name: 'Live Shadows',
+        description: 'Real-time shadow overlay for the current timestamp',
         icon: '🌑',
-        enabled: true, // 与showShadowLayer同步
+        enabled: true, // Mirrors showShadowLayer flag
         opacity: 0.7,
         color: '#01112f',
         renderMode: 'overlay'
       },
       sunlight_hours: {
         id: 'sunlight_hours',
-        name: '日照时长',
-        description: '一天内各区域的日照时长分析',
+        name: 'Sunlight Hours',
+        description: 'Displays sampled sunlight duration heatmap',
         icon: '☀️',
         enabled: false,
         opacity: 0.6,
@@ -148,8 +169,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       },
       annual_sunlight: {
         id: 'annual_sunlight',
-        name: '年度日照',
-        description: '全年日照强度和分布统计',
+        name: 'Annual Sunlight',
+        description: 'Annual sunlight distribution summary',
         icon: '🌞',
         enabled: false,
         opacity: 0.5,
@@ -157,8 +178,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       },
       buildings: {
         id: 'buildings',
-        name: '建筑物',
-        description: '建筑物轮廓和高度信息',
+        name: 'Buildings',
+        description: 'Building footprints and height attributes',
         icon: '🏢',
         enabled: true,
         opacity: 0.8,
@@ -167,8 +188,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       },
       terrain: {
         id: 'terrain',
-        name: '地形',
-        description: '数字高程模型（DEM）',
+        name: 'Terrain',
+        description: 'Digital elevation model (DEM)',
         icon: '🗻',
         enabled: false,
         opacity: 0.5,
@@ -182,7 +203,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     set(state => {
       const newMapSettings = { ...state.mapSettings, ...settings };
       
-      // 同步数据层状态
+      // Sync derived layer flags
       if (settings.showShadowLayer !== undefined) {
         newMapSettings.dataLayers.shadows.enabled = settings.showShadowLayer;
       }
@@ -207,7 +228,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     shadowColor: '#01112f',
     shadowBlur: 2,
     enableShadowAnimation: false,
-    showSunExposure: false, // 控制太阳曝光热力图显示
+    showSunExposure: true,
     autoCloudAttenuation: true,
     manualSunlightFactor: 1,
   },
@@ -217,7 +238,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   sunPosition: { altitude: 0, azimuth: 0 },
   setSunPosition: (position: SunPosition) => {
     set({ sunPosition: position });
-    // 同时更新 analysisResults 中的 sunPosition
+    // Keep consolidated analysis sun position in sync
     const current = get();
     set({ 
       analysisResults: { 
@@ -240,7 +261,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   isAnimating: false,
   setIsAnimating: (animating: boolean) => set({ isAnimating: animating }),
   
-  mapCenter: [39.9042, 116.4074], // 北京
+  mapCenter: [39.9042, 116.4074], // Beijing default
   mapZoom: 15,
   setMapView: (center: [number, number], zoom: number) => set({ mapCenter: center, mapZoom: zoom }),
 
@@ -277,7 +298,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     set(state => ({
       statusMessages: [
         { id, message, type, timestamp: new Date() },
-        ...state.statusMessages.slice(0, 4) // 只保留最新的5条消息
+        ...state.statusMessages.slice(0, 4) // Keep newest five entries
       ]
     }));
   },
@@ -286,11 +307,22 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   clearStatusMessages: () => set({ statusMessages: [] }),
   uploadedGeometries: [],
   addUploadedGeometry: (geometry: UploadedGeometry) => {
-    set(state => ({
-      uploadedGeometries: [...state.uploadedGeometries, geometry],
+    const prevState = get();
+    const shouldEnableSunExposure = !prevState.shadowSettings.showSunExposure;
+
+    set({
+      uploadedGeometries: [...prevState.uploadedGeometries, geometry],
       selectedGeometryId: geometry.id,
-    }));
-    get().addStatusMessage?.(`✅ Uploaded geometry “${geometry.name}”`, 'info');
+      shadowSettings: shouldEnableSunExposure
+        ? { ...prevState.shadowSettings, showSunExposure: true }
+        : prevState.shadowSettings,
+    });
+
+    const { addStatusMessage } = get();
+    addStatusMessage?.(`Uploaded geometry "${geometry.name}"`, 'info');
+    if (shouldEnableSunExposure) {
+      addStatusMessage?.('Sun exposure heatmap enabled for geometry analysis.', 'info');
+    }
   },
   removeUploadedGeometry: (geometryId: string) => {
     set(state => {
@@ -387,7 +419,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     state.addStatusMessage?.('📄 Exported analysis as CSV.', 'info');
   },
   
-  // 数据层管理方法实现
+  // Data layer helper implementation (derived state)
   toggleDataLayer: (layerId: DataLayerType) => {
     set(state => {
       const newEnabled = !state.mapSettings.dataLayers[layerId].enabled;
@@ -402,7 +434,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
         }
       };
       
-      // 同步到传统设置
+      // Sync to legacy flags
       if (layerId === 'shadows') {
         newMapSettings.showShadowLayer = newEnabled;
       } else if (layerId === 'sunlight_hours') {
@@ -440,6 +472,20 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       }
     }));
   },
+
+  buildingsLoaded: false,
+  setBuildingsLoaded: (loaded: boolean) => set({ buildingsLoaded: loaded }),
+  isLoadingBuildings: false,
+  setIsLoadingBuildings: (loading: boolean) => set({ isLoadingBuildings: loading }),
+  shadowSimulatorReady: false,
+  setShadowSimulatorReady: (ready: boolean) => set({ shadowSimulatorReady: ready }),
+  isInitialisingShadow: false,
+  setIsInitialisingShadow: (loading: boolean) => set({ isInitialisingShadow: loading }),
+  autoLoadBuildings: true,
+  setAutoLoadBuildings: (enabled: boolean) => set({ autoLoadBuildings: enabled }),
+  viewportActions: {},
+  setViewportActions: (actions: Partial<ViewportActions>) =>
+    set(state => ({ viewportActions: { ...state.viewportActions, ...actions } })),
 
   currentWeather: {
     cloudCover: null,

@@ -16,24 +16,24 @@ export const ControlPanel: React.FC = () => {
 
   const { updateSunPosition, resetSimulation } = useShadowMap();
 
-  // 处理日期时间变化
+  // Handle date changes
   const handleDateChange = (date: Date) => {
     setCurrentDate(date);
     updateSunPosition();
   };
 
-  // 处理地图设置变化
+  // Handle map setting toggles
   const handleMapSettingChange = (key: keyof typeof mapSettings, value: any) => {
     updateMapSettings({ [key]: value });
   };
 
-  // 处理阴影设置变化
+  // Handle shadow setting updates
   const handleShadowSettingChange = (key: keyof typeof shadowSettings, value: any) => {
     updateShadowSettings({ [key]: value });
     updateSunPosition();
   };
 
-  // 格式化日期时间为本地输入格式
+  // Format date for input element
   const formatDateForInput = (date: Date): string => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -43,7 +43,7 @@ export const ControlPanel: React.FC = () => {
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
 
-  // 从输入值解析日期
+  // Parse ISO datetime from input
   const parseDateFromInput = (value: string): Date => {
     return new Date(value);
   };
@@ -51,29 +51,29 @@ export const ControlPanel: React.FC = () => {
   return (
     <div className="bg-white shadow-lg rounded-lg p-4 space-y-6 max-h-screen overflow-y-auto">
       <div className="border-b pb-4">
-        <h2 className="text-xl font-bold text-gray-800 mb-2">🎛️ 控制面板</h2>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">🎛️ Control Panel</h2>
         <div className="flex gap-2">
           <button
             onClick={() => clearStatusMessages()}
             className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded transition-colors"
           >
-            清除消息
+            Clear messages
           </button>
           <button
             onClick={resetSimulation}
             className="px-3 py-1 text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 rounded transition-colors"
           >
-            重置模拟
+            Reset simulation
           </button>
         </div>
       </div>
 
-      {/* 日期时间控制 */}
+      {/* Date and time controls */}
       <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-gray-700">⏰ 时间设置</h3>
+        <h3 className="text-lg font-semibold text-gray-700">⏰ Time Settings</h3>
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-600">
-            日期和时间
+            Date & time
           </label>
           <input
             type="datetime-local"
@@ -88,7 +88,7 @@ export const ControlPanel: React.FC = () => {
             onClick={() => handleDateChange(new Date())}
             className="px-3 py-2 text-sm bg-green-100 hover:bg-green-200 text-green-700 rounded transition-colors"
           >
-            当前时间
+            Current time
           </button>
           <button
             onClick={() => {
@@ -98,14 +98,14 @@ export const ControlPanel: React.FC = () => {
             }}
             className="px-3 py-2 text-sm bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded transition-colors"
           >
-            正午时分
+            Set to noon
           </button>
         </div>
       </div>
 
-      {/* 地图图层控制 */}
+      {/* Map layer controls */}
       <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-gray-700">🗺️ 地图图层</h3>
+        <h3 className="text-lg font-semibold text-gray-700">🗺️ Map Layers</h3>
         <div className="space-y-2">
           <label className="flex items-center space-x-2">
             <input
@@ -114,7 +114,7 @@ export const ControlPanel: React.FC = () => {
               onChange={(e) => handleMapSettingChange('showBuildingLayer', e.target.checked)}
               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
-            <span className="text-sm text-gray-700">显示建筑物图层</span>
+            <span className="text-sm text-gray-700">Show building layer</span>
           </label>
           
           <label className="flex items-center space-x-2">
@@ -124,7 +124,7 @@ export const ControlPanel: React.FC = () => {
               onChange={(e) => handleMapSettingChange('showDEMLayer', e.target.checked)}
               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
-            <span className="text-sm text-gray-700">显示地形图层</span>
+            <span className="text-sm text-gray-700">Show terrain layer</span>
           </label>
           
           <label className="flex items-center space-x-2">
@@ -134,18 +134,18 @@ export const ControlPanel: React.FC = () => {
               onChange={(e) => handleMapSettingChange('showShadowLayer', e.target.checked)}
               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
-            <span className="text-sm text-gray-700">显示阴影图层</span>
+            <span className="text-sm text-gray-700">Show shadow layer</span>
           </label>
         </div>
       </div>
 
-      {/* 阴影模拟设置 */}
+      {/* Shadow simulation settings */}
       <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-gray-700">🌅 阴影设置</h3>
+        <h3 className="text-lg font-semibold text-gray-700">🌅 Shadow Settings</h3>
         <div className="space-y-3">
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1">
-              阴影精度: {shadowSettings.shadowResolution}px
+              Shadow resolution: {shadowSettings.shadowResolution}px
             </label>
             <input
               type="range"
@@ -160,7 +160,7 @@ export const ControlPanel: React.FC = () => {
           
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1">
-              阴影透明度: {(shadowSettings.shadowOpacity * 100).toFixed(0)}%
+              Shadow opacity: {(shadowSettings.shadowOpacity * 100).toFixed(0)}%
             </label>
             <input
               type="range"
@@ -175,7 +175,7 @@ export const ControlPanel: React.FC = () => {
           
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1">
-              建筑物高度系数: {shadowSettings.buildingHeightMultiplier}x
+              Building height multiplier: {shadowSettings.buildingHeightMultiplier}x
             </label>
             <input
               type="range"
@@ -195,53 +195,53 @@ export const ControlPanel: React.FC = () => {
               onChange={(e) => handleShadowSettingChange('enableSunPath', e.target.checked)}
               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
-            <span className="text-sm text-gray-700">显示太阳轨迹</span>
+            <span className="text-sm text-gray-700">Show sun path</span>
           </label>
         </div>
       </div>
 
-      {/* 太阳位置信息 */}
+      {/* Sun position */}
       <div className="space-y-3">
-        <h3 className="text-lg font-semibold text-gray-700">☀️ 太阳位置</h3>
+        <h3 className="text-lg font-semibold text-gray-700">☀️ Sun Position</h3>
         <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-sm">
           <div className="flex justify-between">
-            <span className="text-gray-600">海拔高度角:</span>
+            <span className="text-gray-600">Solar altitude:</span>
             <span className="font-medium">
               {analysisResults.sunPosition?.altitude?.toFixed(1) || '-'}°
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-600">方位角:</span>
+            <span className="text-gray-600">Azimuth:</span>
             <span className="font-medium">
               {analysisResults.sunPosition?.azimuth?.toFixed(1) || '-'}°
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-600">日照状态:</span>
+            <span className="text-gray-600">Illumination:</span>
             <span className={`font-medium ${
               (analysisResults.sunPosition?.altitude || 0) > 0 
                 ? 'text-yellow-600' 
                 : 'text-gray-500'
             }`}>
-              {(analysisResults.sunPosition?.altitude || 0) > 0 ? '白天' : '夜晚'}
+              {(analysisResults.sunPosition?.altitude || 0) > 0 ? 'Daytime' : 'Night'}
             </span>
           </div>
         </div>
       </div>
 
-      {/* 分析统计 */}
+      {/* Analysis summary */}
       {analysisResults.shadowArea && (
         <div className="space-y-3">
-          <h3 className="text-lg font-semibold text-gray-700">📊 阴影分析</h3>
+          <h3 className="text-lg font-semibold text-gray-700">📊 Shadow Analysis</h3>
           <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-600">阴影面积:</span>
+              <span className="text-gray-600">Shadow area:</span>
               <span className="font-medium">
                 {analysisResults.shadowArea.toFixed(0)} m²
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">覆盖率:</span>
+              <span className="text-gray-600">Coverage:</span>
               <span className="font-medium">
                 {((analysisResults.shadowArea / 10000) * 100).toFixed(1)}%
               </span>

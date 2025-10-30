@@ -8,6 +8,7 @@ import { buildingCache } from '../../cache/buildingCache';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { shadowOptimizer } from '../../services/shadowOptimizer';
 import { weatherService } from '../../services/weatherService';
+import { ApiService } from '../../services/apiService';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
 const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
@@ -115,7 +116,7 @@ const UPLOADED_SOURCE_ID = 'uploaded-geometry-source';
 const UPLOADED_FILL_LAYER_ID = 'uploaded-geometry-fill';
 const UPLOADED_OUTLINE_LAYER_ID = 'uploaded-geometry-outline';
 
-// 声明全局ShadeMap类型
+// Declare global ShadeMap type
 declare global {
   interface Window {
     ShadeMap: any;
@@ -130,13 +131,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const shadeMapRef = useRef<any>(null);
-  const [buildingsLoaded, setBuildingsLoaded] = useState(false);
-  const [shadowLoaded, setShadowLoaded] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('准备中...');
-  const [autoLoadBuildings, setAutoLoadBuildings] = useState(true); // 🆕 默认开启自动加载
-  const loadBuildingsRef = useRef<(() => Promise<void>) | undefined>(undefined); // 🆕 用于打破循环依赖
-  const moveEndTimeoutRef = useRef<number | null>(null); // 🆕 防抖timer（在load事件中使用）
+  const [statusMessage, setStatusMessage] = useState('Preparing…');
+  const loadBuildingsRef = useRef<(() => Promise<void>) | undefined>(undefined); // Preserve latest loader for debounced callbacks
+  const moveEndTimeoutRef = useRef<number | null>(null); // Debounce timer used by moveend handler
   const tracePlaybackRef = useRef<number | null>(null);
   const weatherRequestRef = useRef<Promise<void> | null>(null);
   const lastWeatherKeyRef = useRef<string | null>(null);
@@ -160,9 +157,17 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     selectedGeometryId,
     setGeometryAnalysis,
     addStatusMessage,
+    buildingsLoaded,
+    setBuildingsLoaded,
+    isLoadingBuildings,
+    setIsLoadingBuildings,
+    shadowSimulatorReady,
+    setShadowSimulatorReady,
+    isInitialisingShadow,
+    setIsInitialisingShadow,
+    autoLoadBuildings,
+    setViewportActions,
   } = useShadowMapStore();
-  const actionButtonBase =
-    'flex w-full h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60';
 
   // Component initialisation lifecycle
   console.log('✅ ShadowMapViewport mounted')
@@ -354,7 +359,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     const map = mapRef.current;
     const shadeMap = shadeMapRef.current;
 
-    if (!map || !shadeMap || !shadowLoaded) {
+    if (!map || !shadeMap || !shadowSimulatorReady) {
       return;
     }
 
@@ -373,7 +378,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     }
 
     if (!shadowSettingsState.showSunExposure) {
-      addStatusMessage?.('⚠️ 请先开启“🌈 太阳热力图”以计算日照时长。', 'warning');
+      addStatusMessage?.('⚠️ Enable the 🌈 Sun Exposure layer before running geometry analysis.', 'warning');
       return;
     }
 
@@ -388,6 +393,8 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     let cancelled = false;
     analysisInFlightRef.current = true;
+
+    setIsInitialisingShadow(true);
 
     try {
       const samples = generateSamplePointsForGeometry(geometry, geometryEntry.bbox);
@@ -436,12 +443,12 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
           samples: results,
         });
         analysisKeyRef.current = analysisKey;
-        addStatusMessage?.('✅ 阴影分析完成。', 'info');
+        addStatusMessage?.('✅ Shadow analysis complete.', 'info');
       }
     } catch (error) {
       if (!cancelled) {
         console.error('Geometry analysis failed', error);
-        addStatusMessage?.('❌ 阴影分析失败。', 'error');
+        addStatusMessage?.('❌ Shadow analysis failed.', 'error');
       }
     } finally {
       analysisInFlightRef.current = false;
@@ -456,7 +463,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     uploadedGeometries,
     currentDate,
     shadowSettingsState.showSunExposure,
-    shadowLoaded,
+    shadowSimulatorReady,
     addStatusMessage,
     setGeometryAnalysis,
   ]);
@@ -486,25 +493,6 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   }, [])
 
   // Back-end connectivity quick check
-  const testWfsConnection = useCallback(async () => {
-    try {
-      setStatusMessage('Testing WFS connection...')
-      const response = await fetch('http://localhost:3500/api/wfs-buildings/test')
-      const result = await response.json()
-      
-      if (result.success) {
-        setStatusMessage('WFS connection successful')
-        return true
-      } else {
-        setStatusMessage('WFS connection failed: ' + result.message)
-        return false
-      }
-    } catch (error) {
-      setStatusMessage('WFS connection failed: ' + (error as Error).message)
-      return false
-    }
-  }, [])
-
   // Load buildings from the back-end stream
   const loadBuildings = useCallback(async () => {
     if (!mapRef.current) {
@@ -513,7 +501,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     }
 
     try {
-      setIsLoading(true)
+      setIsLoadingBuildings(true)
       setStatusMessage('Loading buildings for the current view...')
       console.log('🏢 Begin loading buildings for current viewport')
       
@@ -544,7 +532,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       setStatusMessage('Building load failed: ' + message)
       setBuildingsLoaded(false)
     } finally {
-      setIsLoading(false)
+      setIsLoadingBuildings(false)
     }
   }, [])
 
@@ -553,12 +541,12 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     loadBuildingsRef.current = loadBuildings
   }, [loadBuildings])
 
-  // 添加建筑物到地图 - 完整调试版本
+  // Add building data to the map with verbose diagnostics
   const addBuildingsToMap = useCallback((buildingData: any) => {
-    console.log('🚀 开始添加建筑物到地图...');
+    console.log('🚀 Starting building ingestion...');
     
     if (!mapRef.current) {
-      console.error('❌ mapRef.current 为空');
+      console.error('❌ mapRef.current is null');
       return;
     }
 
@@ -566,7 +554,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     const sourceId = 'clean-buildings';
     const layerId = 'clean-buildings-extrusion';
 
-    console.log('🗺️ 地图状态:', {
+    console.log('🗺️ Map state:', {
       loaded: map.loaded(),
       style: map.getStyle()?.name,
       center: map.getCenter(),
@@ -574,17 +562,17 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       pitch: map.getPitch()
     });
 
-    // 🆕 检查是否已有数据源
+    // Check whether the source already exists
     const existingSource = map.getSource(sourceId);
     const hasExistingLayer = !!map.getLayer(layerId);
     
-    console.log('� 现有状态:', {
+    console.log('🧾 Existing layer/source status:', {
       hasSource: !!existingSource,
       hasLayer: hasExistingLayer
     });
 
-    // 详细数据检查
-    console.log('🔍 详细数据分析:', {
+    // Log dataset diagnostics
+    console.log('🔍 Dataset diagnostics:', {
       dataType: typeof buildingData,
       hasFeatures: !!buildingData.features,
       featuresCount: buildingData.features?.length,
@@ -592,19 +580,19 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     });
 
     if (!buildingData.features || !Array.isArray(buildingData.features)) {
-      console.error('❌ 数据格式错误: features不是数组');
+      console.error('❌ Invalid data format: features is not an array');
       return;
     }
 
     if (buildingData.features.length === 0) {
-      console.warn('⚠️ 建筑物数据为空');
+      console.warn('⚠️ Building dataset is empty');
       return;
     }
 
-    // 分析前3个建筑物的数据结构
+    // Inspect the first few features for sanity checks
     for (let i = 0; i < Math.min(3, buildingData.features.length); i++) {
       const feature = buildingData.features[i];
-      console.log(`🏢 建筑物 ${i + 1} 详细分析:`, {
+      console.log(`🏢 Building ${i + 1} diagnostics:`, {
         type: feature.type,
         geometry: {
           type: feature.geometry?.type,
@@ -622,26 +610,26 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       });
     }
 
-    // 处理高度数据
+    // Prepare building height attributes
     const processedFeatures = buildingData.features.map((feature: Feature, index: number) => {
       if (!feature.properties) feature.properties = {};
       
-      // 设置高度
+      // Assign height when explicit values are missing
       if (!feature.properties.height) {
         if (feature.properties.height_mean) {
           feature.properties.height = feature.properties.height_mean;
         } else if (feature.properties.levels) {
           feature.properties.height = feature.properties.levels * 3.5;
         } else {
-          feature.properties.height = 15; // 默认高度
+          feature.properties.height = 15; // Default height fallback
         }
       }
 
-      // 确保高度是数字
+      // Ensure height is numeric
       feature.properties.height = Number(feature.properties.height) || 15;
 
       if (index < 3) {
-        console.log(`🔧 处理后建筑物 ${index + 1}:`, {
+        console.log(`🔧 Post-processed building ${index + 1}:`, {
           height: feature.properties.height,
           heightType: typeof feature.properties.height
         });
@@ -650,7 +638,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       return feature;
     });
 
-    console.log('📊 处理后数据统计:', {
+    console.log('📊 Processed dataset stats:', {
       totalFeatures: processedFeatures.length,
       heightStats: {
         min: Math.min(...processedFeatures.map((f: Feature) => f.properties?.height || 0)),
@@ -659,65 +647,65 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       }
     });
 
-    // 创建GeoJSON数据源
+    // Build GeoJSON source payload
     const geoJsonData: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
       features: processedFeatures
     };
 
-    // 🆕 如果数据源已存在，只更新数据；否则创建新数据源和图层
+    // Update the source if present; otherwise create it alongside the layer
     if (existingSource && 'setData' in existingSource) {
-      console.log('� 更新现有数据源（不删除图层，避免阴影模拟器冲突）');
+      console.log('🛠️ Updating existing source (keep layers to avoid ShadeMap conflicts)');
       (existingSource as mapboxgl.GeoJSONSource).setData(geoJsonData);
-      console.log('✅ 数据源更新成功');
+      console.log('✅ Source update complete');
     } else {
-      console.log('�📍 创建新数据源...');
+      console.log('🆕 Creating new data source...');
       try {
         map.addSource(sourceId, {
           type: 'geojson',
           data: geoJsonData
         });
-        console.log('✅ 数据源添加成功');
+        console.log('✅ Data source added successfully');
       } catch (sourceError) {
-        console.error('❌ 添加数据源失败:', sourceError);
+        console.error('❌ Failed to add data source:', sourceError);
         return;
       }
 
-      // 添加图层（仅首次）
-      console.log('🎨 添加图层到地图...');
+      // Add the extrusion layer when creating the source
+      console.log('🎨 Adding extrusion layer to the map...');
       try {
         map.addLayer({
         id: layerId,
         type: 'fill-extrusion',
         source: sourceId,
         paint: {
-          'fill-extrusion-color': '#4a4a4a', // 深灰色建筑物
+          'fill-extrusion-color': '#4a4a4a', // Render buildings in dark grey
           'fill-extrusion-height': ['get', 'height'],
           'fill-extrusion-base': 0,
           'fill-extrusion-opacity': 0.8
         }
       });
-      console.log('✅ 图层添加成功');
+      console.log('✅ Layer added successfully');
       } catch (layerError) {
-        console.error('❌ 添加图层失败:', layerError);
+        console.error('❌ Failed to add layer:', layerError);
         return;
       }
-    } // 🆕 关闭 else 块
+    } // Close conditional source creation block
 
-    // 立即验证
-    console.log('🔍 立即验证图层状态:');
+    // Immediate validation
+    console.log('🔍 Validating layer state immediately:');
     const addedLayer = map.getLayer(layerId);
     const addedSource = map.getSource(sourceId);
-    console.log('📊 验证结果:', {
+    console.log('📊 Validation result:', {
       layerExists: !!addedLayer,
       layerType: addedLayer?.type,
       sourceExists: !!addedSource,
       sourceType: addedSource?.type
     });
 
-    // 检查地图边界是否包含数据
+    // Log map bounds for troubleshooting
     const mapBounds = map.getBounds();
-    console.log('🗺️ 地图边界与数据范围检查:', {
+    console.log('🗺️ Map bounds vs data extents:', {
       mapBounds: {
         north: mapBounds.getNorth(),
         south: mapBounds.getSouth(),
@@ -726,19 +714,19 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       }
     });
 
-    // 延迟验证渲染状态
+    // Delayed validation to ensure render completes
     setTimeout(() => {
       if (!map || !mapRef.current) {
-        console.warn('⚠️ 地图对象已销毁，跳过延迟验证');
+        console.warn('⚠️ Map instance disposed, skipping delayed validation');
         return;
       }
       
-      console.log('⏰ 延迟验证 (1秒后):');
+      console.log('⏰ Delayed validation (after 1s):');
       const finalLayer = map.getLayer(layerId);
       const finalSource = map.getSource(sourceId);
       
       if (finalSource && 'type' in finalSource && finalSource.type === 'geojson') {
-        console.log('📈 最终状态:', {
+        console.log('📈 Final render state:', {
           layerVisible: finalLayer ? true : false,
           sourceLoaded: true,
           mapRendering: map.loaded()
@@ -746,18 +734,18 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       }
     }, 1000);
 
-    console.log('🎯 建筑物添加流程完成');
+    console.log('🎯 Building ingestion sequence complete');
   }, [refreshWeatherData]);
 
-  // 初始化阴影模拟器
+  // Initialise shadow simulator
   const initShadowSimulator = useCallback(() => {
     if (!mapRef.current || !window.ShadeMap) {
-      setStatusMessage('地图或阴影模拟器未就绪');
+      setStatusMessage('Map or shadow simulator not ready');
       return;
     }
 
     if (!buildingsLoaded) {
-      setStatusMessage('请先加载建筑物数据');
+      setStatusMessage('Load buildings before initializing ShadeMap');
       return;
     }
 
@@ -776,45 +764,45 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       );
 
       if (!optimizationCheck.shouldCalculate && shadeMapRef.current) {
-        console.log('⏭️ 跳过阴影计算:', optimizationCheck.reason);
-        setStatusMessage(`阴影已是最新 (${optimizationCheck.reason})`);
+        console.log('⏭️ Skip shadow calculation:', optimizationCheck.reason);
+        setStatusMessage(`Shadows already up to date (${optimizationCheck.reason})`);
         return;
       }
 
-      console.log('🌅 开始初始化阴影模拟器...', { 
+      console.log('🌅 Initializing shadow simulator...', { 
         date: latestDate,
         reason: optimizationCheck.reason 
       });
       
-      // 安全地移除现有阴影模拟器
+      // Remove any existing ShadeMap instance before reinitialising
       if (shadeMapRef.current) {
         try {
-          console.log('🗑️ 移除现有阴影模拟器...');
+          console.log('🗑️ Removing existing shadow simulator...');
           shadeMapRef.current.remove();
         } catch (removeError) {
-          console.warn('⚠️ 移除现有阴影模拟器时出错:', removeError);
+          console.warn('⚠️ Error removing existing shadow simulator:', removeError);
         } finally {
           shadeMapRef.current = null;
         }
       }
 
-      // 验证建筑物数据
+      // Validate building data presence
       const buildingSource = mapRef.current.getSource('clean-buildings');
       if (!buildingSource) {
-        setStatusMessage('建筑物数据源不存在');
+        setStatusMessage('Building data source not found');
         return;
       }
 
       const sourceData = (buildingSource as any)._data;
       if (!sourceData || !sourceData.features || sourceData.features.length === 0) {
-        setStatusMessage('建筑物数据为空');
+        setStatusMessage('Building dataset is empty');
         return;
       }
 
       const buildings = sourceData.features;
-      console.log(`🏢 准备为阴影模拟器提供 ${buildings.length} 个建筑物`);
+      console.log(`🏢 Preparing to provide ${buildings.length} building features to ShadeMap`);
 
-      // 验证建筑物数据格式
+      // Validate building data presence
       const validBuildings = buildings.filter((building: any) => {
         return building && 
                building.geometry && 
@@ -822,31 +810,31 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
                building.properties;
       });
 
-      console.log(`✅ 有效建筑物数量: ${validBuildings.length}`);
+      console.log(`✅ Valid building count: ${validBuildings.length}`);
 
       if (validBuildings.length === 0) {
-        setStatusMessage('没有有效的建筑物数据');
+        setStatusMessage('No valid building features provided');
         return;
       }
 
-      // 创建新的阴影模拟器 - 使用store中的最新设置
+      const terrainSource = latestMapSettings.showDEMLayer
+        ? {
+            tileSize: 256,
+            maxZoom: 15,
+            getSourceUrl: ({ x, y, z }: { x: number; y: number; z: number }) =>
+              ApiService.getDEMTileUrl(z, x, y),
+            getElevation: ({ r, g, b }: { r: number; g: number; b: number }) =>
+              r * 256 + g + b / 256 - 32768,
+          }
+        : undefined;
+
+      // Instantiate ShadeMap with the freshest settings from the store
       shadeMapRef.current = new window.ShadeMap({
         date: latestDate,
         color: latestMapSettings.shadowColor,
         opacity: getEffectiveOpacity(latestMapSettings.shadowOpacity),
         apiKey: mapboxgl.accessToken,
-        terrainSource: {
-          tileSize: 256,
-          maxZoom: 15,
-          getSourceUrl: () => {
-            // 使用本地Example DEM数据
-            return `/Example/Height/europe/11.4_48.2_11.6_48.0_sr_ss.tif`;
-          },
-          getElevation: ({ r, g, b }: { r: number; g: number; b: number }) => {
-            // GeoTIFF格式的高程解析（示例实现，视数据格式调整）
-            return (r * 256 + g + b / 256) - 32768;
-          }
-        },
+        ...(terrainSource ? { terrainSource } : {}),
         getFeatures: () => {
           const buildingSource = mapRef.current?.getSource('clean-buildings');
           if (buildingSource && (buildingSource as any)._data) {
@@ -857,10 +845,10 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
                      building.geometry.coordinates && 
                      building.properties;
             });
-            console.log(`🏢 实时提供 ${validBuildings.length} 个有效建筑物给阴影模拟器`);
+            console.log(`🏢 Providing ${validBuildings.length} valid buildings to ShadeMap in real time`);
             return validBuildings;
           }
-          console.warn('⚠️ 无法获取建筑物数据源');
+          console.warn('⚠️ Unable to read building data source');
           return [];
         },
         debug: (msg: string) => {
@@ -870,47 +858,49 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
       applyShadowOpacity(latestMapSettings.shadowOpacity);
 
-      // 🎯 记录这次计算，用于后续优化
+      // Record this calculation for optimisation statistics
       shadowOptimizer.recordCalculation(mapRef.current, latestDate, validBuildings.length);
 
-      setShadowLoaded(true);
-      setStatusMessage(`阴影模拟器初始化成功，处理了 ${validBuildings.length} 个建筑物`);
-      console.log('✅ 阴影模拟器初始化成功');
+      setShadowSimulatorReady(true);
+      setStatusMessage(`Shadow simulator ready; processed ${validBuildings.length} building features to ShadeMap`);
+      console.log('✅ Shadow simulator initialised');
       
-      // 📊 输出优化统计
+      // Emit optimisation statistics
       const stats = shadowOptimizer.getStats();
-      console.log('📊 阴影优化统计:', stats);
+      console.log('📊 Shadow optimiser stats:', stats);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setStatusMessage('阴影模拟器初始化失败: ' + errorMessage);
-      console.error('❌ 阴影模拟器初始化失败:', error);
+      setStatusMessage('Shadow simulator initialisation failed: ' + errorMessage);
+      console.error('❌ Shadow simulator initialisation failed:', error);
       
-      // 重置状态
-      setShadowLoaded(false);
+      // Reset status indicators
+      setShadowSimulatorReady(false);
       shadeMapRef.current = null;
+    } finally {
+      setIsInitialisingShadow(false);
     }
     // ✅ FIXED: Don't include currentDate in deps - time updates via setDate(), not re-init
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildingsLoaded]);
 
-  // 更新阴影时间
+  // Update shadow simulation time
   const updateShadowTime = useCallback((newTime: Date) => {
     const { setCurrentDate } = useShadowMapStore.getState();
     
     // ✅ Add safety checks
     if (!shadeMapRef.current) {
-      setStatusMessage('阴影模拟器未初始化');
+      setStatusMessage('Shadow simulator not initialised');
       return;
     }
 
     if (!mapRef.current || !mapRef.current.loaded()) {
-      setStatusMessage('地图未完全加载');
+      setStatusMessage('Map is not fully loaded');
       return;
     }
 
     const buildingSource = mapRef.current.getSource('clean-buildings');
     if (!buildingSource) {
-      setStatusMessage('建筑物数据未加载');
+      setStatusMessage('Building data not loaded');
       return;
     }
 
@@ -918,12 +908,12 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       if (typeof shadeMapRef.current.setDate === 'function') {
         shadeMapRef.current.setDate(newTime);
         setCurrentDate(newTime);
-        setStatusMessage('阴影时间已更新: ' + newTime.toLocaleString());
+        setStatusMessage('Shadow time updated: ' + newTime.toLocaleString());
         refreshWeatherData('time-update');
       }
     } catch (error) {
       console.error('❌ Error updating shadow time:', error);
-      setStatusMessage('更新阴影时间失败');
+      setStatusMessage('Failed to update shadow time');
     }
   }, []);
 
@@ -1231,7 +1221,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     }
   }, [mapSettings.showBuildingLayer, mapSettings.showShadowLayer, mapSettings.shadowOpacity, getEffectiveOpacity]);
 
-  // 清除建筑物和阴影
+  // Clear building and shadow artefacts
   const clearBuildings = useCallback(() => {
     if (!mapRef.current) return;
 
@@ -1239,49 +1229,66 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     const sourceId = 'clean-buildings';
     const layerId = 'clean-buildings-extrusion';
 
-    // 移除建筑物图层
+    // Remove building layer
     if (map.getLayer(layerId)) {
       map.removeLayer(layerId);
-      console.log('🗑️ 移除建筑物图层');
+      console.log('🗑️ Removing building layer');
     }
     if (map.getSource(sourceId)) {
       map.removeSource(sourceId);
-      console.log('🗑️ 移除建筑物数据源');
+      console.log('🗑️ Removing building source');
     }
 
     // Clear the client-side cache
     buildingCache.clear();
 
-    // 安全地移除阴影模拟器
+    // Remove ShadeMap safely
     if (shadeMapRef.current) {
       try {
         shadeMapRef.current.remove();
-        console.log('🗑️ 移除阴影模拟器');
+        console.log('🗑️ Removing shadow simulator');
       } catch (removeError) {
-        console.warn('⚠️ 移除阴影模拟器时出错:', removeError);
+        console.warn('⚠️ Error removing shadow simulator:', removeError);
       } finally {
         shadeMapRef.current = null;
       }
     }
 
-    // 重置状态
+    // Reset status indicators
     setBuildingsLoaded(false);
-    setShadowLoaded(false);
-    setStatusMessage('已清除建筑物和阴影，可以重新加载');
+    setShadowSimulatorReady(false);
+    setStatusMessage('Buildings and shadow data cleared; ready to reload');
   }, []);
 
-  // 初始化地图
+  // Expose core viewport actions to the toolbar
+  useEffect(() => {
+    setViewportActions({
+      loadBuildings,
+      initShadowSimulator,
+      clearBuildings,
+    });
+
+    return () => {
+      setViewportActions({
+        loadBuildings: undefined,
+        initShadowSimulator: undefined,
+        clearBuildings: undefined,
+      });
+    };
+  }, [setViewportActions, loadBuildings, initShadowSimulator, clearBuildings]);
+
+  // Initialise the map instance
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    console.log('🗺️ 初始化清洁版阴影地图...');
+    console.log('🗺️ Initialising streamlined shadow map...');
 
     mapboxgl.accessToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
       style: 'mapbox://styles/mapbox/streets-v11',
-      center: [114.1694, 22.3193], // 香港
+      center: [114.1694, 22.3193], // Hong Kong
       zoom: 16,
       pitch: 45,
       bearing: 0,
@@ -1291,44 +1298,44 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     mapRef.current = map;
 
     map.on('load', async () => {
-      console.log('✅ 地图加载完成');
+      console.log('✅ Map load complete');
       
-      // 加载阴影模拟器库
+      // Load ShadeMap library on demand
       await loadShadowSimulator();
       
-      // 🆕 自动加载初始区域的建筑物
-      console.log('🏗️ 自动加载初始区域建筑物...');
-      setStatusMessage('自动加载建筑物中...');
+      // Auto-load buildings for the initial viewport
+      console.log('🏗️ Auto-loading initial viewport buildings...');
+      setStatusMessage('Auto-loading buildings...');
       await loadBuildings();
       
-      // 自动初始化阴影
-      console.log('🌅 自动初始化阴影模拟器...');
-      setStatusMessage('自动初始化阴影...');
-      // 给建筑物一点时间渲染
+      // Auto-initialise shadows after buildings load
+      console.log('🌅 Auto-initialising shadow simulator...');
+      setStatusMessage('Auto-initialising shadows...');
+      // Give the extrusion a moment to render
       setTimeout(() => {
         initShadowSimulator();
       }, 500);
 
       refreshWeatherData('map-load');
       
-      // 🆕 地图加载完成后，绑定 moveend 监听器
-      console.log('🎯 地图完全加载，现在绑定moveend监听器...');
+      // After load, register the debounced moveend listener
       const handleMoveEnd = () => {
-        console.log('📍 moveend事件触发！');
-        
+        if (!autoLoadBuildings) {
+          return;
+        }
+
         if (!loadBuildingsRef.current) {
-          console.warn('⚠️ loadBuildingsRef 为空');
+          console.warn('⚠️ loadBuildingsRef is undefined');
           return;
         }
         
-        // 清除之前的timer
+        // Clear any existing debounce timer
         if (moveEndTimeoutRef.current) {
           window.clearTimeout(moveEndTimeoutRef.current);
         }
         
-        // 防抖：500ms后加载
+        // Debounce: load again after 500ms
         moveEndTimeoutRef.current = window.setTimeout(() => {
-          console.log('🗺️ 地图移动结束（500ms防抖后），开始加载建筑物...');
           if (loadBuildingsRef.current) {
             loadBuildingsRef.current();
           }
@@ -1337,7 +1344,6 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       };
       
       map.on('moveend', handleMoveEnd);
-      console.log('✅ moveend监听器已绑定（在load事件中）');
     });
 
     return () => {
@@ -1346,11 +1352,11 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         mapRef.current = null;
       }
     };
-  }, [loadShadowSimulator, testWfsConnection, initShadowSimulator]); // ✅ 移除 loadBuildings 依赖
+  }, [loadShadowSimulator, initShadowSimulator, refreshWeatherData, autoLoadBuildings]);
 
   return (
     <div className={`relative w-full h-full ${className}`}>
-      {/* 添加CSS动画样式 */}
+      {/* Inline animation styles */}
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
@@ -1363,144 +1369,53 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
           display: none !important;
         }
       `}</style>
-      {/* 地图容器 */}
+      {/* Map container */}
       <div ref={mapContainerRef} className="w-full h-full" />
       
-      {/* 🆕 左侧控制面板 (包含 Shadow Layer, Sun Exposure, Buildings, Dynamic Quality 按钮) */}
+      {/* Left control panel (shadow, sun exposure, buildings, quality) */}
       <CleanControlPanel />
       
-      {/* 实用控制面板 */}
-      <div className="absolute top-6 right-6 z-40 flex w-72 max-w-[90vw] flex-col gap-4">
-        <div className="space-y-3 rounded-2xl border border-white/40 bg-white/95 p-4 shadow-2xl backdrop-blur-xl">
-          <button
-            onClick={testWfsConnection}
-            disabled={isLoading}
-            className={`${actionButtonBase} bg-blue-600 hover:bg-blue-700 focus:ring-blue-300`}
-          >
-            <span className="text-lg">🔍</span>
-            <span className="leading-tight">测试WFS连接</span>
-          </button>
-
-          <button
-            onClick={() => {
-              if (mapRef.current) {
-                console.log('🧪 手动触发moveend事件测试');
-                console.log('地图对象:', mapRef.current);
-                console.log('自动加载状态:', autoLoadBuildings);
-                console.log('地图已加载:', mapRef.current.loaded());
-                mapRef.current.fire('moveend');
-              }
-            }}
-            className={`${actionButtonBase} bg-violet-500 hover:bg-violet-600 focus:ring-violet-300`}
-          >
-            <span className="text-lg">🧪</span>
-            <span className="leading-tight">测试moveend</span>
-          </button>
-
-          <button
-            onClick={loadBuildings}
-            disabled={isLoading}
-            className={`${actionButtonBase} ${
-              buildingsLoaded
-                ? 'bg-emerald-600 hover:bg-emerald-700'
-                : 'bg-emerald-500 hover:bg-emerald-600'
-            } focus:ring-emerald-300`}
-          >
-            {isLoading ? (
-              <>
-                <span className="animate-spin text-lg">⏳</span>
-                <span className="leading-tight">加载中...</span>
-              </>
-            ) : (
-              <>
-                <span className="text-lg">🏢</span>
-                <span className="leading-tight">
-                  {buildingsLoaded ? '重新加载建筑物' : '加载建筑物'}
-                </span>
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={() => setAutoLoadBuildings(!autoLoadBuildings)}
-            className={`${actionButtonBase} ${
-              autoLoadBuildings
-                ? 'bg-amber-500 hover:bg-amber-600 focus:ring-amber-300'
-                : 'bg-slate-500 hover:bg-slate-600 focus:ring-slate-300'
-            }`}
-          >
-            <span className="text-lg">{autoLoadBuildings ? '🟢' : '⚫'}</span>
-            <span className="leading-tight">
-              自动加载: {autoLoadBuildings ? '开' : '关'}
-            </span>
-          </button>
-
-          <button
-            onClick={initShadowSimulator}
-            disabled={isLoading || !buildingsLoaded}
-            className={`${actionButtonBase} ${
-              shadowLoaded
-                ? 'bg-indigo-600 hover:bg-indigo-700'
-                : 'bg-violet-600 hover:bg-violet-700'
-            } focus:ring-violet-300`}
-          >
-            <span className="text-lg">🌅</span>
-            <span className="leading-tight">
-              {shadowLoaded ? '重新计算阴影' : '初始化阴影模拟器'}
-            </span>
-          </button>
-
-          <button
-            onClick={clearBuildings}
-            disabled={isLoading || (!buildingsLoaded && !shadowLoaded)}
-            className={`${actionButtonBase} bg-red-500 hover:bg-red-600 focus:ring-red-300`}
-          >
-            <span className="text-lg">🗑️</span>
-            <span className="leading-tight">清除所有数据</span>
-          </button>
-
-        </div>
-
-        <div className="rounded-2xl border border-white/40 bg-white/95 p-4 shadow-2xl backdrop-blur-xl">
-          <label className="mb-2 block text-sm font-medium text-gray-700">阴影时间</label>
-          <input
-            type="datetime-local"
-            value={currentDate.toISOString().slice(0, 16)}
-            onChange={(e) => updateShadowTime(new Date(e.target.value))}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 shadow-inner focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
-          />
-        </div>
-      </div>
-
-      {/* 状态信息和操作指南 */}
+      {/* Status block & quick start */}
       <div className="absolute bottom-4 left-6 z-30 space-y-3">
-        {/* 状态信息 */}
+        {/* Status summary */}
         <div className="bg-white/90 backdrop-blur-md rounded-lg shadow-lg border border-white/20 px-4 py-3">
           <div className="text-sm text-gray-700 space-y-1">
             <div className="flex items-center">
               <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-              状态: {statusMessage}
+              Status: {statusMessage}
             </div>
             <div className="flex items-center">
-              <div className={`w-2 h-2 rounded-full mr-2 ${buildingsLoaded ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-              建筑物: {buildingsLoaded ? '已加载' : '未加载'}
+              <div
+                className={`w-2 h-2 rounded-full mr-2 ${isLoadingBuildings
+                  ? 'bg-amber-500'
+                  : buildingsLoaded
+                  ? 'bg-green-500'
+                  : 'bg-gray-400'}`}
+              ></div>
+              Buildings: {isLoadingBuildings ? 'Loading…' : buildingsLoaded ? 'Loaded' : 'Not loaded'}
             </div>
             <div className="flex items-center">
-              <div className={`w-2 h-2 rounded-full mr-2 ${shadowLoaded ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-              阴影: {shadowLoaded ? '已启用' : '未启用'}
+              <div
+                className={`w-2 h-2 rounded-full mr-2 ${isInitialisingShadow
+                  ? 'bg-amber-500'
+                  : shadowSimulatorReady
+                  ? 'bg-green-500'
+                  : 'bg-gray-400'}`}
+              ></div>
+              Shadows: {isInitialisingShadow ? 'Initialising…' : shadowSimulatorReady ? 'Ready' : 'Not ready'}
             </div>
           </div>
         </div>
 
-        {/* 操作指南 */}
+        {/* Quick start helper */}
         <div className="bg-blue-50/90 backdrop-blur-md rounded-lg shadow-lg border border-blue-200/20 px-4 py-3">
           <div className="text-sm text-blue-800">
-            <div className="font-medium mb-2">📋 操作步骤:</div>
+            <div className="font-medium mb-2">📋 Quick start steps:</div>
             <div className="space-y-1 text-xs">
-              <div>1. 🔍 测试WFS连接</div>
-              <div>2. 🏢 加载建筑物数据</div>
-              <div>3. 🌅 初始化阴影模拟器</div>
-              <div>4. ⏰ 调整时间查看阴影变化</div>
+              <div>1. 🗂️ Upload a GeoJSON polygon</div>
+              <div>2. 🏢 Load buildings for the current view</div>
+              <div>3. ☀️ Enable sun exposure & initialise shadows</div>
+              <div>4. ⏰ Adjust time to inspect changes</div>
             </div>
           </div>
         </div>
