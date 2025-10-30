@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { CleanControlPanel } from '../UI/CleanControlPanel';
 import type { Feature, Polygon, MultiPolygon, FeatureCollection } from 'geojson';
 import { getWfsBuildings } from '../../services/wfsBuildingService';
 import { buildingCache } from '../../cache/buildingCache';
@@ -9,6 +8,7 @@ import { useShadowMapStore } from '../../store/shadowMapStore';
 import { shadowOptimizer } from '../../services/shadowOptimizer';
 import { weatherService } from '../../services/weatherService';
 import { ApiService } from '../../services/apiService';
+import { GeometryAnalysisOverlay } from '../Analysis/GeometryAnalysisOverlay';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
 const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
@@ -140,6 +140,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const analysisInFlightRef = useRef(false);
   const lastFitGeometryRef = useRef<string | null>(null);
   const analysisKeyRef = useRef<string | null>(null);
+  const sunExposureStateRef = useRef<string | null>(null);
+  const loadShadowSimulatorRef = useRef<(() => Promise<unknown>) | null>(null);
+  const refreshWeatherDataRef = useRef<((reason: string) => void) | null>(null);
   
   // Connect to Zustand store
   const {
@@ -168,6 +171,8 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     autoLoadBuildings,
     setViewportActions,
   } = useShadowMapStore();
+
+  const autoLoadBuildingsRef = useRef(autoLoadBuildings);
 
   // Component initialisation lifecycle
   console.log('✅ ShadowMapViewport mounted')
@@ -377,7 +382,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       return;
     }
 
-    if (!shadowSettingsState.showSunExposure) {
+    const sunExposureEnabled = mapSettings.showSunExposure || shadowSettingsState.showSunExposure;
+
+    if (!sunExposureEnabled) {
       addStatusMessage?.('⚠️ Enable the 🌈 Sun Exposure layer before running geometry analysis.', 'warning');
       return;
     }
@@ -386,7 +393,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       return;
     }
 
-    const analysisKey = `${selectedGeometryId}|${currentDate.toISOString()}|${shadowSettingsState.showSunExposure ? '1' : '0'}`;
+    const analysisKey = `${selectedGeometryId}|${currentDate.toISOString()}|${sunExposureEnabled ? '1' : '0'}`;
     if (analysisKeyRef.current === analysisKey) {
       return;
     }
@@ -462,6 +469,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     selectedGeometryId,
     uploadedGeometries,
     currentDate,
+    mapSettings.showSunExposure,
     shadowSettingsState.showSunExposure,
     shadowSimulatorReady,
     addStatusMessage,
@@ -501,6 +509,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     }
 
     try {
+      setBuildingsLoaded(false)
       setIsLoadingBuildings(true)
       setStatusMessage('Loading buildings for the current view...')
       console.log('🏢 Begin loading buildings for current viewport')
@@ -540,6 +549,17 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   useEffect(() => {
     loadBuildingsRef.current = loadBuildings
   }, [loadBuildings])
+
+  useEffect(() => {
+    loadShadowSimulatorRef.current = loadShadowSimulator;
+  }, [loadShadowSimulator]);
+  useEffect(() => {
+    refreshWeatherDataRef.current = refreshWeatherData;
+  }, [refreshWeatherData]);
+
+  useEffect(() => {
+    autoLoadBuildingsRef.current = autoLoadBuildings;
+  }, [autoLoadBuildings]);
 
   // Add building data to the map with verbose diagnostics
   const addBuildingsToMap = useCallback((buildingData: any) => {
@@ -783,6 +803,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
           console.warn('⚠️ Error removing existing shadow simulator:', removeError);
         } finally {
           shadeMapRef.current = null;
+          sunExposureStateRef.current = null;
         }
       }
 
@@ -1085,7 +1106,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
   useEffect(() => {
     if (!mobilityTrace.length) {
-      setTracePlaying(false);
+      if (isTracePlaying) {
+        setTracePlaying(false);
+      }
       return;
     }
 
@@ -1221,6 +1244,72 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     }
   }, [mapSettings.showBuildingLayer, mapSettings.showShadowLayer, mapSettings.shadowOpacity, getEffectiveOpacity]);
 
+  useEffect(() => {
+    const shadeMap = shadeMapRef.current;
+    if (!shadeMap || typeof shadeMap.setSunExposure !== 'function') {
+      return;
+    }
+
+    if (!shadowSimulatorReady) {
+      return;
+    }
+
+    const enableSunExposure = mapSettings.showSunExposure || shadowSettingsState.showSunExposure;
+    const exposureKey = enableSunExposure ? `on:${currentDate.toISOString()}` : 'off';
+
+    if (sunExposureStateRef.current === exposureKey) {
+      return;
+    }
+    sunExposureStateRef.current = exposureKey;
+
+    let cancelled = false;
+
+    const applySunExposure = async () => {
+      try {
+        if (!enableSunExposure) {
+          await shadeMap.setSunExposure(false);
+          return;
+        }
+
+        const startDate = new Date(currentDate);
+        startDate.setHours(6, 0, 0, 0);
+
+        const endDate = new Date(currentDate);
+        endDate.setHours(18, 0, 0, 0);
+
+        await shadeMap.setSunExposure(true, {
+          startDate,
+          endDate,
+          iterations: 24,
+        });
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('⚠️ Failed to toggle sun exposure:', error);
+        }
+      }
+    };
+
+    applySunExposure();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mapSettings.showSunExposure, shadowSettingsState.showSunExposure, shadowSimulatorReady, currentDate]);
+
+  useEffect(() => {
+    if (!buildingsLoaded) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      initShadowSimulator();
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [buildingsLoaded, initShadowSimulator]);
+
   // Clear building and shadow artefacts
   const clearBuildings = useCallback(() => {
     if (!mapRef.current) return;
@@ -1251,6 +1340,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         console.warn('⚠️ Error removing shadow simulator:', removeError);
       } finally {
         shadeMapRef.current = null;
+        sunExposureStateRef.current = null;
       }
     }
 
@@ -1297,62 +1387,58 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     mapRef.current = map;
 
-    map.on('load', async () => {
+    const handleLoad = async () => {
       console.log('✅ Map load complete');
-      
-      // Load ShadeMap library on demand
-      await loadShadowSimulator();
-      
-      // Auto-load buildings for the initial viewport
+
+      try {
+        const shadowLoader = loadShadowSimulatorRef.current ?? loadShadowSimulator;
+        await shadowLoader();
+      } catch (error) {
+        console.warn('⚠️ ShadeMap library load failed:', error);
+      }
+
       console.log('🏗️ Auto-loading initial viewport buildings...');
       setStatusMessage('Auto-loading buildings...');
       await loadBuildings();
-      
-      // Auto-initialise shadows after buildings load
-      console.log('🌅 Auto-initialising shadow simulator...');
-      setStatusMessage('Auto-initialising shadows...');
-      // Give the extrusion a moment to render
-      setTimeout(() => {
-        initShadowSimulator();
+      (refreshWeatherDataRef.current ?? refreshWeatherData)('map-load');
+    };
+
+    const handleMoveEnd = () => {
+      if (!autoLoadBuildingsRef.current) {
+        return;
+      }
+
+      if (!loadBuildingsRef.current) {
+        console.warn('⚠️ loadBuildingsRef is undefined');
+        return;
+      }
+
+      if (moveEndTimeoutRef.current) {
+        window.clearTimeout(moveEndTimeoutRef.current);
+      }
+
+      moveEndTimeoutRef.current = window.setTimeout(() => {
+        loadBuildingsRef.current?.();
+        (refreshWeatherDataRef.current ?? refreshWeatherData)('moveend');
       }, 500);
+    };
 
-      refreshWeatherData('map-load');
-      
-      // After load, register the debounced moveend listener
-      const handleMoveEnd = () => {
-        if (!autoLoadBuildings) {
-          return;
-        }
-
-        if (!loadBuildingsRef.current) {
-          console.warn('⚠️ loadBuildingsRef is undefined');
-          return;
-        }
-        
-        // Clear any existing debounce timer
-        if (moveEndTimeoutRef.current) {
-          window.clearTimeout(moveEndTimeoutRef.current);
-        }
-        
-        // Debounce: load again after 500ms
-        moveEndTimeoutRef.current = window.setTimeout(() => {
-          if (loadBuildingsRef.current) {
-            loadBuildingsRef.current();
-          }
-          refreshWeatherData('moveend');
-        }, 500);
-      };
-      
-      map.on('moveend', handleMoveEnd);
-    });
+    map.on('load', handleLoad);
+    map.on('moveend', handleMoveEnd);
 
     return () => {
+      if (moveEndTimeoutRef.current) {
+        window.clearTimeout(moveEndTimeoutRef.current);
+        moveEndTimeoutRef.current = null;
+      }
+      map.off('load', handleLoad);
+      map.off('moveend', handleMoveEnd);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
-  }, [loadShadowSimulator, initShadowSimulator, refreshWeatherData, autoLoadBuildings]);
+  }, []); // Initialise map once
 
   return (
     <div className={`relative w-full h-full ${className}`}>
@@ -1371,14 +1457,27 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       `}</style>
       {/* Map container */}
       <div ref={mapContainerRef} className="w-full h-full" />
-      
-      {/* Left control panel (shadow, sun exposure, buildings, quality) */}
-      <CleanControlPanel />
-      
-      {/* Status block & quick start */}
-      <div className="absolute bottom-4 left-6 z-30 space-y-3">
-        {/* Status summary */}
-        <div className="bg-white/90 backdrop-blur-md rounded-lg shadow-lg border border-white/20 px-4 py-3">
+      <GeometryAnalysisOverlay />
+      {/* Status block */}
+      <div
+        className="absolute bottom-4 left-6 z-30"
+        style={{
+          position: 'absolute',
+          left: '1.5rem',
+          bottom: '1.5rem',
+          zIndex: 200,
+        }}
+      >
+        <div
+          className="bg-white/90 backdrop-blur-md rounded-lg shadow-lg border border-white/20 px-4 py-3"
+          style={{
+            borderRadius: '0.75rem',
+            background: 'rgba(255, 255, 255, 0.9)',
+            padding: '0.75rem 1rem',
+            boxShadow: '0 18px 40px rgba(15, 23, 42, 0.18)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+          }}
+        >
           <div className="text-sm text-gray-700 space-y-1">
             <div className="flex items-center">
               <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
@@ -1403,19 +1502,6 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
                   : 'bg-gray-400'}`}
               ></div>
               Shadows: {isInitialisingShadow ? 'Initialising…' : shadowSimulatorReady ? 'Ready' : 'Not ready'}
-            </div>
-          </div>
-        </div>
-
-        {/* Quick start helper */}
-        <div className="bg-blue-50/90 backdrop-blur-md rounded-lg shadow-lg border border-blue-200/20 px-4 py-3">
-          <div className="text-sm text-blue-800">
-            <div className="font-medium mb-2">📋 Quick start steps:</div>
-            <div className="space-y-1 text-xs">
-              <div>1. 🗂️ Upload a GeoJSON polygon</div>
-              <div>2. 🏢 Load buildings for the current view</div>
-              <div>3. ☀️ Enable sun exposure & initialise shadows</div>
-              <div>4. ⏰ Adjust time to inspect changes</div>
             </div>
           </div>
         </div>

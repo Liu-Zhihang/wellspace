@@ -39,6 +39,7 @@ export const LeftIconToolbar: React.FC = () => {
     setIsAnimating,
     mapSettings,
     updateMapSettings,
+    updateShadowSettings,
     addStatusMessage,
     setMobilityTrace,
     clearMobilityTrace,
@@ -110,6 +111,14 @@ export const LeftIconToolbar: React.FC = () => {
   const isPolygonGeometry = (geometry: any): geometry is Geometry => {
     if (!geometry || typeof geometry !== 'object') return false;
     return geometry.type === 'Polygon' || geometry.type === 'MultiPolygon';
+  };
+
+  const isTraceGeometry = (geometry: any): boolean => {
+    if (!geometry || typeof geometry !== 'object') return false;
+    if (geometry.type === 'GeometryCollection') {
+      return Array.isArray(geometry.geometries) && geometry.geometries.some(isTraceGeometry);
+    }
+    return geometry.type === 'Point' || geometry.type === 'MultiPoint' || geometry.type === 'LineString';
   };
 
   const computeFeatureBbox = (feature: Feature<Geometry>): [number, number, number, number] => {
@@ -191,6 +200,29 @@ export const LeftIconToolbar: React.FC = () => {
 
     pushFeature(geojson);
     return features;
+  };
+
+  const hasTraceLikeFeatures = (geojson: any): boolean => {
+    const checkFeature = (feature: any): boolean => {
+      if (!feature || typeof feature !== 'object') return false;
+      if (feature.type === 'Feature' && feature.geometry) {
+        return isTraceGeometry(feature.geometry);
+      }
+      if (feature.type === 'GeometryCollection') {
+        return Array.isArray(feature.geometries) && feature.geometries.some(checkFeature);
+      }
+      return isTraceGeometry(feature);
+    };
+
+    if (!geojson || typeof geojson !== 'object') {
+      return false;
+    }
+
+    if (geojson.type === 'FeatureCollection' && Array.isArray(geojson.features)) {
+      return geojson.features.some(checkFeature);
+    }
+
+    return checkFeature(geojson);
   };
 
   const parseMobilityTraceGeoJson = (raw: string | unknown): MobilityTracePoint[] => {
@@ -296,6 +328,11 @@ export const LeftIconToolbar: React.FC = () => {
     return geometryId;
   };
 
+  const toggleSunExposureSetting = (enabled: boolean) => {
+    updateMapSettings({ showSunExposure: enabled });
+    updateShadowSettings({ showSunExposure: enabled });
+  };
+
   const handleFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
@@ -317,6 +354,7 @@ export const LeftIconToolbar: React.FC = () => {
       const parsed = JSON.parse(raw);
 
       const polygonFeatures = extractPolygonFeatures(parsed);
+      const containsTrace = hasTraceLikeFeatures(parsed);
 
       if (polygonFeatures.length > 0) {
         const baseOffset = uploadedGeometries.length;
@@ -329,14 +367,17 @@ export const LeftIconToolbar: React.FC = () => {
         }
 
         clearMobilityTrace();
+        toggleSunExposureSetting(true);
 
         addStatusMessage?.(`✅ Uploaded ${polygonFeatures.length} polygon feature(s) for analysis.`, 'info');
         setOpenPanel(null);
-      } else {
+      } else if (containsTrace) {
         const tracePoints = parseMobilityTraceGeoJson(parsed);
         setMobilityTrace(tracePoints);
         addStatusMessage?.(`Mobility trace ready (${tracePoints.length} points)`, 'info');
         setOpenPanel(null);
+      } else {
+        addStatusMessage?.('The selected GeoJSON does not contain polygons or trace features that can be processed.', 'warning');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to parse GeoJSON';
@@ -518,7 +559,7 @@ export const LeftIconToolbar: React.FC = () => {
             <Switch
               size="small"
               checked={mapSettings.showSunExposure}
-              onChange={(checked) => updateMapSettings({ showSunExposure: checked })}
+              onChange={(checked) => toggleSunExposureSetting(Boolean(checked))}
             />
           </div>
 
@@ -580,7 +621,7 @@ export const LeftIconToolbar: React.FC = () => {
     }
 
     return (
-      <div className="w-72 space-y-3">
+      <div className="w-60 space-y-3">
         <div>
           <span className="text-sm font-semibold text-gray-800">Add file to map</span>
           <p className="text-xs text-gray-500">Supported: .tif .tiff .gpx .kml .json .geojson</p>
@@ -632,10 +673,26 @@ export const LeftIconToolbar: React.FC = () => {
 
   return (
     <div
-      className="fixed z-50 inline-flex flex-col gap-4"
-      style={{ left: '1.5rem', bottom: '6rem', width: 'fit-content' }}
+      className="inline-flex flex-col gap-4"
+      style={{
+        position: 'fixed',
+        zIndex: 300,
+        left: '1.5rem',
+        bottom: '6rem',
+        width: 'fit-content',
+        pointerEvents: 'none',
+      }}
     >
-      <div className="rounded-2xl border border-white/40 bg-white/95 p-3 shadow-2xl">
+      <div
+        className="rounded-2xl border border-white/40 bg-white/95 p-3 shadow-2xl"
+        style={{
+          borderRadius: '1rem',
+          border: '1px solid rgba(255,255,255,0.4)',
+          background: 'rgba(255,255,255,0.95)',
+          boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25)',
+          pointerEvents: 'auto',
+        }}
+      >
         <div className="flex flex-col gap-4">
           {toolbarItems.map((item) => (
             <Popover
@@ -643,7 +700,7 @@ export const LeftIconToolbar: React.FC = () => {
               trigger="click"
               placement="right"
               overlayClassName="shadow-map-toolbar-popover"
-              overlayStyle={{ zIndex: 1400 }}
+              overlayStyle={{ zIndex: 1400, maxWidth: 320 }}
               open={openPanel === item.id}
               onOpenChange={(open) => handleOpenChange(item.id, open)}
               content={renderPanelContent(item.id)}
@@ -658,6 +715,18 @@ export const LeftIconToolbar: React.FC = () => {
                       : 'border-transparent bg-white text-slate-600 shadow-lg hover:bg-slate-100 focus:ring-blue-200'
                   }`}
                   aria-pressed={openPanel === item.id}
+                  style={{
+                    height: '3rem',
+                    width: '3rem',
+                    borderRadius: '0.75rem',
+                    border: openPanel === item.id ? '1px solid #60a5fa' : '1px solid rgba(148, 163, 184, 0.25)',
+                    background: openPanel === item.id ? '#2563eb' : 'rgba(255, 255, 255, 0.95)',
+                    color: openPanel === item.id ? '#ffffff' : '#475569',
+                    boxShadow: openPanel === item.id
+                      ? '0 14px 32px rgba(37, 99, 235, 0.35)'
+                      : '0 10px 28px rgba(15, 23, 42, 0.18)',
+                    transition: 'all 0.18s ease',
+                  }}
                 >
                   {item.icon}
                 </button>
@@ -674,6 +743,7 @@ export const LeftIconToolbar: React.FC = () => {
         accept=".tif,.tiff,.gpx,.kml,.json,.geojson"
         multiple
         className="hidden"
+        style={{ display: 'none' }}
         data-role="trace-upload-input"
         onChange={handleFilesSelected}
       />

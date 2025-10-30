@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ShadowMapViewport } from './components/Map/ShadowMapViewport'
-import { ReferenceInspiredTimeline } from './components/UI/ReferenceInspiredTimeline'
 import { LeftIconToolbar } from './components/UI/LeftIconToolbar'
 import './App.css'
 
@@ -40,7 +39,6 @@ function App() {
         </main>
 
         <LeftIconToolbar />
-        <ReferenceInspiredTimeline />
       </div>
     </QueryClientProvider>
   )

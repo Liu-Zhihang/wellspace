@@ -308,11 +308,15 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   uploadedGeometries: [],
   addUploadedGeometry: (geometry: UploadedGeometry) => {
     const prevState = get();
-    const shouldEnableSunExposure = !prevState.shadowSettings.showSunExposure;
+    const shouldEnableSunExposure =
+      !prevState.shadowSettings.showSunExposure || !prevState.mapSettings.showSunExposure;
 
     set({
       uploadedGeometries: [...prevState.uploadedGeometries, geometry],
       selectedGeometryId: geometry.id,
+      mapSettings: shouldEnableSunExposure
+        ? { ...prevState.mapSettings, showSunExposure: true }
+        : prevState.mapSettings,
       shadowSettings: shouldEnableSunExposure
         ? { ...prevState.shadowSettings, showSunExposure: true }
         : prevState.shadowSettings,
