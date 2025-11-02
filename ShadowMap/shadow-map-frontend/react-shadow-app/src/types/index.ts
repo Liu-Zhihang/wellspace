@@ -191,6 +191,8 @@ export type GeometryAnalysisStats = {
   shadedRatio: number;
   avgSunlightHours: number;
   sampleCount: number;
+  validSamples: number;
+  invalidSamples: number;
   generatedAt: Date;
   notes?: string;
 };

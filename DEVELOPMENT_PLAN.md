@@ -28,6 +28,26 @@
    - Extend `shadowMapStore` to manage uploaded geometries, analysis results, exports.
    - Prototype sampling + ShadeMap integration for shadow coverage / sunlight hours.
 3. After TS build and analysis prototype, run bundle report to confirm no missing imports and size regressions.
+4. Draft shadow-engine migration plan
+   - Stage A – Research & Prototype
+     - Evaluate `pybdshadow` capabilities (shadow polygons, sunshine duration grids, performance on HK CBD subset).
+     - Build a minimal Python notebook/service to ingest building footprints + height and output GeoJSON shadows + statistics.
+     - Document upstream data requirements (footprint source, height attribute, CRS) and preprocessing pipeline.
+   - Stage B – Service Abstraction
+     - Design backend interface (`POST /analysis/shadow`) returning shadow polygons, sunshine metrics, confidence metadata.
+     - Outline caching strategy (tile/time buckets) and fallback behaviour when data is missing or geometry is too large.
+     - Decide deployment model (separate microservice vs worker) and dependency management.
+   - Stage C – Frontend Integration
+     - Replace ShadeMap sampling with service call; update Zustand store types to consume new stats/metadata.
+     - Render returned shadow/heatmap layers as Mapbox/MapLibre vector overlays (remove ShadeMap visual dependency).
+     - Refresh analysis overlay UI (stats, notes, confidence flags) and expose controls for heatmap/shadow toggles.
+   - Stage D – Engine Evaluation
+     - Compare staying on MapLibre vs migrating to CesiumJS (prototype 3D tiles loading, assess effort).
+     - Decide target engine and list migration subtasks (routing, UI adjustments, data loading).
+   - Stage E – Testing & Roll-out
+     - Define regression suite (unit tests for analysis response, integration tests for overlay rendering).
+     - Collect benchmark numbers (processing time per polygon, accuracy vs ShadeMap sampling).
+     - Prepare deployment checklist (service containerization, monitoring, rollback strategy).
 
 ## Risks / Blockers
 

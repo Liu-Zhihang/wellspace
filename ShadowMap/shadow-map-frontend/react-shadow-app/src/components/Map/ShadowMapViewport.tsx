@@ -9,6 +9,7 @@ import { shadowOptimizer } from '../../services/shadowOptimizer';
 import { weatherService } from '../../services/weatherService';
 import { ApiService } from '../../services/apiService';
 import { GeometryAnalysisOverlay } from '../Analysis/GeometryAnalysisOverlay';
+import type { GeometryAnalysisSample } from '../../types';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
 const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
@@ -82,6 +83,7 @@ const generateSamplePointsForGeometry = (
   const lonSpan = Math.max(1e-6, maxLng - minLng);
   const latSpan = Math.max(1e-6, maxLat - minLat);
   const approxArea = Math.abs(lonSpan * latSpan);
+
   const targetSamples = Math.min(SAMPLE_MAX, Math.max(SAMPLE_MIN, Math.round(approxArea * 4000)));
   const gridSize = Math.max(6, Math.ceil(Math.sqrt(targetSamples)));
   const stepLng = lonSpan / (gridSize + 1);
@@ -89,24 +91,39 @@ const generateSamplePointsForGeometry = (
 
   const points: Array<[number, number]> = [];
 
-  for (let i = 1; i <= gridSize; i++) {
-    for (let j = 1; j <= gridSize; j++) {
-      const lng = minLng + stepLng * i;
-      const lat = minLat + stepLat * j;
+  const centerLng = (minLng + maxLng) / 2;
+  const centerLat = (minLat + maxLat) / 2;
+  const maxRadius = Math.max(lonSpan, latSpan) / 2;
+
+  for (let radiusFactor = 0; radiusFactor <= 1; radiusFactor += 1 / Math.max(gridSize, 1)) {
+    const radius = maxRadius * radiusFactor;
+    const ringCount = Math.max(6, Math.round(2 * Math.PI * (radius / stepLng)));
+
+    for (let k = 0; k < ringCount; k++) {
+      const angle = (2 * Math.PI * k) / ringCount;
+      const lng = centerLng + radius * Math.cos(angle);
+      const lat = centerLat + radius * Math.sin(angle);
+
+      if (lng < minLng || lng > maxLng || lat < minLat || lat > maxLat) {
+        continue;
+      }
+
       if (pointInPolygonGeometry([lng, lat], geometry)) {
         points.push([lng, lat]);
       }
+
       if (points.length >= SAMPLE_MAX) {
         break;
       }
     }
+
     if (points.length >= SAMPLE_MAX) {
       break;
     }
   }
 
   if (!points.length) {
-    points.push([(minLng + maxLng) / 2, (minLat + maxLat) / 2]);
+    points.push([centerLng, centerLat]);
   }
 
   return points;
@@ -115,6 +132,9 @@ const generateSamplePointsForGeometry = (
 const UPLOADED_SOURCE_ID = 'uploaded-geometry-source';
 const UPLOADED_FILL_LAYER_ID = 'uploaded-geometry-fill';
 const UPLOADED_OUTLINE_LAYER_ID = 'uploaded-geometry-outline';
+const ANALYSIS_HEATMAP_SOURCE_ID = 'analysis-heatmap-source';
+const ANALYSIS_HEATMAP_LAYER_ID = 'analysis-heatmap-layer';
+const ANALYSIS_POINTS_LAYER_ID = 'analysis-heatmap-points';
 
 // Declare global ShadeMap type
 declare global {
@@ -143,6 +163,110 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const sunExposureStateRef = useRef<string | null>(null);
   const loadShadowSimulatorRef = useRef<(() => Promise<unknown>) | null>(null);
   const refreshWeatherDataRef = useRef<((reason: string) => void) | null>(null);
+  const heatmapDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
+
+  const updateMapSource = useCallback((sourceId: string, data: GeoJSON.FeatureCollection) => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const existing = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+    if (existing) {
+      existing.setData(data as GeoJSON.FeatureCollection);
+    } else {
+      map.addSource(sourceId, {
+        type: 'geojson',
+        data,
+      });
+    }
+  }, []);
+
+  const ensureHeatmapLayers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!map.getLayer(ANALYSIS_HEATMAP_LAYER_ID)) {
+      map.addLayer({
+        id: ANALYSIS_HEATMAP_LAYER_ID,
+        type: 'heatmap',
+        source: ANALYSIS_HEATMAP_SOURCE_ID,
+        layout: { visibility: 'visible' },
+        paint: {
+          'heatmap-radius': 25,
+          'heatmap-opacity': 0.85,
+          'heatmap-weight': [
+            'interpolate',
+            ['linear'],
+            ['get', 'weight'],
+            0,
+            0,
+            1,
+            1,
+          ],
+          'heatmap-color': [
+            'interpolate',
+            ['linear'],
+            ['heatmap-density'],
+            0,
+            'rgba(59, 130, 246, 0)',
+            0.25,
+            'rgba(59, 130, 246, 0.35)',
+            0.5,
+            'rgba(59, 130, 246, 0.65)',
+            0.8,
+            'rgba(37, 99, 235, 0.9)',
+            1,
+            'rgba(30, 64, 175, 0.95)',
+          ],
+        },
+      }, 'waterway-label');
+    }
+
+    if (!map.getLayer(ANALYSIS_POINTS_LAYER_ID)) {
+      map.addLayer({
+        id: ANALYSIS_POINTS_LAYER_ID,
+        type: 'circle',
+        source: ANALYSIS_HEATMAP_SOURCE_ID,
+        layout: { visibility: 'visible' },
+        paint: {
+          'circle-radius': 5,
+          'circle-opacity': 0.0,
+          'circle-color': '#f97316',
+        },
+      });
+    }
+  }, []);
+
+  const updateAnalysisHeatmap = useCallback((samples: GeometryAnalysisSample[]) => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) {
+      return;
+    }
+
+    if (!samples.length) {
+      const emptyData: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+      updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, emptyData);
+      heatmapDataRef.current = emptyData;
+      return;
+    }
+
+    const featureCollection: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: samples.map((sample) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [sample.lng, sample.lat],
+        },
+        properties: {
+          sunHours: sample.hoursOfSun,
+          weight: Math.max(0, Math.min(sample.hoursOfSun / 6, 1)),
+        },
+      })),
+    };
+
+    updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, featureCollection);
+    heatmapDataRef.current = featureCollection;
+    ensureHeatmapLayers();
+  }, [ensureHeatmapLayers, updateMapSource]);
   
   // Connect to Zustand store
   const {
@@ -365,10 +489,18 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     const shadeMap = shadeMapRef.current;
 
     if (!map || !shadeMap || !shadowSimulatorReady) {
+      if (!selectedGeometryId && map && heatmapDataRef.current) {
+        const emptyData: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+        updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, emptyData);
+        heatmapDataRef.current = emptyData;
+      }
       return;
     }
 
     if (!selectedGeometryId) {
+      const emptyData: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+      updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, emptyData);
+      heatmapDataRef.current = emptyData;
       return;
     }
 
@@ -407,11 +539,14 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       const samples = generateSamplePointsForGeometry(geometry, geometryEntry.bbox);
 
       const results: { lat: number; lng: number; shadowPercent: number; hoursOfSun: number }[] = [];
+      let validSamples = 0;
+      let invalidSamples = 0;
 
       samples.forEach((samplePoint) => {
         if (cancelled) return;
         const projected = map.project({ lng: samplePoint[0], lat: samplePoint[1] });
-        let hoursOfSun = 0;
+
+        let hoursOfSun: number | undefined;
 
         try {
           if (typeof shadeMap.getHoursOfSun === 'function') {
@@ -424,7 +559,13 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
           console.warn('getHoursOfSun failed', error);
         }
 
-        const shadowPercent = hoursOfSun <= 0.1 ? 1 : 0;
+        if (hoursOfSun === undefined) {
+          invalidSamples += 1;
+          return;
+        }
+
+        validSamples += 1;
+        const shadowPercent = hoursOfSun < 2 ? 1 : 0;
         results.push({
           lat: samplePoint[1],
           lng: samplePoint[0],
@@ -437,10 +578,16 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       const sumSunlight = results.reduce((acc, item) => acc + item.hoursOfSun, 0);
 
       const stats = {
-        shadedRatio: results.length ? shadedCount / results.length : 0,
-        avgSunlightHours: results.length ? sumSunlight / results.length : 0,
-        sampleCount: results.length,
+        shadedRatio: validSamples ? shadedCount / validSamples : 0,
+        avgSunlightHours: validSamples ? sumSunlight / validSamples : 0,
+        sampleCount: samples.length,
+        validSamples,
+        invalidSamples,
         generatedAt: new Date(),
+        notes:
+          invalidSamples > 0
+            ? `${invalidSamples} sample${invalidSamples === 1 ? '' : 's'} skipped due to missing exposure data.`
+            : undefined,
       };
 
       if (!cancelled) {
@@ -449,6 +596,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
           stats,
           samples: results,
         });
+        updateAnalysisHeatmap(results);
         analysisKeyRef.current = analysisKey;
         addStatusMessage?.('✅ Shadow analysis complete.', 'info');
       }
@@ -1279,6 +1427,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       try {
         if (!enableSunExposure) {
           await shadeMap.setSunExposure(false);
+          if (typeof shadeMap.setOpacity === 'function') {
+            shadeMap.setOpacity(getEffectiveOpacity(mapSettings.shadowOpacity));
+          }
           return;
         }
 
@@ -1293,6 +1444,11 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
           endDate,
           iterations: 24,
         });
+
+        if (typeof shadeMap.setOpacity === 'function') {
+          const dimmedOpacity = getEffectiveOpacity(mapSettings.shadowOpacity * 0.25);
+          shadeMap.setOpacity(dimmedOpacity);
+        }
       } catch (error) {
         if (!cancelled) {
           console.warn('⚠️ Failed to toggle sun exposure:', error);
@@ -1305,7 +1461,27 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     return () => {
       cancelled = true;
     };
-  }, [mapSettings.showSunExposure, shadowSettingsState.showSunExposure, shadowSimulatorReady, currentDate]);
+  }, [
+    mapSettings.showSunExposure,
+    shadowSettingsState.showSunExposure,
+    shadowSimulatorReady,
+    currentDate,
+    mapSettings.shadowOpacity,
+    getEffectiveOpacity,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const heatmapOpacity = mapSettings.showSunExposure || shadowSettingsState.showSunExposure ? 0.85 : 0;
+    if (map.getLayer(ANALYSIS_HEATMAP_LAYER_ID)) {
+      map.setPaintProperty(ANALYSIS_HEATMAP_LAYER_ID, 'heatmap-opacity', heatmapOpacity);
+    }
+    if (map.getLayer(ANALYSIS_POINTS_LAYER_ID)) {
+      map.setPaintProperty(ANALYSIS_POINTS_LAYER_ID, 'circle-opacity', heatmapOpacity > 0 ? 0.2 : 0);
+    }
+  }, [mapSettings.showSunExposure, shadowSettingsState.showSunExposure]);
 
   useEffect(() => {
     if (!buildingsLoaded) {
@@ -1354,6 +1530,17 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         sunExposureStateRef.current = null;
       }
     }
+
+    if (map.getLayer(ANALYSIS_HEATMAP_LAYER_ID)) {
+      map.removeLayer(ANALYSIS_HEATMAP_LAYER_ID);
+    }
+    if (map.getLayer(ANALYSIS_POINTS_LAYER_ID)) {
+      map.removeLayer(ANALYSIS_POINTS_LAYER_ID);
+    }
+    if (map.getSource(ANALYSIS_HEATMAP_SOURCE_ID)) {
+      map.removeSource(ANALYSIS_HEATMAP_SOURCE_ID);
+    }
+    heatmapDataRef.current = null;
 
     // Reset status indicators
     setBuildingsLoaded(false);
@@ -1421,6 +1608,17 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       (refreshWeatherDataRef.current ?? refreshWeatherData)('map-load');
     };
 
+    const handleStyleData = () => {
+      if (heatmapDataRef.current) {
+        try {
+          updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, heatmapDataRef.current);
+          ensureHeatmapLayers();
+        } catch (error) {
+          console.warn('⚠️ Failed to restore analysis heatmap after style change:', error);
+        }
+      }
+    };
+
     const handleMoveEnd = () => {
       if (!autoLoadBuildingsRef.current) {
         return;
@@ -1438,11 +1636,16 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       moveEndTimeoutRef.current = window.setTimeout(() => {
         loadBuildingsRef.current?.();
         (refreshWeatherDataRef.current ?? refreshWeatherData)('moveend');
+        if (shadeMapRef.current && typeof shadeMapRef.current.setOpacity === 'function') {
+          const dimmedOpacity = getEffectiveOpacity(mapSettings.shadowOpacity * 0.25);
+          shadeMapRef.current.setOpacity(dimmedOpacity);
+        }
       }, 500);
     };
 
     map.on('load', handleLoad);
     map.on('moveend', handleMoveEnd);
+    map.on('styledata', handleStyleData);
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -1453,6 +1656,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       window.removeEventListener('resize', handleResize);
       map.off('load', handleLoad);
       map.off('moveend', handleMoveEnd);
+       map.off('styledata', handleStyleData);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;

@@ -329,8 +329,17 @@ export const LeftIconToolbar: React.FC = () => {
   };
 
   const toggleSunExposureSetting = (enabled: boolean) => {
-    updateMapSettings({ showSunExposure: enabled });
+    updateMapSettings({
+      showSunExposure: enabled,
+      showShadowLayer: true,
+    });
     updateShadowSettings({ showSunExposure: enabled });
+    addStatusMessage?.(
+      enabled
+        ? 'Sun exposure heatmap enabled. Shadow layer is dimmed to improve contrast.'
+        : 'Sun exposure heatmap disabled. Shadow layer restored to normal intensity.',
+      'info',
+    );
   };
 
   const handleFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -391,7 +400,7 @@ export const LeftIconToolbar: React.FC = () => {
   const renderPanelContent = (panelId: Exclude<PanelId, null>): React.ReactNode => {
     if (panelId === 'time') {
       return (
-        <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
+        <div className="w-full space-y-4 p-4 text-slate-700">
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold text-slate-900">Date & time</span>
             <span className="text-xs text-slate-400">{formattedDate}</span>
@@ -432,7 +441,7 @@ export const LeftIconToolbar: React.FC = () => {
 
     if (panelId === 'shadow') {
       return (
-        <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
+        <div className="w-full space-y-4 p-4 text-slate-700">
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold text-slate-900">Shadow layer</span>
             <Switch
@@ -483,7 +492,7 @@ export const LeftIconToolbar: React.FC = () => {
         : 'Not loaded';
 
       return (
-        <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
+        <div className="w-full space-y-4 p-4 text-slate-700">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-900">Building data</p>
@@ -552,7 +561,7 @@ export const LeftIconToolbar: React.FC = () => {
       const readyClass = shadowSimulatorReady ? 'text-emerald-600' : 'text-gray-500';
 
       return (
-        <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
+        <div className="w-full space-y-4 p-4 text-slate-700">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-900">Shadow simulator</p>
@@ -597,21 +606,14 @@ export const LeftIconToolbar: React.FC = () => {
             <Button
               block
               className="h-10 rounded-lg border border-blue-200 text-sm font-semibold text-blue-600 hover:border-blue-300"
-              onClick={() => {
-                toggleSunExposureSetting(true);
-                updateMapSettings({ showShadowLayer: false });
-                addStatusMessage?.('Sun exposure heatmap highlighted while shadows are hidden.', 'info');
-              }}
+              onClick={() => toggleSunExposureSetting(true)}
             >
               Highlight exposure heatmap
             </Button>
             <Button
               block
               className="h-10 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:border-slate-300"
-              onClick={() => {
-                updateMapSettings({ showShadowLayer: true });
-                addStatusMessage?.('Shadow layer restored. Adjust exposure toggle as needed.', 'info');
-              }}
+              onClick={() => toggleSunExposureSetting(false)}
             >
               Restore shadow layer
             </Button>
@@ -627,7 +629,7 @@ export const LeftIconToolbar: React.FC = () => {
 
     if (panelId === 'style') {
       return (
-        <div className="w-72 max-w-xs space-y-3 px-4 py-3 text-slate-700">
+        <div className="w-full space-y-3 p-4 text-slate-700">
           <span className="text-sm font-semibold text-slate-900">Base map</span>
           {baseMapPresets.map((preset) => (
             <Button
@@ -655,7 +657,7 @@ export const LeftIconToolbar: React.FC = () => {
     }
 
     return (
-      <div className="w-72 max-w-xs space-y-4 px-4 py-3 text-slate-700">
+      <div className="w-full space-y-4 p-4 text-slate-700">
         <div>
           <span className="text-sm font-semibold text-slate-900">Add file to map</span>
           <p className="text-xs text-slate-400">Supported: .tif .tiff .gpx .kml .json .geojson</p>
@@ -720,6 +722,7 @@ export const LeftIconToolbar: React.FC = () => {
               trigger="click"
               placement="right"
               overlayClassName="shadow-map-toolbar-popover"
+              overlayInnerStyle={{ width: 320, padding: 0 }}
               overlayStyle={{ zIndex: 1400 }}
               open={openPanel === item.id}
               onOpenChange={(open) => handleOpenChange(item.id, open)}

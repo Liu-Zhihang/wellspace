@@ -34,6 +34,7 @@ export const GeometryAnalysisOverlay: React.FC = () => {
     }
 
     try {
+      updateMapSettings({ showSunExposure: true, showShadowLayer: false });
       addStatusMessage?.(`Re-running exposure analysis for "${selectedGeometry.name}"...`, 'info');
       await viewportActions.initShadowSimulator();
     } catch (error) {
@@ -86,10 +87,19 @@ export const GeometryAnalysisOverlay: React.FC = () => {
                 <dd className="font-semibold text-slate-50">{(analysis.stats.shadedRatio * 100).toFixed(1)}%</dd>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <dt className="text-slate-300">Sample count</dt>
+                <dt className="text-slate-300">Total sampled points</dt>
                 <dd className="text-slate-100">{analysis.stats.sampleCount}</dd>
               </div>
+              <div className="flex items-center justify-between text-xs">
+                <dt className="text-slate-300">Skipped samples</dt>
+                <dd className="text-slate-100">{analysis.stats.invalidSamples}</dd>
+              </div>
             </dl>
+            {analysis.stats.notes ? (
+              <p className="mt-3 rounded-lg bg-slate-900/40 px-3 py-2 text-xs text-slate-200/80">
+                {analysis.stats.notes}
+              </p>
+            ) : null}
           </section>
         ) : (
           <section className="mt-5 rounded-2xl border border-slate-700/60 bg-slate-900/60 p-4 text-sm text-slate-200/80">

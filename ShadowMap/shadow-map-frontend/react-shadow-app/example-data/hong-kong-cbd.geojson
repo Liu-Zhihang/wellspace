@@ -1,0 +1,44 @@
+{
+  "type": "FeatureCollection",
+  "name": "hong-kong-cbd-sample",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "hk_cbd_core",
+        "name": "Hong Kong Island CBD Core"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [114.1546, 22.2874],
+            [114.1718, 22.2878],
+            [114.1726, 22.2786],
+            [114.1556, 22.2783],
+            [114.1546, 22.2874]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "kowloon_extension",
+        "name": "Kowloon Waterfront Extension"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [114.1657, 22.3104],
+            [114.1885, 22.3108],
+            [114.1909, 22.2972],
+            [114.1676, 22.2967],
+            [114.1657, 22.3104]
+          ]
+        ]
+      }
+    }
+  ]
+}
