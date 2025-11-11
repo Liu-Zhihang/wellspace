@@ -17,6 +17,7 @@
 | REQ-ANALYSIS-01 | Extend upload workflow for geometry-based analysis | In Progress | Uploads auto-select geometry, UI overlays show backend metrics, JSON/CSV export ready |
 | REQ-ENGINE-01 | Shadow engine service abstraction | In Progress | `/api/analysis/shadow` + local pybdshadow worker + script bridge landed; Redis/metrics TBD |
 | REQ-ENGINE-02 | Frontend shadow engine integration | In Progress | Zustand stores consume engine metrics, heatmap default-off toggle + overlay redesign shipped |
+| REQ-MAP-BASE | MapLibre basemap switching revamp | Done | `mapSettings.baseMapId` now drives in-place `map.setStyle` calls; overlays + uploads are rehydrated without remounting |
 
 ## Next Steps
 

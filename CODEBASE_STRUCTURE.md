@@ -42,6 +42,7 @@ Key entry points:
 - `components/Analysis/AnalysisPanel.tsx` – right sidebar summary for analysis output.
 - `services/wfsBuildingService.ts` – helpers for the building WFS proxy.
 - `services/shadowAnalysisService.ts` – deduplicated client for `POST /api/analysis/shadow`, normalises bbox/time buckets, and reuses AbortSignals.
+- `services/baseMapManager.ts` – catalogues MapLibre/Mapbox styles (vector + raster fallback) and builds style specs used when Zustand switches the active basemap.
 - `store/shadowMapStore.ts` – tracks `shadowServiceStatus`, cached results, and error state to power UI + overlay updates.
 - `scripts/shadow-engine-prototype/service_cli.py` – Python worker that runs `pybdshadow` and streams `shadows/sunlight/heatmap` JSON back to the Node backend when `SHADOW_ENGINE_SCRIPT_PATH` is configured.
 

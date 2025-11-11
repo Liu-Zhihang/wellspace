@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import type { Feature, Polygon, MultiPolygon, FeatureCollection } from 'geojson';
@@ -11,9 +11,11 @@ import { ApiService } from '../../services/apiService';
 import { shadowAnalysisClient } from '../../services/shadowAnalysisService';
 import { GeometryAnalysisOverlay } from '../Analysis/GeometryAnalysisOverlay';
 import type { GeometryAnalysisSample } from '../../types/index.ts';
+import { getBaseMapStyle } from '../../services/baseMapManager';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
 const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
+const BASE_ANIMATION_MINUTES_PER_SECOND = 12;
 
 const computeEffectiveShadowOpacity = (
   baseOpacity: number,
@@ -45,9 +47,10 @@ declare global {
 
 interface ShadowMapViewportProps {
   className?: string;
+  baseMapId?: string;
 }
 
-export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className = '' }) => {
+export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className = '', baseMapId }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const shadeMapRef = useRef<any>(null);
@@ -64,6 +67,11 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const loadShadowSimulatorRef = useRef<(() => Promise<unknown>) | null>(null);
   const refreshWeatherDataRef = useRef<((reason: string) => void) | null>(null);
   const heatmapDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const animationLastTimestampRef = useRef<number | null>(null);
+  const shadowResultDataRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FEATURE_COLLECTION);
+  const baseMapBootstrapRef = useRef(false);
+  const lastBaseMapIdRef = useRef<string | null>(null);
 
   const updateMapSource = useCallback((sourceId: string, data: GeoJSON.FeatureCollection) => {
     const map = mapRef.current;
@@ -185,6 +193,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
       heatmapDataRef.current = EMPTY_FEATURE_COLLECTION;
       updateMapSource(SHADOW_RESULT_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+      shadowResultDataRef.current = EMPTY_FEATURE_COLLECTION;
       return;
     }
 
@@ -228,6 +237,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     setBuildingsLoaded,
     setIsLoadingBuildings,
     shadowSimulatorReady,
+    isAnimating,
     setShadowSimulatorReady,
     setIsInitialisingShadow,
     autoLoadBuildings,
@@ -235,9 +245,19 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     setShadowServiceStatus,
     setShadowServiceResult,
     setShadowServiceError,
+    mapCenter,
+    mapZoom,
+    setMapView,
   } = useShadowMapStore();
 
+  const setMapViewRef = useRef(setMapView);
+  useEffect(() => {
+    setMapViewRef.current = setMapView;
+  }, [setMapView]);
+
   const autoLoadBuildingsRef = useRef(autoLoadBuildings);
+  const selectedBaseMapId = baseMapId ?? mapSettings.baseMapId ?? 'mapbox-streets';
+  const baseMapStyle = useMemo(() => getBaseMapStyle(selectedBaseMapId), [selectedBaseMapId]);
 
   // Component initialisation lifecycle
   console.log('✅ ShadowMapViewport mounted')
@@ -312,74 +332,128 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     refreshWeatherData(shadowSettingsState.autoCloudAttenuation ? 'auto-on' : 'manual-mode');
   }, [refreshWeatherData, shadowSettingsState.autoCloudAttenuation, currentDate]);
 
-  useEffect(() => {
+  const applyUploadedGeometrySelectionStyles = useCallback((geometryId: string | null) => {
     const map = mapRef.current;
     if (!map) {
       return;
     }
 
-    const updateSource = () => {
-      const featureCollection: FeatureCollection = {
-        type: 'FeatureCollection',
-        features: uploadedGeometries.map((item) => ({
-          ...item.feature,
-          properties: {
-            ...(item.feature.properties ?? {}),
-            __geometryId: item.id,
-          },
-        })),
-      };
+    if (map.getLayer(UPLOADED_FILL_LAYER_ID)) {
+      map.setPaintProperty(UPLOADED_FILL_LAYER_ID, 'fill-opacity', [
+        'case',
+        ['==', ['get', '__geometryId'], geometryId ?? ''],
+        0.05,
+        0.02,
+      ]);
+    }
 
+    if (map.getLayer(UPLOADED_OUTLINE_LAYER_ID)) {
+      map.setPaintProperty(UPLOADED_OUTLINE_LAYER_ID, 'line-color', [
+        'case',
+        ['==', ['get', '__geometryId'], geometryId ?? ''],
+        '#1d4ed8',
+        '#94a3b8',
+      ]);
+      map.setPaintProperty(UPLOADED_OUTLINE_LAYER_ID, 'line-width', [
+        'case',
+        ['==', ['get', '__geometryId'], geometryId ?? ''],
+        2.4,
+        1.2,
+      ]);
+    }
+  }, []);
+
+  const refreshUploadedGeometryLayers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return undefined;
+    }
+
+    const featureCollection: FeatureCollection = {
+      type: 'FeatureCollection',
+      features: uploadedGeometries.map((item) => ({
+        ...item.feature,
+        properties: {
+          ...(item.feature.properties ?? {}),
+          __geometryId: item.id,
+        },
+      })),
+    };
+
+    const applyLayers = () => {
       const existingSource = map.getSource(UPLOADED_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
 
       if (existingSource) {
         existingSource.setData(featureCollection as any);
-        return;
+      } else {
+        map.addSource(UPLOADED_SOURCE_ID, {
+          type: 'geojson',
+          data: featureCollection,
+        });
+
+        map.addLayer({
+          id: UPLOADED_FILL_LAYER_ID,
+          type: 'fill',
+          source: UPLOADED_SOURCE_ID,
+          paint: {
+            'fill-color': '#2563eb',
+            'fill-opacity': 0.12,
+          },
+        });
+
+        map.addLayer({
+          id: UPLOADED_OUTLINE_LAYER_ID,
+          type: 'line',
+          source: UPLOADED_SOURCE_ID,
+          paint: {
+            'line-color': '#2563eb',
+            'line-width': 1.2,
+          },
+        });
       }
 
-      map.addSource(UPLOADED_SOURCE_ID, {
-        type: 'geojson',
-        data: featureCollection,
-      });
-
-      map.addLayer({
-        id: UPLOADED_FILL_LAYER_ID,
-        type: 'fill',
-        source: UPLOADED_SOURCE_ID,
-        paint: {
-          'fill-color': '#2563eb',
-          'fill-opacity': 0.12,
-        },
-      });
-
-      map.addLayer({
-        id: UPLOADED_OUTLINE_LAYER_ID,
-        type: 'line',
-        source: UPLOADED_SOURCE_ID,
-        paint: {
-          'line-color': '#2563eb',
-          'line-width': 1.2,
-        },
-      });
+      const { selectedGeometryId: activeGeometryId } = useShadowMapStore.getState();
+      applyUploadedGeometrySelectionStyles(activeGeometryId ?? null);
     };
 
     if (map.isStyleLoaded()) {
-      updateSource();
-      return;
+      applyLayers();
+      return undefined;
     }
 
     const handleStyle = () => {
-      updateSource();
+      applyLayers();
       ensureHeatmapLayers();
       ensureShadowLayer();
       bringLayerToFront(SHADOW_RESULT_LAYER_ID);
       bringLayerToFront(ANALYSIS_HEATMAP_LAYER_ID);
     };
+
     map.once('styledata', handleStyle);
     return () => {
       map.off('styledata', handleStyle);
     };
-  }, [uploadedGeometries, ensureHeatmapLayers, ensureShadowLayer, bringLayerToFront]);
+  }, [uploadedGeometries, ensureHeatmapLayers, ensureShadowLayer, bringLayerToFront, applyUploadedGeometrySelectionStyles]);
+
+  useEffect(() => {
+    const cleanup = refreshUploadedGeometryLayers();
+    return () => {
+      if (cleanup) {
+        cleanup();
+      }
+    };
+  }, [refreshUploadedGeometryLayers]);
+
+  const refreshUploadedGeometryLayersRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    refreshUploadedGeometryLayersRef.current = () => {
+      refreshUploadedGeometryLayers();
+    };
+  }, [refreshUploadedGeometryLayers]);
+
+  useEffect(() => {
+    applyUploadedGeometrySelectionStyles(selectedGeometryId);
+  }, [applyUploadedGeometrySelectionStyles, selectedGeometryId]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -442,6 +516,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
         heatmapDataRef.current = EMPTY_FEATURE_COLLECTION;
         updateMapSource(SHADOW_RESULT_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        shadowResultDataRef.current = EMPTY_FEATURE_COLLECTION;
       }
       setShadowServiceResult(null);
       setShadowServiceStatus('idle');
@@ -528,6 +603,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
         const shadowFeatures = (response.data.shadows as FeatureCollection | undefined) ?? EMPTY_FEATURE_COLLECTION;
         updateMapSource(SHADOW_RESULT_SOURCE_ID, shadowFeatures);
+        shadowResultDataRef.current = shadowFeatures;
         ensureShadowLayer();
 
         setGeometryAnalysis({
@@ -560,6 +636,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
         heatmapDataRef.current = EMPTY_FEATURE_COLLECTION;
         updateMapSource(SHADOW_RESULT_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        shadowResultDataRef.current = EMPTY_FEATURE_COLLECTION;
       })
       .finally(() => {
         if (!controller.signal.aborted) {
@@ -872,6 +949,19 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     console.log('🎯 Building ingestion sequence complete');
   }, [refreshWeatherData]);
 
+  const restoreBuildingLayerFromCache = useCallback(() => {
+    const cached = buildingCache.getAllAsFeatureCollection();
+    if (!cached?.features?.length) {
+      return;
+    }
+    addBuildingsToMap(cached);
+  }, [addBuildingsToMap]);
+
+  const restoreBuildingLayerFromCacheRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    restoreBuildingLayerFromCacheRef.current = restoreBuildingLayerFromCache;
+  }, [restoreBuildingLayerFromCache]);
+
   // Initialise shadow simulator
   const initShadowSimulator = useCallback(() => {
     if (!mapRef.current || !window.ShadeMap) {
@@ -1052,6 +1142,40 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       setStatusMessage('Failed to update shadow time');
     }
   }, []);
+
+  const stopTimeAnimation = useCallback(() => {
+    if (animationFrameRef.current != null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    animationLastTimestampRef.current = null;
+  }, []);
+
+  const animateShadowTime = useCallback((timestamp: number) => {
+    if (!isAnimating || !shadowSimulatorReady || !shadeMapRef.current) {
+      stopTimeAnimation();
+      return;
+    }
+
+    if (animationLastTimestampRef.current == null) {
+      animationLastTimestampRef.current = timestamp;
+      animationFrameRef.current = requestAnimationFrame(animateShadowTime);
+      return;
+    }
+
+    const deltaMs = timestamp - animationLastTimestampRef.current;
+    animationLastTimestampRef.current = timestamp;
+    const minutesDelta = (deltaMs / 1000) * BASE_ANIMATION_MINUTES_PER_SECOND;
+
+    if (minutesDelta > 0) {
+      const { currentDate: latestDate } = useShadowMapStore.getState();
+      const nextDate = new Date(latestDate);
+      nextDate.setMinutes(nextDate.getMinutes() + minutesDelta);
+      updateShadowTime(nextDate);
+    }
+
+    animationFrameRef.current = requestAnimationFrame(animateShadowTime);
+  }, [isAnimating, shadowSimulatorReady, stopTimeAnimation, updateShadowTime]);
 
   // Sync uploaded mobility trace onto the map
   useEffect(() => {
@@ -1464,6 +1588,23 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     };
   }, [buildingsLoaded, initShadowSimulator]);
 
+  useEffect(() => {
+    if (!isAnimating) {
+      stopTimeAnimation();
+      return;
+    }
+
+    if (!shadowSimulatorReady || !shadeMapRef.current) {
+      return;
+    }
+
+    animationFrameRef.current = requestAnimationFrame(animateShadowTime);
+
+    return () => {
+      stopTimeAnimation();
+    };
+  }, [isAnimating, shadowSimulatorReady, animateShadowTime, stopTimeAnimation]);
+
   // Clear building and shadow artefacts
   const clearBuildings = useCallback(() => {
     if (!mapRef.current) return;
@@ -1508,6 +1649,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       map.removeSource(ANALYSIS_HEATMAP_SOURCE_ID);
     }
     heatmapDataRef.current = null;
+    shadowResultDataRef.current = EMPTY_FEATURE_COLLECTION;
 
     // Reset status indicators
     setBuildingsLoaded(false);
@@ -1540,17 +1682,22 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     mapboxgl.accessToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
 
+    const initialCenter: [number, number] = (mapCenter ?? [114.1694, 22.3193]) as [number, number];
+    const initialZoom = mapZoom ?? 16;
+
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/streets-v11',
-      center: [114.1694, 22.3193], // Hong Kong
-      zoom: 16,
+      style: baseMapStyle,
+      center: initialCenter,
+      zoom: initialZoom,
       pitch: 45,
       bearing: 0,
       attributionControl: false,
     });
 
     mapRef.current = map;
+    baseMapBootstrapRef.current = true;
+    lastBaseMapIdRef.current = selectedBaseMapId;
 
     const handleResize = () => {
       if (mapRef.current) {
@@ -1561,6 +1708,10 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     const handleLoad = async () => {
       console.log('✅ Map load complete');
       map.resize();
+      const center = map.getCenter();
+      setMapViewRef.current?.([center.lng, center.lat], map.getZoom());
+      baseMapBootstrapRef.current = true;
+      lastBaseMapIdRef.current = selectedBaseMapId;
 
       try {
         const shadowLoader = loadShadowSimulatorRef.current ?? loadShadowSimulator;
@@ -1587,6 +1738,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     };
 
     const handleMoveEnd = () => {
+      const center = map.getCenter();
+      setMapViewRef.current?.([center.lng, center.lat], map.getZoom());
+
       if (!autoLoadBuildingsRef.current) {
         return;
       }
@@ -1623,13 +1777,81 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       window.removeEventListener('resize', handleResize);
       map.off('load', handleLoad);
       map.off('moveend', handleMoveEnd);
-       map.off('styledata', handleStyleData);
+      map.off('styledata', handleStyleData);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
   }, []); // Initialise map once
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (!baseMapBootstrapRef.current) {
+      baseMapBootstrapRef.current = true;
+      lastBaseMapIdRef.current = selectedBaseMapId;
+      return;
+    }
+
+    if (lastBaseMapIdRef.current === selectedBaseMapId) {
+      return;
+    }
+
+    lastBaseMapIdRef.current = selectedBaseMapId;
+
+    if (shadeMapRef.current) {
+      try {
+        shadeMapRef.current.remove();
+      } catch (error) {
+        console.warn('⚠️ Failed to remove shadow simulator before style change:', error);
+      } finally {
+        shadeMapRef.current = null;
+        sunExposureStateRef.current = null;
+        setShadowSimulatorReady(false);
+        setStatusMessage('Shadow simulator reset after basemap change');
+      }
+    }
+
+    const restoreLayers = () => {
+      restoreBuildingLayerFromCacheRef.current?.();
+      refreshUploadedGeometryLayersRef.current?.();
+      if (heatmapDataRef.current) {
+        updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, heatmapDataRef.current);
+      }
+      if (shadowResultDataRef.current) {
+        updateMapSource(SHADOW_RESULT_SOURCE_ID, shadowResultDataRef.current);
+      }
+      ensureHeatmapLayers();
+      ensureShadowLayer();
+      bringLayerToFront(SHADOW_RESULT_LAYER_ID);
+      bringLayerToFront(ANALYSIS_HEATMAP_LAYER_ID);
+
+      window.setTimeout(() => {
+        initShadowSimulator();
+      }, 50);
+    };
+
+    map.once('styledata', restoreLayers);
+    map.setStyle(baseMapStyle, { diff: false });
+
+    return () => {
+      map.off('styledata', restoreLayers);
+    };
+  }, [
+    baseMapStyle,
+    selectedBaseMapId,
+    ensureHeatmapLayers,
+    ensureShadowLayer,
+    bringLayerToFront,
+    updateMapSource,
+    initShadowSimulator,
+    setShadowSimulatorReady,
+    setStatusMessage,
+  ]);
 
   return (
     <div className={`relative w-full h-full ${className}`}>

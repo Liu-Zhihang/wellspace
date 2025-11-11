@@ -206,6 +206,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     } as { [K in DataLayerType]: DataLayer },
     
     activeDataLayer: 'shadows' as DataLayerType,
+    baseMapId: 'mapbox-streets',
   },
   updateMapSettings: (settings: Partial<MapSettings>) => 
     set(state => {
@@ -275,8 +276,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   isAnimating: false,
   setIsAnimating: (animating: boolean) => set({ isAnimating: animating }),
   
-  mapCenter: [39.9042, 116.4074], // Beijing default
-  mapZoom: 15,
+  mapCenter: [114.1694, 22.3193], // Hong Kong default (lng, lat)
+  mapZoom: 16,
   setMapView: (center: [number, number], zoom: number) => set({ mapCenter: center, mapZoom: zoom }),
 
   mobilityTrace: [],

@@ -14,6 +14,7 @@ import {
 import { useShadowMapStore } from '../../store/shadowMapStore'
 import type { MobilityTracePoint } from '../../store/shadowMapStore'
 import type { Feature, Geometry } from 'geojson'
+import { BASE_MAPS } from '../../services/baseMapManager'
 
 type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'analysis' | null;
 
@@ -23,12 +24,7 @@ const presetHours = [
   { hour: 18, label: 'Sunset' },
 ];
 
-const baseMapPresets = [
-  { id: 'osm', name: 'OpenStreetMap', description: 'Balanced street map', badge: 'Default' },
-  { id: 'satellite', name: 'Satellite', description: 'High-resolution imagery' },
-  { id: 'terrain', name: 'Terrain', description: 'Topographic relief' },
-  { id: 'dark', name: 'Dark Mode', description: 'Low-light friendly' },
-];
+const baseMapPresets = BASE_MAPS;
 
 export const LeftIconToolbar: React.FC = () => {
   const {
@@ -57,7 +53,7 @@ export const LeftIconToolbar: React.FC = () => {
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
-  const [selectedBaseMap, setSelectedBaseMap] = useState<string>('osm');
+  const selectedBaseMap = mapSettings.baseMapId ?? 'mapbox-streets';
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const formattedDate = useMemo(
@@ -83,8 +79,7 @@ export const LeftIconToolbar: React.FC = () => {
   const toggleAnimation = () => setIsAnimating(!isAnimating);
 
   const handleBaseMapChange = (mapId: string) => {
-    setSelectedBaseMap(mapId);
-    // TODO: Wire into map instance once baseMapManager is exposed here.
+    updateMapSettings({ baseMapId: mapId });
     const preset = baseMapPresets.find((item) => item.id === mapId);
     addStatusMessage?.(`Base map switched to ${preset?.name ?? mapId}`);
   };
@@ -652,9 +647,6 @@ export const LeftIconToolbar: React.FC = () => {
                 <span className="block text-sm font-medium">{preset.name}</span>
                 <span className="block text-xs text-gray-500">{preset.description}</span>
               </span>
-              {preset.badge && (
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-600">{preset.badge}</span>
-              )}
             </Button>
           ))}
           <span className="text-[11px] text-gray-400">Coming soon: direct Mapbox / custom style URL.</span>
