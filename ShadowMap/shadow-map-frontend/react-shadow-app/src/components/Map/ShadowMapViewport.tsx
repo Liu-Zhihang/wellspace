@@ -8,8 +8,9 @@ import { useShadowMapStore } from '../../store/shadowMapStore';
 import { shadowOptimizer } from '../../services/shadowOptimizer';
 import { weatherService } from '../../services/weatherService';
 import { ApiService } from '../../services/apiService';
+import { shadowAnalysisClient } from '../../services/shadowAnalysisService';
 import { GeometryAnalysisOverlay } from '../Analysis/GeometryAnalysisOverlay';
-import type { GeometryAnalysisSample } from '../../types';
+import type { GeometryAnalysisSample } from '../../types/index.ts';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
 const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
@@ -25,116 +26,15 @@ const computeEffectiveShadowOpacity = (
   return Math.max(0, Math.min(1, baseOpacity * factor));
 };
 
-const isPointInRing = (point: [number, number], ring: number[][]): boolean => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0];
-    const yi = ring[i][1];
-    const xj = ring[j][0];
-    const yj = ring[j][1];
-
-    const intersect = yi > point[1] !== yj > point[1] &&
-      point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi + 1e-12) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-};
-
-const pointInPolygonGeometry = (point: [number, number], geometry: Polygon | MultiPolygon): boolean => {
-  if (geometry.type === 'Polygon') {
-    const [outer, ...holes] = geometry.coordinates;
-    if (!outer || !isPointInRing(point, outer)) {
-      return false;
-    }
-    for (const hole of holes) {
-      if (hole && isPointInRing(point, hole)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  if (geometry.type === 'MultiPolygon') {
-    return geometry.coordinates.some((polygon) => {
-      const [outer, ...holes] = polygon;
-      if (!outer || !isPointInRing(point, outer)) {
-        return false;
-      }
-      for (const hole of holes) {
-        if (hole && isPointInRing(point, hole)) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }
-
-  return false;
-};
-
-const SAMPLE_MIN = 40;
-const SAMPLE_MAX = 180;
-
-const generateSamplePointsForGeometry = (
-  geometry: Polygon | MultiPolygon,
-  bbox: [number, number, number, number]
-): Array<[number, number]> => {
-  const [minLng, minLat, maxLng, maxLat] = bbox;
-  const lonSpan = Math.max(1e-6, maxLng - minLng);
-  const latSpan = Math.max(1e-6, maxLat - minLat);
-  const approxArea = Math.abs(lonSpan * latSpan);
-
-  const targetSamples = Math.min(SAMPLE_MAX, Math.max(SAMPLE_MIN, Math.round(approxArea * 4000)));
-  const gridSize = Math.max(6, Math.ceil(Math.sqrt(targetSamples)));
-  const stepLng = lonSpan / (gridSize + 1);
-  const stepLat = latSpan / (gridSize + 1);
-
-  const points: Array<[number, number]> = [];
-
-  const centerLng = (minLng + maxLng) / 2;
-  const centerLat = (minLat + maxLat) / 2;
-  const maxRadius = Math.max(lonSpan, latSpan) / 2;
-
-  for (let radiusFactor = 0; radiusFactor <= 1; radiusFactor += 1 / Math.max(gridSize, 1)) {
-    const radius = maxRadius * radiusFactor;
-    const ringCount = Math.max(6, Math.round(2 * Math.PI * (radius / stepLng)));
-
-    for (let k = 0; k < ringCount; k++) {
-      const angle = (2 * Math.PI * k) / ringCount;
-      const lng = centerLng + radius * Math.cos(angle);
-      const lat = centerLat + radius * Math.sin(angle);
-
-      if (lng < minLng || lng > maxLng || lat < minLat || lat > maxLat) {
-        continue;
-      }
-
-      if (pointInPolygonGeometry([lng, lat], geometry)) {
-        points.push([lng, lat]);
-      }
-
-      if (points.length >= SAMPLE_MAX) {
-        break;
-      }
-    }
-
-    if (points.length >= SAMPLE_MAX) {
-      break;
-    }
-  }
-
-  if (!points.length) {
-    points.push([centerLng, centerLat]);
-  }
-
-  return points;
-};
-
 const UPLOADED_SOURCE_ID = 'uploaded-geometry-source';
 const UPLOADED_FILL_LAYER_ID = 'uploaded-geometry-fill';
 const UPLOADED_OUTLINE_LAYER_ID = 'uploaded-geometry-outline';
 const ANALYSIS_HEATMAP_SOURCE_ID = 'analysis-heatmap-source';
 const ANALYSIS_HEATMAP_LAYER_ID = 'analysis-heatmap-layer';
 const ANALYSIS_POINTS_LAYER_ID = 'analysis-heatmap-points';
+const SHADOW_RESULT_SOURCE_ID = 'analysis-shadow-source';
+const SHADOW_RESULT_LAYER_ID = 'analysis-shadow-layer';
+const EMPTY_FEATURE_COLLECTION: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 // Declare global ShadeMap type
 declare global {
@@ -177,6 +77,12 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         data,
       });
     }
+  }, []);
+
+  const bringLayerToFront = useCallback((layerId: string) => {
+    const map = mapRef.current;
+    if (!map || !map.getLayer(layerId)) return;
+    map.moveLayer(layerId);
   }, []);
 
   const ensureHeatmapLayers = useCallback(() => {
@@ -233,7 +139,41 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         },
       });
     }
-  }, []);
+
+    bringLayerToFront(ANALYSIS_HEATMAP_LAYER_ID);
+  }, [bringLayerToFront]);
+
+  const ensureShadowLayer = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!map.getSource(SHADOW_RESULT_SOURCE_ID)) {
+      map.addSource(SHADOW_RESULT_SOURCE_ID, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+
+    if (!map.getLayer(SHADOW_RESULT_LAYER_ID)) {
+      map.addLayer({
+        id: SHADOW_RESULT_LAYER_ID,
+        type: 'fill',
+        source: SHADOW_RESULT_SOURCE_ID,
+        paint: {
+          'fill-color': '#0f172a',
+          'fill-opacity': 0.28,
+          'fill-outline-color': '#1e293b',
+        },
+      });
+    }
+
+    bringLayerToFront(SHADOW_RESULT_LAYER_ID);
+  }, [bringLayerToFront]);
+
+  useEffect(() => {
+    ensureHeatmapLayers();
+    ensureShadowLayer();
+  }, [ensureHeatmapLayers, ensureShadowLayer]);
 
   const updateAnalysisHeatmap = useCallback((samples: GeometryAnalysisSample[]) => {
     const map = mapRef.current;
@@ -242,9 +182,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     }
 
     if (!samples.length) {
-      const emptyData: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-      updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, emptyData);
-      heatmapDataRef.current = emptyData;
+      updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+      heatmapDataRef.current = EMPTY_FEATURE_COLLECTION;
+      updateMapSource(SHADOW_RESULT_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
       return;
     }
 
@@ -286,14 +226,15 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     addStatusMessage,
     buildingsLoaded,
     setBuildingsLoaded,
-    isLoadingBuildings,
     setIsLoadingBuildings,
     shadowSimulatorReady,
     setShadowSimulatorReady,
-    isInitialisingShadow,
     setIsInitialisingShadow,
     autoLoadBuildings,
     setViewportActions,
+    setShadowServiceStatus,
+    setShadowServiceResult,
+    setShadowServiceError,
   } = useShadowMapStore();
 
   const autoLoadBuildingsRef = useRef(autoLoadBuildings);
@@ -429,12 +370,16 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     const handleStyle = () => {
       updateSource();
+      ensureHeatmapLayers();
+      ensureShadowLayer();
+      bringLayerToFront(SHADOW_RESULT_LAYER_ID);
+      bringLayerToFront(ANALYSIS_HEATMAP_LAYER_ID);
     };
     map.once('styledata', handleStyle);
     return () => {
       map.off('styledata', handleStyle);
     };
-  }, [uploadedGeometries]);
+  }, [uploadedGeometries, ensureHeatmapLayers, ensureShadowLayer, bringLayerToFront]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -446,8 +391,8 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       map.setPaintProperty(UPLOADED_FILL_LAYER_ID, 'fill-opacity', [
         'case',
         ['==', ['get', '__geometryId'], selectedGeometryId ?? ''],
-        0.35,
-        0.12,
+        0.05,
+        0.02,
       ]);
     }
 
@@ -482,25 +427,26 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         }
       }
     }
-  }, [selectedGeometryId, uploadedGeometries]);
+    bringLayerToFront(SHADOW_RESULT_LAYER_ID);
+    bringLayerToFront(ANALYSIS_HEATMAP_LAYER_ID);
+  }, [selectedGeometryId, uploadedGeometries, bringLayerToFront]);
 
   useEffect(() => {
     const map = mapRef.current;
-    const shadeMap = shadeMapRef.current;
-
-    if (!map || !shadeMap || !shadowSimulatorReady) {
-      if (!selectedGeometryId && map && heatmapDataRef.current) {
-        const emptyData: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-        updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, emptyData);
-        heatmapDataRef.current = emptyData;
-      }
+    if (!map) {
       return;
     }
 
     if (!selectedGeometryId) {
-      const emptyData: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-      updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, emptyData);
-      heatmapDataRef.current = emptyData;
+      if (heatmapDataRef.current) {
+        updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        heatmapDataRef.current = EMPTY_FEATURE_COLLECTION;
+        updateMapSource(SHADOW_RESULT_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+      }
+      setShadowServiceResult(null);
+      setShadowServiceStatus('idle');
+      setShadowServiceError(null);
+      analysisKeyRef.current = null;
       return;
     }
 
@@ -511,13 +457,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     const geometry = geometryEntry.feature.geometry;
     if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) {
-      return;
-    }
-
-    const sunExposureEnabled = mapSettings.showSunExposure || shadowSettingsState.showSunExposure;
-
-    if (!sunExposureEnabled) {
-      addStatusMessage?.('⚠️ Enable the 🌈 Sun Exposure layer before running geometry analysis.', 'warning');
+      setShadowServiceStatus('error');
+      setShadowServiceError('Only Polygon or MultiPolygon geometries are supported for analysis.');
+      addStatusMessage?.('⚠️ Only Polygon or MultiPolygon geometries can be analysed for shadows.', 'warning');
       return;
     }
 
@@ -525,103 +467,128 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       return;
     }
 
-    const analysisKey = `${selectedGeometryId}|${currentDate.toISOString()}|${sunExposureEnabled ? '1' : '0'}`;
-    if (analysisKeyRef.current === analysisKey) {
+    const requestKey = `${selectedGeometryId}|${currentDate.toISOString()}|${geometryEntry.bbox.join(',')}`;
+    if (analysisKeyRef.current === requestKey) {
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     analysisInFlightRef.current = true;
-
     setIsInitialisingShadow(true);
+    setShadowServiceStatus('loading');
+    setShadowServiceError(null);
+    addStatusMessage?.('📡 Requesting real-time shadow analysis…', 'info');
 
-    try {
-      const samples = generateSamplePointsForGeometry(geometry, geometryEntry.bbox);
-
-      const results: { lat: number; lng: number; shadowPercent: number; hoursOfSun: number }[] = [];
-      let validSamples = 0;
-      let invalidSamples = 0;
-
-      samples.forEach((samplePoint) => {
-        if (cancelled) return;
-        const projected = map.project({ lng: samplePoint[0], lat: samplePoint[1] });
-
-        let hoursOfSun: number | undefined;
-
-        try {
-          if (typeof shadeMap.getHoursOfSun === 'function') {
-            const value = shadeMap.getHoursOfSun(projected.x, projected.y);
-            if (typeof value === 'number' && !Number.isNaN(value)) {
-              hoursOfSun = Math.max(0, value);
-            }
-          }
-        } catch (error) {
-          console.warn('getHoursOfSun failed', error);
-        }
-
-        if (hoursOfSun === undefined) {
-          invalidSamples += 1;
+    shadowAnalysisClient
+      .requestAnalysis({
+        bbox: geometryEntry.bbox,
+        timestamp: currentDate,
+        geometry: geometryEntry.feature as Feature<Polygon | MultiPolygon>,
+        outputs: { shadowPolygons: true, sunlightGrid: true, heatmap: true },
+        signal: controller.signal,
+      })
+      .then((response) => {
+        if (controller.signal.aborted) {
           return;
         }
 
-        validSamples += 1;
-        const shadowPercent = hoursOfSun < 2 ? 1 : 0;
-        results.push({
-          lat: samplePoint[1],
-          lng: samplePoint[0],
-          shadowPercent,
-          hoursOfSun,
-        });
-      });
+        const samples = (response.data.sunlight?.features ??
+          response.data.heatmap?.features ??
+          []) as Array<Feature>;
 
-      const shadedCount = results.filter((item) => item.shadowPercent >= 1).length;
-      const sumSunlight = results.reduce((acc, item) => acc + item.hoursOfSun, 0);
+        const geometrySamples: GeometryAnalysisSample[] = samples
+          .map((feature) => {
+            if (!feature.geometry || feature.geometry.type !== 'Point') {
+              return null;
+            }
+            const [lng, lat] = feature.geometry.coordinates as [number, number];
+            const props = feature.properties ?? {};
+            const hoursOfSun = Number(props['hoursOfSun'] ?? props['sunHours'] ?? response.metrics.avgSunlightHours);
+            const shadowPercent =
+              typeof props['shadowPercent'] === 'number'
+                ? Number(props['shadowPercent'])
+                : Math.max(0, Math.min(100, response.metrics.avgShadowPercent));
+            return {
+              lat,
+              lng,
+              shadowPercent,
+              hoursOfSun,
+            };
+          })
+          .filter((item): item is GeometryAnalysisSample => Boolean(item));
 
-      const stats = {
-        shadedRatio: validSamples ? shadedCount / validSamples : 0,
-        avgSunlightHours: validSamples ? sumSunlight / validSamples : 0,
-        sampleCount: samples.length,
-        validSamples,
-        invalidSamples,
-        generatedAt: new Date(),
-        notes:
-          invalidSamples > 0
-            ? `${invalidSamples} sample${invalidSamples === 1 ? '' : 's'} skipped due to missing exposure data.`
-            : undefined,
-      };
+        const heatmapAllowed = mapSettings.showSunExposure || shadowSettingsState.showSunExposure;
+        if (heatmapAllowed && geometrySamples.length) {
+          updateAnalysisHeatmap(geometrySamples);
+          bringLayerToFront(ANALYSIS_HEATMAP_LAYER_ID);
+        } else {
+          updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+          heatmapDataRef.current = EMPTY_FEATURE_COLLECTION;
+        }
 
-      if (!cancelled) {
+        const shadowFeatures = (response.data.shadows as FeatureCollection | undefined) ?? EMPTY_FEATURE_COLLECTION;
+        updateMapSource(SHADOW_RESULT_SOURCE_ID, shadowFeatures);
+        ensureShadowLayer();
+
         setGeometryAnalysis({
           geometryId: selectedGeometryId,
-          stats,
-          samples: results,
+          stats: {
+            shadedRatio: response.metrics.avgShadowPercent / 100,
+            avgSunlightHours: response.metrics.avgSunlightHours,
+            sampleCount: response.metrics.sampleCount,
+            validSamples: geometrySamples.length,
+            invalidSamples: Math.max(response.metrics.sampleCount - geometrySamples.length, 0),
+            generatedAt: new Date(response.bucketStart),
+            notes: response.cache.hit ? 'Served from cache' : undefined,
+          },
+          samples: geometrySamples,
         });
-        updateAnalysisHeatmap(results);
-        analysisKeyRef.current = analysisKey;
-        addStatusMessage?.('✅ Shadow analysis complete.', 'info');
-      }
-    } catch (error) {
-      if (!cancelled) {
-        console.error('Geometry analysis failed', error);
-        addStatusMessage?.('❌ Shadow analysis failed.', 'error');
-      }
-    } finally {
-      analysisInFlightRef.current = false;
-    }
+
+        analysisKeyRef.current = requestKey;
+        setShadowServiceResult(response);
+        setShadowServiceStatus('success');
+        addStatusMessage?.('✅ Shadow analysis ready.', 'info');
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        setShadowServiceStatus('error');
+        setShadowServiceError(message);
+        addStatusMessage?.(`❌ Shadow analysis failed: ${message}`, 'error');
+        updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        heatmapDataRef.current = EMPTY_FEATURE_COLLECTION;
+        updateMapSource(SHADOW_RESULT_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          analysisInFlightRef.current = false;
+          setIsInitialisingShadow(false);
+        }
+      });
 
     return () => {
-      cancelled = true;
+      controller.abort();
       analysisInFlightRef.current = false;
+      setIsInitialisingShadow(false);
     };
   }, [
     selectedGeometryId,
     uploadedGeometries,
     currentDate,
-    mapSettings.showSunExposure,
-    shadowSettingsState.showSunExposure,
-    shadowSimulatorReady,
+    updateMapSource,
     addStatusMessage,
     setGeometryAnalysis,
+    setShadowServiceResult,
+    setShadowServiceStatus,
+    setShadowServiceError,
+    setIsInitialisingShadow,
+    updateAnalysisHeatmap,
+    ensureShadowLayer,
+    bringLayerToFront,
+    mapSettings.showSunExposure,
+    shadowSettingsState.showSunExposure,
   ]);
 
   // Load the shadow simulator script on demand

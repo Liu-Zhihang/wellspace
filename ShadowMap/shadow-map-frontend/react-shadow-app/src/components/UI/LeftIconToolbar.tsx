@@ -9,14 +9,13 @@ import {
   PauseCircleIcon,
   BuildingOfficeIcon,
   SunIcon,
-  BoltIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
 import { useShadowMapStore } from '../../store/shadowMapStore'
 import type { MobilityTracePoint } from '../../store/shadowMapStore'
 import type { Feature, Geometry } from 'geojson'
 
-type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'shadowOps' | null;
+type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'analysis' | null;
 
 const presetHours = [
   { hour: 6, label: 'Sunrise' },
@@ -50,10 +49,11 @@ export const LeftIconToolbar: React.FC = () => {
     buildingsLoaded,
     isLoadingBuildings,
     shadowSimulatorReady,
-    isInitialisingShadow,
     autoLoadBuildings,
     setAutoLoadBuildings,
     viewportActions,
+    shadowServiceStatus,
+    shadowServiceResult,
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
@@ -557,72 +557,78 @@ export const LeftIconToolbar: React.FC = () => {
       );
     }
 
-    if (panelId === 'shadowOps') {
-      const readyClass = shadowSimulatorReady ? 'text-emerald-600' : 'text-gray-500';
+    if (panelId === 'analysis') {
+      const statusMap: Record<string, { label: string; tone: string }> = {
+        loading: { label: 'Running analysis…', tone: 'text-amber-500' },
+        success: { label: 'Analysis ready', tone: 'text-emerald-500' },
+        error: { label: 'Analysis failed', tone: 'text-rose-500' },
+        idle: { label: 'Idle', tone: 'text-slate-400' },
+      };
+
+      const statusMeta = statusMap[shadowServiceStatus] ?? statusMap.idle;
 
       return (
         <div className="w-full space-y-4 p-4 text-slate-700">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Shadow simulator</p>
-              <p className="text-xs text-slate-400">Control exposure heatmap and recalculation</p>
-            </div>
-            <span className={`text-xs font-medium ${readyClass}`}>
-              {shadowSimulatorReady ? 'Ready' : 'Idle'}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>Sun exposure heatmap</span>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-900">Heatmap overlay</span>
             <Switch
               size="small"
               checked={mapSettings.showSunExposure}
               onChange={(checked) => toggleSunExposureSetting(Boolean(checked))}
             />
           </div>
+          <p className="text-xs text-slate-500">
+            The heatmap is disabled by default to keep the map clear. Toggle it on only when you need an exposure view.
+          </p>
 
-          <Button
-            type="primary"
-            icon={<BoltIcon className="h-4 w-4" />}
-            block
-            className="h-11 rounded-xl"
-            loading={isInitialisingShadow}
-            disabled={!viewportActions.initShadowSimulator || !buildingsLoaded}
-            onClick={() =>
-              invokeViewportAction(
-                buildingsLoaded
-                  ? viewportActions.initShadowSimulator
-                  : undefined,
-                buildingsLoaded
-                  ? 'Shadow simulator is not ready yet.'
-                  : 'Load buildings before initialising shadows.',
-              )
-            }
-          >
-            {shadowSimulatorReady ? 'Recalculate shadows' : 'Initialise shadows'}
-          </Button>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+            <p className={`text-[11px] uppercase tracking-[0.2em] ${statusMeta.tone}`}>{statusMeta.label}</p>
+            {shadowServiceResult ? (
+              <dl className="mt-3 space-y-2 text-sm text-slate-600">
+                <div className="flex items-center justify-between">
+                  <dt>Avg sunlight</dt>
+                  <dd className="font-semibold text-slate-900">
+                    {shadowServiceResult.metrics.avgSunlightHours.toFixed(1)} h
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt>Shadow coverage</dt>
+                  <dd className="font-semibold text-slate-900">
+                    {shadowServiceResult.metrics.avgShadowPercent.toFixed(1)}%
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <dt>Samples</dt>
+                  <dd>{shadowServiceResult.metrics.sampleCount}</dd>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <dt>Cache</dt>
+                  <dd>{shadowServiceResult.cache.hit ? 'Hit' : 'Fresh compute'}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="mt-3 text-xs text-slate-500">
+                Select a polygon to trigger the backend analysis. Metrics appear here automatically when ready.
+              </p>
+            )}
+          </div>
 
-          <div className="grid gap-2">
+          <div className="flex gap-2">
             <Button
               block
               className="h-10 rounded-lg border border-blue-200 text-sm font-semibold text-blue-600 hover:border-blue-300"
               onClick={() => toggleSunExposureSetting(true)}
             >
-              Highlight exposure heatmap
+              Show heatmap
             </Button>
             <Button
               block
               className="h-10 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:border-slate-300"
               onClick={() => toggleSunExposureSetting(false)}
             >
-              Restore shadow layer
+              Hide heatmap
             </Button>
           </div>
-
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            Enable the sun exposure heatmap to populate geometry analytics. Initialisation can take a
-            few seconds for dense urban scenes.
-          </p>
         </div>
       );
     }
@@ -702,7 +708,7 @@ export const LeftIconToolbar: React.FC = () => {
     { id: 'time', label: 'Time controls', icon: <ClockIcon className="h-5 w-5" /> },
     { id: 'shadow', label: 'Shadow styling', icon: <SwatchIcon className="h-5 w-5" /> },
     { id: 'buildings', label: 'Building data', icon: <BuildingOfficeIcon className="h-5 w-5" /> },
-    { id: 'shadowOps', label: 'Shadow simulator', icon: <SunIcon className="h-5 w-5" /> },
+    { id: 'analysis', label: 'Heatmap & analysis', icon: <SunIcon className="h-5 w-5" /> },
     { id: 'style', label: 'Map style', icon: <GlobeAltIcon className="h-5 w-5" /> },
     { id: 'upload', label: 'Add file to map', icon: <ArrowUpTrayIcon className="h-5 w-5" /> },
   ];

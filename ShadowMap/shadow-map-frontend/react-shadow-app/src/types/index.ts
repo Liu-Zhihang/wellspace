@@ -202,3 +202,46 @@ export type GeometryAnalysis = {
   stats: GeometryAnalysisStats;
   samples?: GeometryAnalysisSample[];
 };
+
+export type ShadowServiceStatus = 'idle' | 'loading' | 'success' | 'error';
+
+export type ShadowServiceLayer = FeatureCollection;
+
+export type ShadowServiceMetrics = {
+  sampleCount: number;
+  avgShadowPercent: number;
+  avgSunlightHours: number;
+  engineLatencyMs: number;
+  engineVersion: string;
+  source: 'cache' | 'engine';
+  shadowAreaSqm?: number;
+  bboxAreaSqm?: number;
+  coverageSource?: 'area' | 'sample';
+};
+
+export type ShadowServiceCacheMeta = {
+  key: string;
+  hit: boolean;
+  expiresAt: string;
+  bucketStart: string;
+  bucketSizeMinutes: number;
+  dimensions: string[];
+};
+
+export type ShadowServiceResponse = {
+  requestId: string;
+  bbox: BoundingBox;
+  timestamp: string;
+  bucketStart: string;
+  bucketEnd: string;
+  timeGranularityMinutes: number;
+  cache: ShadowServiceCacheMeta;
+  metrics: ShadowServiceMetrics;
+  data: {
+    shadows?: ShadowServiceLayer;
+    sunlight?: ShadowServiceLayer;
+    heatmap?: ShadowServiceLayer;
+  };
+  warnings?: string[];
+  metadata?: Record<string, unknown>;
+};

@@ -14,7 +14,9 @@
 | REQ-CLEAN-02 | Remove unused UI/Control components | Done | Legacy panels removed; verify no stale imports remain |
 | REQ-DOC-03 | Establish structure + plan docs | Done | `CODEBASE_STRUCTURE.md` and this file created |
 | REQ-CLEAN-04 | Consolidate frontend map modes | Done | Mapbox viewport shared; Clean UI retained as styling |
-| REQ-ANALYSIS-01 | Extend upload workflow for geometry-based analysis | Planned | Merge upload UX, compute shadow coverage & sunlight stats, export results |
+| REQ-ANALYSIS-01 | Extend upload workflow for geometry-based analysis | In Progress | Uploads auto-select geometry, UI overlays show backend metrics, JSON/CSV export ready |
+| REQ-ENGINE-01 | Shadow engine service abstraction | In Progress | `/api/analysis/shadow` + local pybdshadow worker + script bridge landed; Redis/metrics TBD |
+| REQ-ENGINE-02 | Frontend shadow engine integration | In Progress | Zustand stores consume engine metrics, heatmap default-off toggle + overlay redesign shipped |
 
 ## Next Steps
 
@@ -34,20 +36,23 @@
      - Build a minimal Python notebook/service to ingest building footprints + height and output GeoJSON shadows + statistics.
      - Document upstream data requirements (footprint source, height attribute, CRS) and preprocessing pipeline.
    - Stage B – Service Abstraction
-     - Design backend interface (`POST /analysis/shadow`) returning shadow polygons, sunshine metrics, confidence metadata.
-     - Outline caching strategy (tile/time buckets) and fallback behaviour when data is missing or geometry is too large.
-     - Decide deployment model (separate microservice vs worker) and dependency management.
+     - ✅ `/api/analysis/shadow` route + cache/in-flight controller delivered with simulator fallback.
+     - ✅ Added local pybdshadow worker integration via `service_cli.py` + `SHADOW_ENGINE_SCRIPT_PATH`; backend now streams requests through the Python CLI when no external base URL is configured.
+     - [ ] Persist cache entries in Redis (keyed by bbox+bucket) and expose metrics endpoints for hit rate / latency.
+     - [ ] Finalise deployment plan (stand-alone microservice vs worker pool) and health probes.
    - Stage C – Frontend Integration
-     - Replace ShadeMap sampling with service call; update Zustand store types to consume new stats/metadata.
-     - Render returned shadow/heatmap layers as Mapbox/MapLibre vector overlays (remove ShadeMap visual dependency).
-     - Refresh analysis overlay UI (stats, notes, confidence flags) and expose controls for heatmap/shadow toggles.
+     - ✅ Zustand store, Map viewport, and Analysis panel now read/write engine status + results.
+     - [ ] Add UI toggles for shadow polygon vs heatmap overlays and expose cache/debug metadata.
+     - [ ] Remove remaining ShadeMap sampling paths once backend parity is validated; gate behind feature flag for rollout.
+     - [ ] Stream results into downloadable GeoJSON/CSV exports (currently geometry analysis reuses summary only).
    - Stage D – Engine Evaluation
-     - Compare staying on MapLibre vs migrating to CesiumJS (prototype 3D tiles loading, assess effort).
-     - Decide target engine and list migration subtasks (routing, UI adjustments, data loading).
+     - Stand up a spike comparing MapLibre vs CesiumJS rendering of returned shadow polygons + potential 3D tiles.
+     - Catalogue migration subtasks (camera controls, interaction patterns, data loading) with engineering estimates.
+     - Prototype CesiumJS overlay of pybdshadow outputs to stress-test performance on HK CBD dataset.
    - Stage E – Testing & Roll-out
-     - Define regression suite (unit tests for analysis response, integration tests for overlay rendering).
-     - Collect benchmark numbers (processing time per polygon, accuracy vs ShadeMap sampling).
-     - Prepare deployment checklist (service containerization, monitoring, rollback strategy).
+     - Capture regression suite: contract tests for `/api/analysis/shadow`, frontend rendering snapshot tests, and store selectors.
+     - Define performance SLA (p95 latency per bbox) and benchmark both simulator + real engine.
+     - Draft launch checklist covering container build, monitoring dashboards, cache warmup, and rollback plan.
 
 ## Risks / Blockers
 

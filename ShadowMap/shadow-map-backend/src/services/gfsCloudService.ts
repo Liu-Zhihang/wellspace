@@ -3,6 +3,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
+const GFS_VERBOSE = process.env['LOG_VERBOSE_GFS'] === 'true';
+
 const execFileAsync = promisify(execFile);
 
 interface GfsCloudCoverResult {
@@ -60,7 +62,7 @@ export class GfsCloudService {
         const cloudPercent = this.parseAsciiResponse(response.data);
         const ratio = Math.min(Math.max(cloudPercent / 100, 0), 1);
 
-        if (offsetHours > 0) {
+        if (offsetHours > 0 && GFS_VERBOSE) {
           console.warn(`[gfs] 落回 ${offsetHours}h 前的运行 (cycle ${cycleHourUtc}Z)`);
         }
 
@@ -75,7 +77,9 @@ export class GfsCloudService {
       } catch (error) {
         lastError = error;
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[gfs] 获取失败 (cycle ${cycleHourUtc}Z, offset ${offsetHours}h): ${message}`);
+        if (GFS_VERBOSE) {
+          console.warn(`[gfs] 获取失败 (cycle ${cycleHourUtc}Z, offset ${offsetHours}h): ${message}`);
+        }
 
         // 在当前运行失败时尝试一次 curl 兜底
         if (message.includes('Client network socket') || message.includes('Request failed with status code 503')) {
@@ -83,7 +87,9 @@ export class GfsCloudService {
           if (curlPercent !== null) {
             const ratio = Math.min(Math.max(curlPercent / 100, 0), 1);
 
-            console.warn('[gfs] 使用 curl fallback 成功');
+            if (GFS_VERBOSE) {
+              console.warn('[gfs] 使用 curl fallback 成功');
+            }
             return {
               cloudCoverRatio: ratio,
               rawValue: curlPercent,
@@ -218,7 +224,9 @@ export class GfsCloudService {
         proxy: false,
       };
     } catch (error) {
-      console.warn('[gfs] 创建代理 agent 失败:', error);
+      if (GFS_VERBOSE) {
+        console.warn('[gfs] 创建代理 agent 失败:', error);
+      }
       return {
         responseType: 'text',
         timeout: 15_000,
@@ -341,13 +349,17 @@ export class GfsCloudService {
       } catch (parseError) {
         const preview = stdout.slice(0, 200).replace(/\s+/g, ' ');
         if (preview) {
-          console.warn('[gfs] curl 返回无法解析:', preview);
+          if (GFS_VERBOSE) {
+            console.warn('[gfs] curl 返回无法解析:', preview);
+          }
         }
         throw parseError;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn('[gfs] curl fallback 失败:', message);
+      if (GFS_VERBOSE) {
+        console.warn('[gfs] curl fallback 失败:', message);
+      }
       return null;
     }
   }

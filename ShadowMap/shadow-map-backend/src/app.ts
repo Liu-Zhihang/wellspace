@@ -10,6 +10,7 @@ import healthRoutes from './routes/health';
 import buildingRoutes from './routes/buildings';
 import buildingWfsRoutes from './routes/buildingWfs';
 import weatherRoutes from './routes/weather';
+import analysisRoutes from './routes/analysis';
 
 const app = express();
 
@@ -54,6 +55,7 @@ app.use('/api/dem', demRoutes);
 app.use('/api/buildings', buildingRoutes);
 app.use('/api/wfs-buildings', buildingWfsRoutes);
 app.use('/api/weather', weatherRoutes);
+app.use('/api/analysis', analysisRoutes);
 
 // Static file service - prefer the built React app, fall back to prototypes
 const reactDistPath = path.join(__dirname, '../../shadow-map-frontend/react-shadow-app/dist');
@@ -80,6 +82,9 @@ app.get('/', (req, res) => {
       },
       weather: {
         current: '/api/weather/current'
+      },
+      analysis: {
+        shadow: '/api/analysis/shadow'
       },
       docs: '/api/docs'
     }

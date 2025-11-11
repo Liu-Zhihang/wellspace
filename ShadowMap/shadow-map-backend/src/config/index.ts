@@ -13,6 +13,18 @@ interface Config {
   api: {
     weatherBaseUrl: string | null;
   };
+  analysis: {
+    engineBaseUrl: string | null;
+    requestTimeoutMs: number;
+    cacheTtlMs: number;
+    maxCacheEntries: number;
+    deploymentMode: 'microservice' | 'worker';
+    localScriptPath: string | null;
+    pythonPath: string;
+    timezone: string;
+    backendBaseUrl: string;
+    maxFeatures: number;
+  };
   cors: {
     origins: string[];
     credentials: boolean;
@@ -28,6 +40,18 @@ const config: Config = {
   },
   api: {
     weatherBaseUrl: process.env['WEATHER_API_URL'] || null,
+  },
+  analysis: {
+    engineBaseUrl: process.env['SHADOW_ENGINE_BASE_URL'] || null,
+    requestTimeoutMs: Number.parseInt(process.env['SHADOW_ENGINE_TIMEOUT_MS'] || '45000', 10),
+    cacheTtlMs: Number.parseInt(process.env['SHADOW_ENGINE_CACHE_TTL_MS'] || '120000', 10),
+    maxCacheEntries: Number.parseInt(process.env['SHADOW_ENGINE_CACHE_MAX_KEYS'] || '200', 10),
+    deploymentMode: (process.env['SHADOW_ENGINE_DEPLOYMENT_MODE'] as 'microservice' | 'worker') || 'microservice',
+    localScriptPath: process.env['SHADOW_ENGINE_SCRIPT_PATH'] || null,
+    pythonPath: process.env['SHADOW_ENGINE_PYTHON_PATH'] || 'python3',
+    timezone: process.env['SHADOW_ENGINE_TIMEZONE'] || 'Asia/Hong_Kong',
+    backendBaseUrl: process.env['SHADOW_ENGINE_BACKEND_URL'] || 'http://localhost:3500',
+    maxFeatures: Number.parseInt(process.env['SHADOW_ENGINE_MAX_FEATURES'] || '8000', 10),
   },
   cors: {
     origins: process.env['CORS_ORIGINS']
@@ -48,4 +72,7 @@ if (isDevelopment()) {
   console.log(`   Port: ${config.port}`);
   console.log(`   DEM Path: ${config.data.demPath}`);
   console.log(`   Buildings Path: ${config.data.buildingsPath}`);
+  console.log(
+    `   Shadow Engine: mode=${config.analysis.deploymentMode}, base=${config.analysis.engineBaseUrl ?? 'local-script'}`,
+  );
 }

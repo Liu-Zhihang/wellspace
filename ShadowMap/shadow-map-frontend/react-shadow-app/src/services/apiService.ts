@@ -1,7 +1,7 @@
 import type { BuildingTileData } from '../types/index.ts';
 import { advancedCacheManager } from './advancedCacheManager';
 
-const API_BASE_URL = 'http://localhost:3500/api';
+export const API_BASE_URL = 'http://localhost:3500/api';
 
 export class ApiService {
   // Cache in-flight requests to avoid duplicates

@@ -1,4 +1,4 @@
-import { shadowAnalysisService } from '../services/shadowAnalysisService';
+import { shadowAnalysisClient } from '../services/shadowAnalysisService';
 
 export interface ShadowTestResult {
   success: boolean;
@@ -30,12 +30,17 @@ export async function runShadowAnalysisSmokeTest(): Promise<ShadowTestResult> {
   console.log('[ShadowTest] Starting smoke test', { bounds, isoTime: date.toISOString(), zoom });
 
   try {
-    const result = await shadowAnalysisService.calculateRealTimeShadows(bounds, date, zoom);
+    const response = await shadowAnalysisClient.requestAnalysis({
+      bbox: [bounds.west, bounds.south, bounds.east, bounds.north],
+      timestamp: date,
+      timeGranularityMinutes: 15,
+    });
 
     console.log('[ShadowTest] Completed', {
-      shadowCount: result.shadows.length,
-      buildingCount: result.buildingCount,
-      sunPosition: result.sunPosition
+      cache: response.cache.hit ? 'hit' : 'miss',
+      samples: response.metrics.sampleCount,
+      avgShadow: response.metrics.avgShadowPercent,
+      avgSunlight: response.metrics.avgSunlightHours
     });
 
     return {

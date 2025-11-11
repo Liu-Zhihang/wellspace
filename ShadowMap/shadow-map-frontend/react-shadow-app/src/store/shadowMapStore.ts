@@ -8,7 +8,9 @@ import type {
   DataLayerType,
   WeatherSnapshot,
   UploadedGeometry,
-  GeometryAnalysis
+  GeometryAnalysis,
+  ShadowServiceStatus,
+  ShadowServiceResponse
 } from '../types/index.ts';
 
 type ViewportAction = (() => void) | (() => Promise<void>);
@@ -53,6 +55,12 @@ interface ShadowMapState {
     analysisResult?: ShadowAnalysisResult | null;
   };
   setAnalysisResults: (results: Partial<ShadowMapState['analysisResults']>) => void;
+  shadowServiceStatus: ShadowServiceStatus;
+  shadowServiceResult: ShadowServiceResponse | null;
+  shadowServiceError: string | null;
+  setShadowServiceStatus: (status: ShadowServiceStatus) => void;
+  setShadowServiceResult: (result: ShadowServiceResponse | null) => void;
+  setShadowServiceError: (error: string | null) => void;
   
   // Analysis radius
   analysisRadius: number;
@@ -228,7 +236,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     shadowColor: '#01112f',
     shadowBlur: 2,
     enableShadowAnimation: false,
-    showSunExposure: true,
+    showSunExposure: false,
     autoCloudAttenuation: true,
     manualSunlightFactor: 1,
   },
@@ -254,6 +262,12 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   analysisResults: {},
   setAnalysisResults: (results: Partial<ShadowMapState['analysisResults']>) =>
     set(state => ({ analysisResults: { ...state.analysisResults, ...results } })),
+  shadowServiceStatus: 'idle',
+  shadowServiceResult: null,
+  shadowServiceError: null,
+  setShadowServiceStatus: (status) => set({ shadowServiceStatus: status }),
+  setShadowServiceResult: (result) => set({ shadowServiceResult: result }),
+  setShadowServiceError: (error) => set({ shadowServiceError: error ?? null }),
   
   analysisRadius: 500,
   setAnalysisRadius: (radius: number) => set({ analysisRadius: radius }),
@@ -308,25 +322,12 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   uploadedGeometries: [],
   addUploadedGeometry: (geometry: UploadedGeometry) => {
     const prevState = get();
-    const shouldEnableSunExposure =
-      !prevState.shadowSettings.showSunExposure || !prevState.mapSettings.showSunExposure;
-
     set({
       uploadedGeometries: [...prevState.uploadedGeometries, geometry],
       selectedGeometryId: geometry.id,
-      mapSettings: shouldEnableSunExposure
-        ? { ...prevState.mapSettings, showSunExposure: true }
-        : prevState.mapSettings,
-      shadowSettings: shouldEnableSunExposure
-        ? { ...prevState.shadowSettings, showSunExposure: true }
-        : prevState.shadowSettings,
     });
 
-    const { addStatusMessage } = get();
-    addStatusMessage?.(`Uploaded geometry "${geometry.name}"`, 'info');
-    if (shouldEnableSunExposure) {
-      addStatusMessage?.('Sun exposure heatmap enabled for geometry analysis.', 'info');
-    }
+    get().addStatusMessage?.(`Uploaded geometry "${geometry.name}"`, 'info');
   },
   removeUploadedGeometry: (geometryId: string) => {
     set(state => {

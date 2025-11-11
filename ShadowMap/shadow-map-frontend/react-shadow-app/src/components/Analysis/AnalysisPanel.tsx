@@ -1,4 +1,69 @@
 import { useShadowMapStore } from '../../store/shadowMapStore';
+import type { ShadowServiceResponse } from '../../types/index.ts';
+
+const formatNumber = (num: number | undefined, digits = 1) =>
+  typeof num === 'number' && Number.isFinite(num) ? num.toFixed(digits) : '—';
+
+const ShadowEngineStatusCard = ({
+  status,
+  result,
+  error,
+}: {
+  status: string;
+  result: ShadowServiceResponse | null;
+  error: string | null;
+}) => {
+  const statusMap: Record<string, { label: string; className: string }> = {
+    loading: { label: 'Running analysis…', className: 'bg-amber-100 text-amber-700' },
+    success: { label: 'Analysis ready', className: 'bg-emerald-100 text-emerald-700' },
+    error: { label: 'Analysis failed', className: 'bg-rose-100 text-rose-700' },
+    idle: { label: 'Idle', className: 'bg-slate-200 text-slate-700' },
+  };
+
+  const meta = statusMap[status] ?? statusMap.idle;
+
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-gray-500">Shadow Engine</p>
+          <p className="text-base font-semibold text-gray-800">{meta.label}</p>
+        </div>
+        <span className={`px-3 py-1 text-xs font-medium rounded-full ${meta.className}`}>{status}</span>
+      </div>
+
+      {result && (
+        <dl className="grid grid-cols-2 gap-3 text-sm text-gray-700">
+          <div>
+            <dt className="text-xs text-gray-500">Bucket</dt>
+            <dd>{new Date(result.bucketStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">Cache</dt>
+            <dd>{result.cache.hit ? 'Cache hit' : 'Fresh compute'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">Avg Sunlight</dt>
+            <dd>{result.metrics.avgSunlightHours.toFixed(1)} h</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">Shadow Coverage</dt>
+            <dd>{result.metrics.avgShadowPercent.toFixed(1)}%</dd>
+          </div>
+        </dl>
+      )}
+
+      {error && <p className="text-xs text-rose-600">{error}</p>}
+    </div>
+  );
+};
+
+const NoGeometryHint = () => (
+  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-gray-600">
+    <p className="font-medium text-gray-800 mb-1">No geometry selected</p>
+    <p>Upload a polygon via the Layers panel, then select it on the map to run a shadow analysis.</p>
+  </div>
+);
 
 export const AnalysisPanel = () => {
   const {
@@ -11,6 +76,9 @@ export const AnalysisPanel = () => {
     selectGeometry,
     geometryAnalyses,
     exportGeometryAnalysis,
+    shadowServiceStatus,
+    shadowServiceResult,
+    shadowServiceError,
   } = useShadowMapStore();
 
   const currentGeometry = selectedGeometryId
@@ -21,14 +89,15 @@ export const AnalysisPanel = () => {
     : undefined;
 
 
-  // Helper to format numeric values for display
-  const formatNumber = (num: number | undefined, decimals: number = 1): string => {
-    return num?.toFixed(decimals) || '-';
-  };
-
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-4 max-h-screen overflow-y-auto">
       <h3 className="text-lg font-medium text-gray-800">Analysis Results</h3>
+
+      <ShadowEngineStatusCard
+        status={shadowServiceStatus}
+        result={shadowServiceResult}
+        error={shadowServiceError}
+      />
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -52,9 +121,7 @@ export const AnalysisPanel = () => {
         </div>
 
         {uploadedGeometries.length === 0 ? (
-          <p className="text-sm text-gray-500">
-            Upload GeoJSON polygons to review shadow coverage and sunlight statistics.
-          </p>
+          <NoGeometryHint />
         ) : (
           <div className="space-y-2">
             {uploadedGeometries.map((geometry) => {
@@ -120,7 +187,7 @@ export const AnalysisPanel = () => {
                 <div className="text-gray-600">Average sunlight</div>
               </div>
               <div className="text-center col-span-2 text-xs text-gray-500">
-                Sample points: {geometryAnalysis.stats.sampleCount}
+                Generated at {geometryAnalysis.stats.generatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
           </div>
