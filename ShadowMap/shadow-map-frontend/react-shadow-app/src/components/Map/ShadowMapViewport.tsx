@@ -10,7 +10,7 @@ import { weatherService } from '../../services/weatherService';
 import { ApiService } from '../../services/apiService';
 import { shadowAnalysisClient } from '../../services/shadowAnalysisService';
 import { GeometryAnalysisOverlay } from '../Analysis/GeometryAnalysisOverlay';
-import type { GeometryAnalysisSample } from '../../types/index.ts';
+import type { GeometryAnalysisSample, MobilityCsvRecord, MobilityDataset } from '../../types/index.ts';
 import { getBaseMapStyle } from '../../services/baseMapManager';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
@@ -26,6 +26,81 @@ const computeEffectiveShadowOpacity = (
     ? MIN_SHADOW_DARKNESS_FACTOR + (1 - MIN_SHADOW_DARKNESS_FACTOR) * sunlightFactor
     : sunlightFactor;
   return Math.max(0, Math.min(1, baseOpacity * factor));
+};
+
+const buildMobilityLineFeatures = (
+  rows: MobilityCsvRecord[],
+  dataset: MobilityDataset,
+): GeoJSON.Feature[] => {
+  if (!rows.length) {
+    return [];
+  }
+
+  const sortedRows = [...rows].sort(
+    (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+  );
+  const grouped = new Map<string, MobilityCsvRecord[]>();
+  sortedRows.forEach((record) => {
+    const bucket = grouped.get(record.traceId) ?? [];
+    bucket.push(record);
+    grouped.set(record.traceId, bucket);
+  });
+
+  return Array.from(grouped.entries()).map(([traceId, points]) => ({
+    type: 'Feature',
+    geometry: {
+      type: 'LineString',
+      coordinates: points.map((point) => point.coordinates),
+    },
+    properties: {
+      datasetId: dataset.id,
+      traceId,
+      color: dataset.color,
+    },
+  }));
+};
+
+const buildMobilityProgressFeatures = (
+  rows: MobilityCsvRecord[],
+  dataset: MobilityDataset,
+  currentTime: Date,
+): GeoJSON.Feature[] => {
+  const filtered = rows.filter((row) => row.timestamp.getTime() <= currentTime.getTime());
+  if (!filtered.length) {
+    return [];
+  }
+
+  return filtered.map((record) => ({
+    type: 'Feature',
+    geometry: {
+      type: 'Point',
+      coordinates: record.coordinates,
+    },
+    properties: {
+      datasetId: dataset.id,
+      traceId: record.traceId,
+      timestamp: record.timestamp.toISOString(),
+      speedKmh: record.speedKmh ?? null,
+      color: dataset.color,
+    },
+  }));
+};
+
+const BUILDING_SOURCE_ID = 'clean-buildings';
+const BUILDING_LAYER_ID = 'clean-buildings-extrusion';
+
+const computeBuildingStyle = (baseMapId?: string) => {
+  const id = (baseMapId ?? '').toLowerCase();
+  if (id.includes('dark') || id.includes('black')) {
+    return { fill: '#fbbf24', opacity: 0.82 };
+  }
+  if (id.includes('satellite')) {
+    return { fill: '#34d399', opacity: 0.75 };
+  }
+  if (id.includes('carto') || id.includes('light') || id.includes('street')) {
+    return { fill: '#1d4ed8', opacity: 0.58 };
+  }
+  return { fill: '#f97316', opacity: 0.7 };
 };
 
 const UPLOADED_SOURCE_ID = 'uploaded-geometry-source';
@@ -54,7 +129,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const shadeMapRef = useRef<any>(null);
-  const [, setStatusMessage] = useState('Preparing…');
+  const [, setStatusMessage] = useState('Preparing');
   const loadBuildingsRef = useRef<(() => Promise<void>) | undefined>(undefined); // Preserve latest loader for debounced callbacks
   const moveEndTimeoutRef = useRef<number | null>(null); // Debounce timer used by moveend handler
   const tracePlaybackRef = useRef<number | null>(null);
@@ -69,6 +144,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const heatmapDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const animationLastTimestampRef = useRef<number | null>(null);
+  const mobilityLayerRegistryRef = useRef<Set<string>>(new Set());
   const shadowResultDataRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FEATURE_COLLECTION);
   const baseMapBootstrapRef = useRef(false);
   const lastBaseMapIdRef = useRef<string | null>(null);
@@ -248,6 +324,8 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     mapCenter,
     mapZoom,
     setMapView,
+    mobilityDatasets,
+    mobilityTraces,
   } = useShadowMapStore();
 
   const setMapViewRef = useRef(setMapView);
@@ -257,10 +335,19 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
   const autoLoadBuildingsRef = useRef(autoLoadBuildings);
   const selectedBaseMapId = baseMapId ?? mapSettings.baseMapId ?? 'mapbox-streets';
+  const buildingStyle = useMemo(() => computeBuildingStyle(selectedBaseMapId), [selectedBaseMapId]);
   const baseMapStyle = useMemo(() => getBaseMapStyle(selectedBaseMapId), [selectedBaseMapId]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    if (!map.getLayer(BUILDING_LAYER_ID)) return;
+    map.setPaintProperty(BUILDING_LAYER_ID, 'fill-extrusion-color', buildingStyle.fill);
+    map.setPaintProperty(BUILDING_LAYER_ID, 'fill-extrusion-opacity', buildingStyle.opacity);
+  }, [buildingStyle.fill, buildingStyle.opacity]);
+
   // Component initialisation lifecycle
-  console.log('✅ ShadowMapViewport mounted')
+  console.log(' ShadowMapViewport mounted')
 
   const getActiveSunlightFactor = useCallback(() => (
     shadowSettingsState.autoCloudAttenuation
@@ -331,6 +418,136 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   useEffect(() => {
     refreshWeatherData(shadowSettingsState.autoCloudAttenuation ? 'auto-on' : 'manual-mode');
   }, [refreshWeatherData, shadowSettingsState.autoCloudAttenuation, currentDate]);
+
+  const syncMobilityLayers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const activeIds = new Set<string>();
+    mobilityDatasets.forEach((dataset) => {
+      const rows = mobilityTraces[dataset.id] ?? [];
+      const lineSourceId = `mobility-${dataset.id}-source`;
+      const lineLayerId = `mobility-${dataset.id}-line`;
+      const progressSourceId = `mobility-${dataset.id}-progress`;
+      const progressLayerId = `mobility-${dataset.id}-progress-layer`;
+
+      const lineFeatures = buildMobilityLineFeatures(rows, dataset);
+      const lineCollection: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: lineFeatures,
+      };
+
+      const ensureGeoJsonSource = (sourceId: string, data: GeoJSON.FeatureCollection) => {
+        const existing = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+        if (existing) {
+          existing.setData(data);
+          return;
+        }
+        map.addSource(sourceId, {
+          type: 'geojson',
+          data,
+        });
+      };
+
+      ensureGeoJsonSource(lineSourceId, lineCollection);
+
+      if (!map.getLayer(lineLayerId)) {
+        map.addLayer({
+          id: lineLayerId,
+          type: 'line',
+          source: lineSourceId,
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+            visibility: dataset.visible ? 'visible' : 'none',
+          },
+          paint: {
+            'line-color': dataset.color,
+            'line-width': 2.5,
+            'line-opacity': 0.65,
+          },
+        });
+      } else {
+        map.setPaintProperty(lineLayerId, 'line-color', dataset.color);
+        map.setLayoutProperty(lineLayerId, 'visibility', dataset.visible ? 'visible' : 'none');
+      }
+
+      const progressFeatures = buildMobilityProgressFeatures(rows, dataset, currentDate);
+      const progressCollection: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: progressFeatures,
+      };
+
+      ensureGeoJsonSource(progressSourceId, progressCollection);
+
+      if (!map.getLayer(progressLayerId)) {
+        map.addLayer({
+          id: progressLayerId,
+          type: 'circle',
+          source: progressSourceId,
+          layout: {
+            visibility: dataset.visible ? 'visible' : 'none',
+          },
+          paint: {
+            'circle-radius': 4,
+            'circle-color': dataset.color,
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 0.95,
+          },
+        });
+      } else {
+        map.setPaintProperty(progressLayerId, 'circle-color', dataset.color);
+        map.setLayoutProperty(progressLayerId, 'visibility', dataset.visible ? 'visible' : 'none');
+      }
+
+      activeIds.add(dataset.id);
+    });
+
+    mobilityLayerRegistryRef.current.forEach((datasetId) => {
+      if (activeIds.has(datasetId)) {
+        return;
+      }
+      const ids = [
+        `mobility-${datasetId}-line`,
+        `mobility-${datasetId}-progress-layer`,
+      ];
+      ids.forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.removeLayer(layerId);
+        }
+      });
+      const sources = [
+        `mobility-${datasetId}-source`,
+        `mobility-${datasetId}-progress`,
+      ];
+      sources.forEach((sourceId) => {
+        if (map.getSource(sourceId)) {
+          map.removeSource(sourceId);
+        }
+      });
+    });
+
+    mobilityLayerRegistryRef.current = activeIds;
+  }, [mobilityDatasets, mobilityTraces, currentDate]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (!map.isStyleLoaded()) {
+      map.once('styledata', syncMobilityLayers);
+      return () => map.off('styledata', syncMobilityLayers);
+    }
+
+    syncMobilityLayers();
+
+    return undefined;
+  }, [syncMobilityLayers]);
 
   const applyUploadedGeometrySelectionStyles = useCallback((geometryId: string | null) => {
     const map = mapRef.current;
@@ -534,7 +751,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) {
       setShadowServiceStatus('error');
       setShadowServiceError('Only Polygon or MultiPolygon geometries are supported for analysis.');
-      addStatusMessage?.('⚠️ Only Polygon or MultiPolygon geometries can be analysed for shadows.', 'warning');
+      addStatusMessage?.(' Only Polygon or MultiPolygon geometries can be analysed for shadows.', 'warning');
       return;
     }
 
@@ -552,7 +769,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     setIsInitialisingShadow(true);
     setShadowServiceStatus('loading');
     setShadowServiceError(null);
-    addStatusMessage?.('📡 Requesting real-time shadow analysis…', 'info');
+    addStatusMessage?.(' Requesting real-time shadow analysis', 'info');
 
     shadowAnalysisClient
       .requestAnalysis({
@@ -623,7 +840,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         analysisKeyRef.current = requestKey;
         setShadowServiceResult(response);
         setShadowServiceStatus('success');
-        addStatusMessage?.('✅ Shadow analysis ready.', 'info');
+        addStatusMessage?.(' Shadow analysis ready.', 'info');
       })
       .catch((error) => {
         if (controller.signal.aborted) {
@@ -632,7 +849,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         const message = error instanceof Error ? error.message : String(error);
         setShadowServiceStatus('error');
         setShadowServiceError(message);
-        addStatusMessage?.(`❌ Shadow analysis failed: ${message}`, 'error');
+        addStatusMessage?.(` Shadow analysis failed: ${message}`, 'error');
         updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
         heatmapDataRef.current = EMPTY_FEATURE_COLLECTION;
         updateMapSource(SHADOW_RESULT_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
@@ -680,7 +897,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       script.src = 'https://unpkg.com/mapbox-gl-shadow-simulator/dist/mapbox-gl-shadow-simulator.umd.min.js'
       script.onload = () => {
         if (window.ShadeMap) {
-          console.log('✅ Shadow simulator library loaded')
+          console.log(' Shadow simulator library loaded')
           setStatusMessage('Shadow simulator ready')
           resolve(window.ShadeMap)
         } else {
@@ -704,7 +921,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       setBuildingsLoaded(false)
       setIsLoadingBuildings(true)
       setStatusMessage('Loading buildings for the current view...')
-      console.log('🏢 Begin loading buildings for current viewport')
+      console.log(' Begin loading buildings for current viewport')
       
       const bounds = mapRef.current.getBounds()
       const boundingBox = {
@@ -714,7 +931,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         west: bounds.getWest(),
       }
 
-      console.log('📍 Viewport bounds:', boundingBox)
+      console.log(' Viewport bounds:', boundingBox)
 
       // Use the service with caching
       const result = await getWfsBuildings(boundingBox, 10000) // Increase maxFeatures
@@ -728,7 +945,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         throw new Error(metadata?.message ?? 'Failed to load buildings')
       }
     } catch (error) {
-      console.error('❌ Failed to load buildings:', error)
+      console.error(' Failed to load buildings:', error)
       const message = error instanceof Error ? error.message : String(error)
       setStatusMessage('Building load failed: ' + message)
       setBuildingsLoaded(false)
@@ -755,18 +972,18 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
   // Add building data to the map with verbose diagnostics
   const addBuildingsToMap = useCallback((buildingData: any) => {
-    console.log('🚀 Starting building ingestion...');
+    console.log(' Starting building ingestion...');
     
     if (!mapRef.current) {
-      console.error('❌ mapRef.current is null');
+      console.error(' mapRef.current is null');
       return;
     }
 
     const map = mapRef.current;
-    const sourceId = 'clean-buildings';
-    const layerId = 'clean-buildings-extrusion';
+    const sourceId = BUILDING_SOURCE_ID;
+    const layerId = BUILDING_LAYER_ID;
 
-    console.log('🗺️ Map state:', {
+    console.log(' Map state:', {
       loaded: map.loaded(),
       style: map.getStyle()?.name,
       center: map.getCenter(),
@@ -778,13 +995,13 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     const existingSource = map.getSource(sourceId);
     const hasExistingLayer = !!map.getLayer(layerId);
     
-    console.log('🧾 Existing layer/source status:', {
+    console.log(' Existing layer/source status:', {
       hasSource: !!existingSource,
       hasLayer: hasExistingLayer
     });
 
     // Log dataset diagnostics
-    console.log('🔍 Dataset diagnostics:', {
+    console.log(' Dataset diagnostics:', {
       dataType: typeof buildingData,
       hasFeatures: !!buildingData.features,
       featuresCount: buildingData.features?.length,
@@ -792,19 +1009,19 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     });
 
     if (!buildingData.features || !Array.isArray(buildingData.features)) {
-      console.error('❌ Invalid data format: features is not an array');
+      console.error(' Invalid data format: features is not an array');
       return;
     }
 
     if (buildingData.features.length === 0) {
-      console.warn('⚠️ Building dataset is empty');
+      console.warn(' Building dataset is empty');
       return;
     }
 
     // Inspect the first few features for sanity checks
     for (let i = 0; i < Math.min(3, buildingData.features.length); i++) {
       const feature = buildingData.features[i];
-      console.log(`🏢 Building ${i + 1} diagnostics:`, {
+      console.log(` Building ${i + 1} diagnostics:`, {
         type: feature.type,
         geometry: {
           type: feature.geometry?.type,
@@ -841,7 +1058,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       feature.properties.height = Number(feature.properties.height) || 15;
 
       if (index < 3) {
-        console.log(`🔧 Post-processed building ${index + 1}:`, {
+        console.log(` Post-processed building ${index + 1}:`, {
           height: feature.properties.height,
           heightType: typeof feature.properties.height
         });
@@ -850,7 +1067,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       return feature;
     });
 
-    console.log('📊 Processed dataset stats:', {
+    console.log(' Processed dataset stats:', {
       totalFeatures: processedFeatures.length,
       heightStats: {
         min: Math.min(...processedFeatures.map((f: Feature) => f.properties?.height || 0)),
@@ -865,50 +1082,71 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       features: processedFeatures
     };
 
+    const applyBuildingPaint = () => {
+      if (!map.getLayer(layerId)) {
+        return;
+      }
+      map.setPaintProperty(layerId, 'fill-extrusion-color', buildingStyle.fill);
+      map.setPaintProperty(layerId, 'fill-extrusion-height', ['get', 'height']);
+      map.setPaintProperty(layerId, 'fill-extrusion-base', 0);
+      map.setPaintProperty(layerId, 'fill-extrusion-opacity', buildingStyle.opacity);
+      try {
+        map.moveLayer(layerId);
+      } catch (error) {
+        console.warn('Unable to move building layer to front:', error);
+      }
+    };
+
     // Update the source if present; otherwise create it alongside the layer
     if (existingSource && 'setData' in existingSource) {
-      console.log('🛠️ Updating existing source (keep layers to avoid ShadeMap conflicts)');
+      console.log(' Updating existing source (keep layers to avoid ShadeMap conflicts)');
       (existingSource as mapboxgl.GeoJSONSource).setData(geoJsonData);
-      console.log('✅ Source update complete');
+      console.log(' Source update complete');
+      applyBuildingPaint();
     } else {
-      console.log('🆕 Creating new data source...');
+      console.log(' Creating new data source...');
       try {
         map.addSource(sourceId, {
           type: 'geojson',
           data: geoJsonData
         });
-        console.log('✅ Data source added successfully');
+        console.log(' Data source added successfully');
       } catch (sourceError) {
-        console.error('❌ Failed to add data source:', sourceError);
+        console.error(' Failed to add data source:', sourceError);
         return;
       }
 
       // Add the extrusion layer when creating the source
-      console.log('🎨 Adding extrusion layer to the map...');
+      console.log(' Adding extrusion layer to the map...');
       try {
         map.addLayer({
         id: layerId,
         type: 'fill-extrusion',
         source: sourceId,
         paint: {
-          'fill-extrusion-color': '#4a4a4a', // Render buildings in dark grey
+          'fill-extrusion-color': buildingStyle.fill,
           'fill-extrusion-height': ['get', 'height'],
           'fill-extrusion-base': 0,
-          'fill-extrusion-opacity': 0.8
+          'fill-extrusion-opacity': buildingStyle.opacity
         }
       });
-      console.log('✅ Layer added successfully');
+      console.log(' Layer added successfully');
       } catch (layerError) {
-        console.error('❌ Failed to add layer:', layerError);
+        console.error(' Failed to add layer:', layerError);
         return;
+      }
+      try {
+        map.moveLayer(layerId);
+      } catch (error) {
+        console.warn('Unable to move building layer to front:', error);
       }
     } // Close conditional source creation block
 
     // Immediate validation
-    console.log('🔍 Validating layer state immediately:');
+    console.log(' Validating layer state immediately:');
     const addedLayer = map.getLayer(layerId);
     const addedSource = map.getSource(sourceId);
-    console.log('📊 Validation result:', {
+    console.log(' Validation result:', {
       layerExists: !!addedLayer,
       layerType: addedLayer?.type,
       sourceExists: !!addedSource,
@@ -917,7 +1155,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     // Log map bounds for troubleshooting
     const mapBounds = map.getBounds();
-    console.log('🗺️ Map bounds vs data extents:', {
+    console.log(' Map bounds vs data extents:', {
       mapBounds: {
         north: mapBounds.getNorth(),
         south: mapBounds.getSouth(),
@@ -929,16 +1167,16 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     // Delayed validation to ensure render completes
     setTimeout(() => {
       if (!map || !mapRef.current) {
-        console.warn('⚠️ Map instance disposed, skipping delayed validation');
+        console.warn(' Map instance disposed, skipping delayed validation');
         return;
       }
       
-      console.log('⏰ Delayed validation (after 1s):');
+      console.log(' Delayed validation (after 1s):');
       const finalLayer = map.getLayer(layerId);
       const finalSource = map.getSource(sourceId);
       
       if (finalSource && 'type' in finalSource && finalSource.type === 'geojson') {
-        console.log('📈 Final render state:', {
+        console.log(' Final render state:', {
           layerVisible: finalLayer ? true : false,
           sourceLoaded: true,
           mapRendering: map.loaded()
@@ -946,8 +1184,8 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       }
     }, 1000);
 
-    console.log('🎯 Building ingestion sequence complete');
-  }, [refreshWeatherData]);
+    console.log(' Building ingestion sequence complete');
+  }, [refreshWeatherData, buildingStyle.fill, buildingStyle.opacity]);
 
   const restoreBuildingLayerFromCache = useCallback(() => {
     const cached = buildingCache.getAllAsFeatureCollection();
@@ -975,11 +1213,11 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     }
 
     try {
-      // ✅ Get fresh state from store at call time, not from closure
+      //  Get fresh state from store at call time, not from closure
       const { currentDate: latestDate, mapSettings: latestMapSettings } = useShadowMapStore.getState();
       
-      // 🎯 Check if we should recalculate (optimization)
-      const checkBuildingSource = mapRef.current.getSource('clean-buildings');
+      //  Check if we should recalculate (optimization)
+      const checkBuildingSource = mapRef.current.getSource(BUILDING_SOURCE_ID);
       const buildingCount = checkBuildingSource ? ((checkBuildingSource as any)._data?.features?.length || 0) : 0;
       
       const optimizationCheck = shadowOptimizer.shouldRecalculate(
@@ -989,12 +1227,12 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       );
 
       if (!optimizationCheck.shouldCalculate && shadeMapRef.current) {
-        console.log('⏭️ Skip shadow calculation:', optimizationCheck.reason);
+        console.log(' Skip shadow calculation:', optimizationCheck.reason);
         setStatusMessage(`Shadows already up to date (${optimizationCheck.reason})`);
         return;
       }
 
-      console.log('🌅 Initializing shadow simulator...', { 
+      console.log(' Initializing shadow simulator...', { 
         date: latestDate,
         reason: optimizationCheck.reason 
       });
@@ -1002,10 +1240,10 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       // Remove any existing ShadeMap instance before reinitialising
       if (shadeMapRef.current) {
         try {
-          console.log('🗑️ Removing existing shadow simulator...');
+          console.log(' Removing existing shadow simulator...');
           shadeMapRef.current.remove();
         } catch (removeError) {
-          console.warn('⚠️ Error removing existing shadow simulator:', removeError);
+          console.warn(' Error removing existing shadow simulator:', removeError);
         } finally {
           shadeMapRef.current = null;
           sunExposureStateRef.current = null;
@@ -1013,7 +1251,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       }
 
       // Validate building data presence
-      const buildingSource = mapRef.current.getSource('clean-buildings');
+      const buildingSource = mapRef.current.getSource(BUILDING_SOURCE_ID);
       if (!buildingSource) {
         setStatusMessage('Building data source not found');
         return;
@@ -1026,7 +1264,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       }
 
       const buildings = sourceData.features;
-      console.log(`🏢 Preparing to provide ${buildings.length} building features to ShadeMap`);
+      console.log(` Preparing to provide ${buildings.length} building features to ShadeMap`);
 
       // Validate building data presence
       const validBuildings = buildings.filter((building: any) => {
@@ -1036,7 +1274,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
                building.properties;
       });
 
-      console.log(`✅ Valid building count: ${validBuildings.length}`);
+      console.log(` Valid building count: ${validBuildings.length}`);
 
       if (validBuildings.length === 0) {
         setStatusMessage('No valid building features provided');
@@ -1062,7 +1300,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         apiKey: mapboxgl.accessToken,
         ...(terrainSource ? { terrainSource } : {}),
         getFeatures: () => {
-          const buildingSource = mapRef.current?.getSource('clean-buildings');
+          const buildingSource = mapRef.current?.getSource(BUILDING_SOURCE_ID);
           if (buildingSource && (buildingSource as any)._data) {
             const buildings = (buildingSource as any)._data.features;
             const validBuildings = buildings.filter((building: any) => {
@@ -1071,10 +1309,10 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
                      building.geometry.coordinates && 
                      building.properties;
             });
-            console.log(`🏢 Providing ${validBuildings.length} valid buildings to ShadeMap in real time`);
+            console.log(` Providing ${validBuildings.length} valid buildings to ShadeMap in real time`);
             return validBuildings;
           }
-          console.warn('⚠️ Unable to read building data source');
+          console.warn(' Unable to read building data source');
           return [];
         },
         debug: (msg: string) => {
@@ -1089,15 +1327,15 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
       setShadowSimulatorReady(true);
       setStatusMessage(`Shadow simulator ready; processed ${validBuildings.length} building features to ShadeMap`);
-      console.log('✅ Shadow simulator initialised');
+      console.log(' Shadow simulator initialised');
       
       // Emit optimisation statistics
       const stats = shadowOptimizer.getStats();
-      console.log('📊 Shadow optimiser stats:', stats);
+      console.log(' Shadow optimiser stats:', stats);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setStatusMessage('Shadow simulator initialisation failed: ' + errorMessage);
-      console.error('❌ Shadow simulator initialisation failed:', error);
+      console.error(' Shadow simulator initialisation failed:', error);
       
       // Reset status indicators
       setShadowSimulatorReady(false);
@@ -1105,7 +1343,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     } finally {
       setIsInitialisingShadow(false);
     }
-    // ✅ FIXED: Don't include currentDate in deps - time updates via setDate(), not re-init
+    //  FIXED: Don't include currentDate in deps - time updates via setDate(), not re-init
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildingsLoaded]);
 
@@ -1113,7 +1351,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const updateShadowTime = useCallback((newTime: Date) => {
     const { setCurrentDate } = useShadowMapStore.getState();
     
-    // ✅ Add safety checks
+    //  Add safety checks
     if (!shadeMapRef.current) {
       setStatusMessage('Shadow simulator not initialised');
       return;
@@ -1124,7 +1362,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       return;
     }
 
-    const buildingSource = mapRef.current.getSource('clean-buildings');
+    const buildingSource = mapRef.current.getSource(BUILDING_SOURCE_ID);
     if (!buildingSource) {
       setStatusMessage('Building data not loaded');
       return;
@@ -1138,7 +1376,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         refreshWeatherData('time-update');
       }
     } catch (error) {
-      console.error('❌ Error updating shadow time:', error);
+      console.error(' Error updating shadow time:', error);
       setStatusMessage('Failed to update shadow time');
     }
   }, []);
@@ -1399,27 +1637,27 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
   // Watch for setting changes and update shadow simulator
   useEffect(() => {
-    // ✅ Guard: Check if shadow simulator and map are fully ready
+    //  Guard: Check if shadow simulator and map are fully ready
     if (!shadeMapRef.current || !mapRef.current) {
-      console.log('⏸️ Shadow simulator or map not ready, skipping update');
+      console.log(' Shadow simulator or map not ready, skipping update');
       return;
     }
 
-    // ✅ Guard: Check if building source exists (shadow simulator needs this)
-    const buildingSource = mapRef.current.getSource('clean-buildings');
+    //  Guard: Check if building source exists (shadow simulator needs this)
+    const buildingSource = mapRef.current.getSource(BUILDING_SOURCE_ID);
     if (!buildingSource) {
-      console.log('⏸️ Building source not loaded yet, skipping shadow update');
+      console.log(' Building source not loaded yet, skipping shadow update');
       return;
     }
 
-    // ✅ Guard: Check if map is loaded
+    //  Guard: Check if map is loaded
     if (!mapRef.current.loaded()) {
-      console.log('⏸️ Map not fully loaded, skipping shadow update');
+      console.log(' Map not fully loaded, skipping shadow update');
       return;
     }
 
     try {
-      console.log('🎨 Updating shadow settings:', {
+      console.log(' Updating shadow settings:', {
         color: mapSettings.shadowColor,
         opacity: mapSettings.shadowOpacity,
         date: currentDate
@@ -1438,32 +1676,33 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         shadeMapRef.current.setDate(currentDate);
       }
     } catch (error) {
-      console.error('❌ Error updating shadow settings:', error);
+      console.error(' Error updating shadow settings:', error);
       // Don't crash the app, just log the error
     }
   }, [mapSettings.shadowColor, mapSettings.shadowOpacity, currentDate, applyShadowOpacity]);
 
-  // 🆕 Watch for layer visibility changes and update map layers
+  //  Watch for layer visibility changes and update map layers
   useEffect(() => {
     if (!mapRef.current || !mapRef.current.loaded()) return;
 
     const map = mapRef.current;
-    const buildingLayerId = 'clean-buildings-extrusion';
+    const buildingLayerId = BUILDING_LAYER_ID;
     const sunExposureActive = mapSettings.showSunExposure || shadowSettingsState.showSunExposure;
 
-    console.log('👁️ Updating layer visibility:', {
+    console.log(' Updating layer visibility:', {
       buildings: mapSettings.showBuildingLayer,
       shadow: mapSettings.showShadowLayer
     });
 
-    // Control building layer visibility
     if (map.getLayer(buildingLayerId)) {
+      map.setPaintProperty(buildingLayerId, 'fill-extrusion-color', buildingStyle.fill);
+      map.setPaintProperty(buildingLayerId, 'fill-extrusion-opacity', buildingStyle.opacity);
       map.setLayoutProperty(
         buildingLayerId,
         'visibility',
         mapSettings.showBuildingLayer ? 'visible' : 'none'
       );
-      console.log(`🏢 Building layer: ${mapSettings.showBuildingLayer ? 'visible' : 'hidden'}`);
+      console.log(` Building layer: ${mapSettings.showBuildingLayer ? 'visible' : 'hidden'}`);
     }
 
     // Control shadow layer visibility (if shadow simulator exists)
@@ -1479,10 +1718,10 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
             ? getEffectiveOpacity(adjustedShadowOpacity)
             : 0;
           shadeMapRef.current.setOpacity(effectiveOpacity);
-          console.log(`🌑 Shadow layer: ${mapSettings.showShadowLayer ? 'visible' : 'hidden'}`);
+          console.log(` Shadow layer: ${mapSettings.showShadowLayer ? 'visible' : 'hidden'}`);
         }
       } catch (error) {
-        console.error('❌ Error controlling shadow visibility:', error);
+        console.error(' Error controlling shadow visibility:', error);
       }
     }
   }, [
@@ -1542,7 +1781,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         }
       } catch (error) {
         if (!cancelled) {
-          console.warn('⚠️ Failed to toggle sun exposure:', error);
+          console.warn(' Failed to toggle sun exposure:', error);
         }
       }
     };
@@ -1610,17 +1849,17 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     if (!mapRef.current) return;
 
     const map = mapRef.current;
-    const sourceId = 'clean-buildings';
-    const layerId = 'clean-buildings-extrusion';
+    const sourceId = BUILDING_SOURCE_ID;
+    const layerId = BUILDING_LAYER_ID;
 
     // Remove building layer
     if (map.getLayer(layerId)) {
       map.removeLayer(layerId);
-      console.log('🗑️ Removing building layer');
+      console.log(' Removing building layer');
     }
     if (map.getSource(sourceId)) {
       map.removeSource(sourceId);
-      console.log('🗑️ Removing building source');
+      console.log(' Removing building source');
     }
 
     // Clear the client-side cache
@@ -1630,9 +1869,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     if (shadeMapRef.current) {
       try {
         shadeMapRef.current.remove();
-        console.log('🗑️ Removing shadow simulator');
+        console.log(' Removing shadow simulator');
       } catch (removeError) {
-        console.warn('⚠️ Error removing shadow simulator:', removeError);
+        console.warn(' Error removing shadow simulator:', removeError);
       } finally {
         shadeMapRef.current = null;
         sunExposureStateRef.current = null;
@@ -1663,6 +1902,19 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       loadBuildings,
       initShadowSimulator,
       clearBuildings,
+      fitToBounds: (bounds, options) => {
+        if (!mapRef.current) return;
+        mapRef.current.fitBounds(
+          [
+            [bounds.west, bounds.south],
+            [bounds.east, bounds.north],
+          ],
+          {
+            padding: options?.padding ?? 80,
+            maxZoom: options?.maxZoom ?? 16.5,
+          },
+        );
+      },
     });
 
     return () => {
@@ -1670,6 +1922,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         loadBuildings: undefined,
         initShadowSimulator: undefined,
         clearBuildings: undefined,
+        fitToBounds: undefined,
       });
     };
   }, [setViewportActions, loadBuildings, initShadowSimulator, clearBuildings]);
@@ -1678,7 +1931,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    console.log('🗺️ Initialising streamlined shadow map...');
+    console.log(' Initialising streamlined shadow map...');
 
     mapboxgl.accessToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
 
@@ -1696,6 +1949,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     });
 
     mapRef.current = map;
+    (window as any).__shadowMapInstance = map;
     baseMapBootstrapRef.current = true;
     lastBaseMapIdRef.current = selectedBaseMapId;
 
@@ -1706,7 +1960,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     };
 
     const handleLoad = async () => {
-      console.log('✅ Map load complete');
+      console.log(' Map load complete');
       map.resize();
       const center = map.getCenter();
       setMapViewRef.current?.([center.lng, center.lat], map.getZoom());
@@ -1717,10 +1971,10 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         const shadowLoader = loadShadowSimulatorRef.current ?? loadShadowSimulator;
         await shadowLoader();
       } catch (error) {
-        console.warn('⚠️ ShadeMap library load failed:', error);
+        console.warn(' ShadeMap library load failed:', error);
       }
 
-      console.log('🏗️ Auto-loading initial viewport buildings...');
+      console.log(' Auto-loading initial viewport buildings...');
       setStatusMessage('Auto-loading buildings...');
       await loadBuildings();
       (refreshWeatherDataRef.current ?? refreshWeatherData)('map-load');
@@ -1732,7 +1986,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
           updateMapSource(ANALYSIS_HEATMAP_SOURCE_ID, heatmapDataRef.current);
           ensureHeatmapLayers();
         } catch (error) {
-          console.warn('⚠️ Failed to restore analysis heatmap after style change:', error);
+          console.warn(' Failed to restore analysis heatmap after style change:', error);
         }
       }
     };
@@ -1746,7 +2000,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       }
 
       if (!loadBuildingsRef.current) {
-        console.warn('⚠️ loadBuildingsRef is undefined');
+        console.warn(' loadBuildingsRef is undefined');
         return;
       }
 
@@ -1807,7 +2061,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       try {
         shadeMapRef.current.remove();
       } catch (error) {
-        console.warn('⚠️ Failed to remove shadow simulator before style change:', error);
+        console.warn(' Failed to remove shadow simulator before style change:', error);
       } finally {
         shadeMapRef.current = null;
         sunExposureStateRef.current = null;

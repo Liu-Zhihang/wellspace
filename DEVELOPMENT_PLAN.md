@@ -18,6 +18,8 @@
 | REQ-ENGINE-01 | Shadow engine service abstraction | In Progress | `/api/analysis/shadow` + local pybdshadow worker + script bridge landed; Redis/metrics TBD |
 | REQ-ENGINE-02 | Frontend shadow engine integration | In Progress | Zustand stores consume engine metrics, heatmap default-off toggle + overlay redesign shipped |
 | REQ-MAP-BASE | MapLibre basemap switching revamp | Done | `mapSettings.baseMapId` now drives in-place `map.setStyle` calls; overlays + uploads are rehydrated without remounting |
+| REQ-MOBILITY-01 | Mobility data ingestion + UI | Planned | Add CSV uploader, dataset list, and validation pipeline for movement traces |
+| REQ-MOBILITY-02 | Trajectory rendering + playback | Planned | Render uploaded traces on MapLibre, sync with shared timeline, expose metrics in analysis panel |
 
 ## Next Steps
 
@@ -53,7 +55,11 @@
    - Stage E – Testing & Roll-out
      - Capture regression suite: contract tests for `/api/analysis/shadow`, frontend rendering snapshot tests, and store selectors.
      - Define performance SLA (p95 latency per bbox) and benchmark both simulator + real engine.
-     - Draft launch checklist covering container build, monitoring dashboards, cache warmup, and rollback plan.
+   - Draft launch checklist covering container build, monitoring dashboards, cache warmup, and rollback plan.
+5. Launch mobility analysis feature
+   - Design CSV schema + validation (id, time ISO8601, lon/lat decimal, optional metrics) and update `ShadowMap/data/samples/mobility-demo.csv` accordingly.
+   - Build uploader modal + dataset drawer entries; surface row-level errors similar to Mobmap’s “data type mismatch”.
+   - Implement GeoJSON/multi-layer rendering for traces, tied to global animation clock; compute per-trace analytics and export hooks.
 
 ## Risks / Blockers
 

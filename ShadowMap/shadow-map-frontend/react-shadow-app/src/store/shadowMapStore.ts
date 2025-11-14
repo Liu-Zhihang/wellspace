@@ -10,7 +10,9 @@ import type {
   UploadedGeometry,
   GeometryAnalysis,
   ShadowServiceStatus,
-  ShadowServiceResponse
+  ShadowServiceResponse,
+  MobilityDataset,
+  MobilityCsvRecord,
 } from '../types/index.ts';
 
 type ViewportAction = (() => void) | (() => Promise<void>);
@@ -19,6 +21,7 @@ interface ViewportActions {
   loadBuildings?: ViewportAction;
   initShadowSimulator?: ViewportAction;
   clearBuildings?: () => void;
+  fitToBounds?: (bounds: BoundingBox, options?: { padding?: number; maxZoom?: number }) => void;
 }
 
 export interface MobilityTracePoint {
@@ -80,6 +83,14 @@ interface ShadowMapState {
   addStatusMessage: (message: string, type?: 'info' | 'warning' | 'error') => void;
   removeStatusMessage: (id: string) => void;
   clearStatusMessages: () => void;
+
+  // Mobility datasets (CSV-driven traces)
+  mobilityDatasets: MobilityDataset[];
+  mobilityTraces: Record<string, MobilityCsvRecord[]>;
+  addMobilityDataset: (dataset: MobilityDataset, rows: MobilityCsvRecord[]) => void;
+  removeMobilityDataset: (datasetId: string) => void;
+  setMobilityDatasetVisibility: (datasetId: string, visible: boolean) => void;
+  clearMobilityDatasets: () => void;
 
   // Uploaded geometries & analysis
   uploadedGeometries: UploadedGeometry[];
@@ -320,6 +331,30 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   removeStatusMessage: (id: string) => 
     set(state => ({ statusMessages: state.statusMessages.filter(msg => msg.id !== id) })),
   clearStatusMessages: () => set({ statusMessages: [] }),
+
+  mobilityDatasets: [],
+  mobilityTraces: {},
+  addMobilityDataset: (dataset, rows) =>
+    set(state => ({
+      mobilityDatasets: [...state.mobilityDatasets, dataset],
+      mobilityTraces: { ...state.mobilityTraces, [dataset.id]: rows },
+    })),
+  removeMobilityDataset: (datasetId) =>
+    set(state => {
+      const { [datasetId]: _removed, ...rest } = state.mobilityTraces;
+      return {
+        mobilityDatasets: state.mobilityDatasets.filter(dataset => dataset.id !== datasetId),
+        mobilityTraces: rest,
+      };
+    }),
+  setMobilityDatasetVisibility: (datasetId, visible) =>
+    set(state => ({
+      mobilityDatasets: state.mobilityDatasets.map(dataset =>
+        dataset.id === datasetId ? { ...dataset, visible } : dataset
+      ),
+    })),
+  clearMobilityDatasets: () => set({ mobilityDatasets: [], mobilityTraces: {} }),
+
   uploadedGeometries: [],
   addUploadedGeometry: (geometry: UploadedGeometry) => {
     const prevState = get();

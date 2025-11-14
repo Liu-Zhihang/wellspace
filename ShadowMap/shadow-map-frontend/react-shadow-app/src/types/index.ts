@@ -203,6 +203,42 @@ export type GeometryAnalysis = {
   samples?: GeometryAnalysisSample[];
 };
 
+export type MobilityValidationError = {
+  row: number;
+  field?: string;
+  message: string;
+};
+
+export type MobilityCsvRecord = {
+  sourceRow: number;
+  traceId: string;
+  timestamp: Date;
+  coordinates: [number, number];
+  speedKmh?: number;
+};
+
+export type MobilityCsvParseResult = {
+  rows: MobilityCsvRecord[];
+  errors: MobilityValidationError[];
+  bounds?: BoundingBox;
+  timeRange?: { start: Date; end: Date };
+  traceIds: string[];
+};
+
+export type MobilityDataset = {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: Date;
+  sourceFile?: string;
+  pointCount: number;
+  traceIds: string[];
+  bounds: BoundingBox;
+  timeRange: { start: Date; end: Date };
+  visible: boolean;
+  errors: MobilityValidationError[];
+};
+
 export type ShadowServiceStatus = 'idle' | 'loading' | 'success' | 'error';
 
 export type ShadowServiceLayer = FeatureCollection;

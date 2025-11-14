@@ -307,10 +307,8 @@ export async function fetchWfsBuildings(bounds: BoundingBox, maxFeatures?: numbe
 
   try {
     const primaryResult = await fetchWfsBuildingsOnce(bounds, maxFeatures, primaryAxis, tileIds);
-    if (
-      BUILDING_WFS_CONFIG.useAxisFallback &&
-      primaryResult.numberReturned === 0
-    ) {
+    const shouldFallback = primaryAxis !== fallbackAxis && primaryResult.numberReturned === 0;
+    if (shouldFallback) {
       console.warn(
         `[BuildingWfs] Axis order ${primaryAxis} returned zero features; retrying with ${fallbackAxis}`
       );
@@ -320,7 +318,8 @@ export async function fetchWfsBuildings(bounds: BoundingBox, maxFeatures?: numbe
 
     return primaryResult;
   } catch (primaryError) {
-    if (!BUILDING_WFS_CONFIG.useAxisFallback) {
+    const shouldFallback = primaryAxis !== fallbackAxis;
+    if (!shouldFallback) {
       throw primaryError;
     }
 
@@ -389,9 +388,15 @@ async function fetchWfsBuildingsPaginatedOnce(
       const pageFeatures = page.features ?? [];
 
       if (pageFeatures.length === 0) {
-        if (BUILDING_WFS_VERBOSE) {
-          console.log('[BuildingWfs] No more features returned; stopping pagination.', { axisOrder });
-        }
+        console.warn(
+          '[BuildingWfs] Received empty feature set; stopping pagination.',
+          {
+            axisOrder,
+            startIndex,
+            bbox: formatBBox(bounds, axisOrder),
+            tiles: tileIds.length ? tileIds : 'none',
+          }
+        );
         try {
           const preview = JSON.stringify(page).slice(0, 600);
           console.warn('[BuildingWfs] Pagination response preview (truncated to 600 chars):', preview);
@@ -457,30 +462,25 @@ export async function fetchWfsBuildingsPaginated(
 
   try {
     const primaryResult = await fetchWfsBuildingsPaginatedOnce(bounds, maxFeaturesPerRequest, primaryAxis, tileIds);
-    if (
-      BUILDING_WFS_CONFIG.useAxisFallback &&
-      primaryResult.numberReturned === 0
-    ) {
-    if (BUILDING_WFS_VERBOSE) {
+    const shouldFallback = primaryAxis !== fallbackAxis && primaryResult.numberReturned === 0;
+    if (shouldFallback) {
       console.warn(
         `[BuildingWfs] Paginated query with axis ${primaryAxis} returned zero features; retrying with ${fallbackAxis}`
       );
-    }
       const fallbackResult = await fetchWfsBuildingsPaginatedOnce(bounds, maxFeaturesPerRequest, fallbackAxis, tileIds);
       return fallbackResult.numberReturned && fallbackResult.numberReturned > 0 ? fallbackResult : primaryResult;
     }
 
     return primaryResult;
   } catch (primaryError) {
-    if (!BUILDING_WFS_CONFIG.useAxisFallback) {
+    const shouldFallback = primaryAxis !== fallbackAxis;
+    if (!shouldFallback) {
       throw primaryError;
     }
 
-    if (BUILDING_WFS_VERBOSE) {
-      console.warn(
-        `[BuildingWfs] Paginated query failed with axis ${primaryAxis} (${primaryError instanceof Error ? primaryError.message : 'unknown error'}); retrying with ${fallbackAxis}`
-      );
-    }
+    console.warn(
+      `[BuildingWfs] Paginated query failed with axis ${primaryAxis} (${primaryError instanceof Error ? primaryError.message : 'unknown error'}); retrying with ${fallbackAxis}`
+    );
     const fallbackResult = await fetchWfsBuildingsPaginatedOnce(bounds, maxFeaturesPerRequest, fallbackAxis, tileIds);
     return fallbackResult;
   }
