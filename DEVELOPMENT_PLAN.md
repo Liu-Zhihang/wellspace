@@ -20,6 +20,7 @@
 | REQ-MAP-BASE | MapLibre basemap switching revamp | Done | `mapSettings.baseMapId` now drives in-place `map.setStyle` calls; overlays + uploads are rehydrated without remounting |
 | REQ-MOBILITY-01 | Mobility data ingestion + UI | Planned | Add CSV uploader, dataset list, and validation pipeline for movement traces |
 | REQ-MOBILITY-02 | Trajectory rendering + playback | Planned | Render uploaded traces on MapLibre, sync with shared timeline, expose metrics in analysis panel |
+| REQ-MOBILITY-03 | Mobility controls & overlays | Planned | Merge mobility upload/controls, add playback UI, heatmap/analysis hooks |
 
 ## Next Steps
 
@@ -59,7 +60,8 @@
 5. Launch mobility analysis feature
    - Design CSV schema + validation (id, time ISO8601, lon/lat decimal, optional metrics) and update `ShadowMap/data/samples/mobility-demo.csv` accordingly.
    - Build uploader modal + dataset drawer entries; surface row-level errors similar to Mobmap’s “data type mismatch”.
-   - Implement GeoJSON/multi-layer rendering for traces, tied to global animation clock; compute per-trace analytics and export hooks.
+   - Implement GeoJSON/multi-layer rendering for traces, tied to global animation clock; compute per-trace analytics, heatmaps, and export hooks.
+   - Unify mobility controls with main upload experience, provide zoom-to-dataset, animation toggle, and timeline-linked heatmap overlays.
 
 ## Risks / Blockers
 

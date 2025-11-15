@@ -12,6 +12,7 @@ import { shadowAnalysisClient } from '../../services/shadowAnalysisService';
 import { GeometryAnalysisOverlay } from '../Analysis/GeometryAnalysisOverlay';
 import type { GeometryAnalysisSample, MobilityCsvRecord, MobilityDataset } from '../../types/index.ts';
 import { getBaseMapStyle } from '../../services/baseMapManager';
+import { useMobilityPlayback } from '../../hooks/useMobilityPlayback';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
 const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
@@ -337,6 +338,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const selectedBaseMapId = baseMapId ?? mapSettings.baseMapId ?? 'mapbox-streets';
   const buildingStyle = useMemo(() => computeBuildingStyle(selectedBaseMapId), [selectedBaseMapId]);
   const baseMapStyle = useMemo(() => getBaseMapStyle(selectedBaseMapId), [selectedBaseMapId]);
+  useMobilityPlayback();
 
   useEffect(() => {
     const map = mapRef.current;

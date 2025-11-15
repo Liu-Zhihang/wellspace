@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react'
-import { Button, Popover, Slider, Switch, Tooltip } from 'antd'
+import { Button, Popover, Slider, Switch, Tooltip, Divider } from 'antd'
 import {
   ClockIcon,
   SwatchIcon,
@@ -10,7 +10,6 @@ import {
   BuildingOfficeIcon,
   SunIcon,
   TrashIcon,
-  MapIcon,
 } from '@heroicons/react/24/outline'
 import { useShadowMapStore } from '../../store/shadowMapStore'
 import type { MobilityTracePoint } from '../../store/shadowMapStore'
@@ -19,7 +18,7 @@ import type { Feature, Geometry } from 'geojson'
 import { BASE_MAPS } from '../../services/baseMapManager'
 import { parseMobilityCsv } from '../../utils/mobilityCsv'
 
-type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'analysis' | 'mobility' | null;
+type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'analysis' | null;
 
 const presetHours = [
   { hour: 6, label: 'Sunrise' },
@@ -57,6 +56,8 @@ export const LeftIconToolbar: React.FC = () => {
     addMobilityDataset,
     removeMobilityDataset,
     setMobilityDatasetVisibility,
+    activeMobilityDatasetId,
+    setActiveMobilityDataset,
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
@@ -688,83 +689,10 @@ export const LeftIconToolbar: React.FC = () => {
       );
     }
 
-    if (panelId === 'mobility') {
-      return (
-        <div className="w-full space-y-4 p-4 text-slate-700">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-sm font-semibold text-slate-900">Mobility datasets</span>
-              <p className="text-xs text-slate-400">Upload CSV traces (id,time,lng,lat[,speed_kmh]).</p>
-            </div>
-            <Button size="small" onClick={handleMobilityUploadClick} icon={<ArrowUpTrayIcon className="h-4 w-4" />}>
-              Upload
-            </Button>
-          </div>
-          {mobilityDatasets.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">
-              No mobility datasets yet. Use the Upload button to add CSV traces.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {mobilityDatasets.map((dataset, index) => (
-                <div key={dataset.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{dataset.name}</p>
-                      <p className="text-xs text-slate-500">
-                        {dataset.pointCount} points · {dataset.traceIds.length} traces
-                      </p>
-                      <p className="text-[11px] text-slate-400">
-                        {dataset.timeRange.start.toISOString()} → {dataset.timeRange.end.toISOString()}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        size="small"
-                        checked={dataset.visible}
-                        onChange={(checked) => setMobilityDatasetVisibility(dataset.id, checked)}
-                      />
-                      <button
-                        type="button"
-                        className="rounded-lg border border-slate-200 p-1 text-slate-500 hover:text-blue-600"
-                        onClick={() => zoomToMobilityDataset(dataset.id)}
-                        aria-label={`Zoom to ${dataset.name}`}
-                      >
-                        <MapIcon className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-slate-200 p-1 text-slate-500 hover:text-red-500"
-                        onClick={() => removeMobilityDataset(dataset.id)}
-                        aria-label={`Remove ${dataset.name}`}
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                  {dataset.errors.length > 0 && (
-                    <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-                      {dataset.errors.length} validation warning(s). First: {dataset.errors[0].message}
-                    </p>
-                  )}
-                  <span
-                    className="mt-2 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
-                    style={{ backgroundColor: dataset.color }}
-                  >
-                    {dataset.color}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
     return (
       <div className="w-full space-y-4 p-4 text-slate-700">
         <div>
-          <span className="text-sm font-semibold text-slate-900">Add file to map</span>
+          <span className="text-sm font-semibold text-slate-900">Geo data uploads</span>
           <p className="text-xs text-slate-400">Supported: .tif .tiff .gpx .kml .json .geojson</p>
         </div>
         <Button
@@ -776,8 +704,90 @@ export const LeftIconToolbar: React.FC = () => {
           Choose files
         </Button>
         <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          Drag & drop support and on-map placement tools are coming soon. For now, uploaded layers align to the current viewport.
+          Drag & drop support and on-map placement tools are coming soon; for now layers align to the current viewport.
         </p>
+        <Divider plain className="text-[11px] text-slate-400">Mobility traces</Divider>
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-sm font-semibold text-slate-900">Mobility datasets</span>
+            <p className="text-xs text-slate-400">CSV schema: id,time,lng,lat[,speed_kmh]</p>
+          </div>
+          <Button size="small" onClick={handleMobilityUploadClick} icon={<ArrowUpTrayIcon className="h-4 w-4" />}>
+            Upload
+          </Button>
+        </div>
+        {mobilityDatasets.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">
+            No mobility datasets yet. Use the Upload button to add CSV traces.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {mobilityDatasets.map((dataset) => (
+              <div
+                key={dataset.id}
+                className={`rounded-xl border ${
+                  activeMobilityDatasetId === dataset.id ? 'border-blue-400 shadow-sm' : 'border-slate-200'
+                } bg-white p-3 transition-shadow`}
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{dataset.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {dataset.pointCount} points · {dataset.traceIds.length} traces
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                    <Switch
+                      size="small"
+                      checked={dataset.visible}
+                      onChange={(checked) => setMobilityDatasetVisibility(dataset.id, checked)}
+                    />
+                    <Button size="small" onClick={() => zoomToMobilityDataset(dataset.id)}>
+                      Focus
+                    </Button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-slate-200 p-1 text-slate-500 hover:text-red-500"
+                      onClick={() => removeMobilityDataset(dataset.id)}
+                      aria-label={`Remove ${dataset.name}`}
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {dataset.timeRange.start.toISOString()} → {dataset.timeRange.end.toISOString()}
+                </p>
+                {dataset.errors.length > 0 && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+                    {dataset.errors.length} validation warning(s). First: {dataset.errors[0].message}
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
+                      activeMobilityDatasetId === dataset.id
+                        ? 'border-blue-500 text-blue-600'
+                        : 'border-slate-200 text-slate-500'
+                    }`}
+                    onClick={() => setActiveMobilityDataset(dataset.id)}
+                  >
+                    Animate
+                  </button>
+                  <span
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
+                    style={{ backgroundColor: dataset.color }}
+                  >
+                    {dataset.color}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -809,8 +819,7 @@ export const LeftIconToolbar: React.FC = () => {
     { id: 'buildings', label: 'Building data', icon: <BuildingOfficeIcon className="h-5 w-5" /> },
     { id: 'analysis', label: 'Heatmap & analysis', icon: <SunIcon className="h-5 w-5" /> },
     { id: 'style', label: 'Map style', icon: <GlobeAltIcon className="h-5 w-5" /> },
-    { id: 'mobility', label: 'Mobility data', icon: <MapIcon className="h-5 w-5" /> },
-    { id: 'upload', label: 'Add file to map', icon: <ArrowUpTrayIcon className="h-5 w-5" /> },
+    { id: 'upload', label: 'Uploads & mobility', icon: <ArrowUpTrayIcon className="h-5 w-5" /> },
   ];
 
   const baseButtonClasses =
@@ -881,7 +890,7 @@ export const LeftIconToolbar: React.FC = () => {
             const sortedRows = [...result.rows].sort(
               (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
             );
-            const datasetId = generateMobilityDatasetId();
+    const datasetId = generateMobilityDatasetId();
             const fallbackBounds = result.bounds ?? {
               north: sortedRows[0].coordinates[1],
               south: sortedRows[0].coordinates[1],
@@ -906,6 +915,7 @@ export const LeftIconToolbar: React.FC = () => {
               errors: result.errors,
             };
             addMobilityDataset(dataset, sortedRows);
+            setActiveMobilityDataset(dataset.id);
             addStatusMessage?.(`Loaded mobility dataset (${result.rows.length} points).`, 'info');
             zoomToMobilityDataset(dataset.id);
           } catch (error) {

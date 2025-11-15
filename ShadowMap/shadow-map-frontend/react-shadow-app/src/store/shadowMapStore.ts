@@ -91,6 +91,8 @@ interface ShadowMapState {
   removeMobilityDataset: (datasetId: string) => void;
   setMobilityDatasetVisibility: (datasetId: string, visible: boolean) => void;
   clearMobilityDatasets: () => void;
+  activeMobilityDatasetId: string | null;
+  setActiveMobilityDataset: (datasetId: string | null) => void;
 
   // Uploaded geometries & analysis
   uploadedGeometries: UploadedGeometry[];
@@ -354,6 +356,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       ),
     })),
   clearMobilityDatasets: () => set({ mobilityDatasets: [], mobilityTraces: {} }),
+  activeMobilityDatasetId: null,
+  setActiveMobilityDataset: (datasetId: string | null) => set({ activeMobilityDatasetId: datasetId }),
 
   uploadedGeometries: [],
   addUploadedGeometry: (geometry: UploadedGeometry) => {

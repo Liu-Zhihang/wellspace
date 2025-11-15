@@ -239,6 +239,12 @@ export type MobilityDataset = {
   errors: MobilityValidationError[];
 };
 
+export type MobilityPlaybackState = {
+  datasetId: string;
+  mode: 'line' | 'heatmap';
+  highlightProgress: boolean;
+};
+
 export type ShadowServiceStatus = 'idle' | 'loading' | 'success' | 'error';
 
 export type ShadowServiceLayer = FeatureCollection;
