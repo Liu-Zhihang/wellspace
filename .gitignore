@@ -69,8 +69,11 @@ mcp安装的坑以及wsl配置codex的坑.md
 # PowerShell 脚本（临时工具）
 *.ps1
 
-# 临时目录
-ShadowMap/scripts/
+# 临时目录 / 脚本输出
+ShadowMap/scripts/**/__pycache__/
+ShadowMap/scripts/**/outputs/
+ShadowMap/scripts/**/outputs/**
+ShadowMap/scripts/mcp-call.mjs
 ShadowMap/$null
 
 # 外部项目（不应该提交）
