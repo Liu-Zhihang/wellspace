@@ -1,6 +1,7 @@
 import type { BuildingTileData } from '../types/index.ts';
 
-const API_BASE_URL = 'http://localhost:3500/api';
+const RUNTIME_BACKEND = (import.meta.env.VITE_BACKEND_BASE_URL as string | undefined) ?? 'http://localhost:3500';
+const API_BASE_URL = `${RUNTIME_BACKEND.replace(/\/$/, '')}/api`;
 
 export interface CacheStats {
   memorySize: number;
