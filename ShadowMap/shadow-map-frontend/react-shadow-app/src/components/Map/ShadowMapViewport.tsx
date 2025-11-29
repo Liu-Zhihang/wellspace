@@ -10,9 +10,11 @@ import { weatherService } from '../../services/weatherService';
 import { ApiService } from '../../services/apiService';
 import { shadowAnalysisClient } from '../../services/shadowAnalysisService';
 import { GeometryAnalysisOverlay } from '../Analysis/GeometryAnalysisOverlay';
-import type { GeometryAnalysisSample, MobilityCsvRecord, MobilityDataset } from '../../types/index.ts';
-import { getBaseMapStyle } from '../../services/baseMapManager';
+import type { GeometryAnalysisSample } from '../../types/index.ts';
+import { getBaseMapStyle, getBaseMapById } from '../../services/baseMapManager';
 import { useMobilityPlayback } from '../../hooks/useMobilityPlayback';
+import { useMobilityDemoBootstrap } from '../../hooks/useMobilityDemoBootstrap';
+import { useDeckMobilityFlow } from '../../hooks/useDeckMobilityFlow';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
 const WEATHER_REFRESH_THROTTLE_MS = 2 * 60 * 1000;
@@ -29,79 +31,35 @@ const computeEffectiveShadowOpacity = (
   return Math.max(0, Math.min(1, baseOpacity * factor));
 };
 
-const buildMobilityLineFeatures = (
-  rows: MobilityCsvRecord[],
-  dataset: MobilityDataset,
-): GeoJSON.Feature[] => {
-  if (!rows.length) {
-    return [];
-  }
-
-  const sortedRows = [...rows].sort(
-    (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
-  );
-  const grouped = new Map<string, MobilityCsvRecord[]>();
-  sortedRows.forEach((record) => {
-    const bucket = grouped.get(record.traceId) ?? [];
-    bucket.push(record);
-    grouped.set(record.traceId, bucket);
-  });
-
-  return Array.from(grouped.entries()).map(([traceId, points]) => ({
-    type: 'Feature',
-    geometry: {
-      type: 'LineString',
-      coordinates: points.map((point) => point.coordinates),
-    },
-    properties: {
-      datasetId: dataset.id,
-      traceId,
-      color: dataset.color,
-    },
-  }));
-};
-
-const buildMobilityProgressFeatures = (
-  rows: MobilityCsvRecord[],
-  dataset: MobilityDataset,
-  currentTime: Date,
-): GeoJSON.Feature[] => {
-  const filtered = rows.filter((row) => row.timestamp.getTime() <= currentTime.getTime());
-  if (!filtered.length) {
-    return [];
-  }
-
-  return filtered.map((record) => ({
-    type: 'Feature',
-    geometry: {
-      type: 'Point',
-      coordinates: record.coordinates,
-    },
-    properties: {
-      datasetId: dataset.id,
-      traceId: record.traceId,
-      timestamp: record.timestamp.toISOString(),
-      speedKmh: record.speedKmh ?? null,
-      color: dataset.color,
-    },
-  }));
-};
-
 const BUILDING_SOURCE_ID = 'clean-buildings';
 const BUILDING_LAYER_ID = 'clean-buildings-extrusion';
 
+const inferBaseMapCategory = (baseMapId?: string) => {
+  if (!baseMapId) return undefined;
+  const fallback = baseMapId.toLowerCase();
+  if (fallback.includes('dark') || fallback.includes('black')) return 'dark';
+  if (fallback.includes('satellite') || fallback.includes('imagery')) return 'satellite';
+  if (fallback.includes('terrain')) return 'terrain';
+  if (fallback.includes('light') || fallback.includes('street') || fallback.includes('carto')) return 'light';
+  return undefined;
+};
+
 const computeBuildingStyle = (baseMapId?: string) => {
-  const id = (baseMapId ?? '').toLowerCase();
-  if (id.includes('dark') || id.includes('black')) {
-    return { fill: '#fbbf24', opacity: 0.82 };
+  const baseOption = baseMapId ? getBaseMapById(baseMapId) : undefined;
+  const category = baseOption?.category ?? inferBaseMapCategory(baseMapId);
+  switch (category) {
+    case 'dark':
+      return { fill: '#fbbf24', opacity: 0.88 };
+    case 'satellite':
+      return { fill: '#34d399', opacity: 0.75 };
+    case 'terrain':
+      return { fill: '#0ea5e9', opacity: 0.7 };
+    case 'light':
+    case 'street':
+      return { fill: '#1d4ed8', opacity: 0.6 };
+    default:
+      return { fill: '#f97316', opacity: 0.72 };
   }
-  if (id.includes('satellite')) {
-    return { fill: '#34d399', opacity: 0.75 };
-  }
-  if (id.includes('carto') || id.includes('light') || id.includes('street')) {
-    return { fill: '#1d4ed8', opacity: 0.58 };
-  }
-  return { fill: '#f97316', opacity: 0.7 };
 };
 
 const UPLOADED_SOURCE_ID = 'uploaded-geometry-source';
@@ -145,8 +103,8 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const heatmapDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const animationLastTimestampRef = useRef<number | null>(null);
-  const mobilityLayerRegistryRef = useRef<Set<string>>(new Set());
   const shadowResultDataRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FEATURE_COLLECTION);
+  const addBuildingsToMapRef = useRef<((buildingData: any) => void) | null>(null);
   const baseMapBootstrapRef = useRef(false);
   const lastBaseMapIdRef = useRef<string | null>(null);
 
@@ -325,8 +283,6 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     mapCenter,
     mapZoom,
     setMapView,
-    mobilityDatasets,
-    mobilityTraces,
   } = useShadowMapStore();
 
   const setMapViewRef = useRef(setMapView);
@@ -338,7 +294,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const selectedBaseMapId = baseMapId ?? mapSettings.baseMapId ?? 'mapbox-streets';
   const buildingStyle = useMemo(() => computeBuildingStyle(selectedBaseMapId), [selectedBaseMapId]);
   const baseMapStyle = useMemo(() => getBaseMapStyle(selectedBaseMapId), [selectedBaseMapId]);
+  useMobilityDemoBootstrap();
   useMobilityPlayback();
+  useDeckMobilityFlow();
 
   useEffect(() => {
     const map = mapRef.current;
@@ -421,135 +379,28 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     refreshWeatherData(shadowSettingsState.autoCloudAttenuation ? 'auto-on' : 'manual-mode');
   }, [refreshWeatherData, shadowSettingsState.autoCloudAttenuation, currentDate]);
 
-  const syncMobilityLayers = useCallback(() => {
+  const hideNativeBuildingLayers = useCallback(() => {
     const map = mapRef.current;
     if (!map) {
       return;
     }
-
-    const activeIds = new Set<string>();
-    mobilityDatasets.forEach((dataset) => {
-      const rows = mobilityTraces[dataset.id] ?? [];
-      const lineSourceId = `mobility-${dataset.id}-source`;
-      const lineLayerId = `mobility-${dataset.id}-line`;
-      const progressSourceId = `mobility-${dataset.id}-progress`;
-      const progressLayerId = `mobility-${dataset.id}-progress-layer`;
-
-      const lineFeatures = buildMobilityLineFeatures(rows, dataset);
-      const lineCollection: GeoJSON.FeatureCollection = {
-        type: 'FeatureCollection',
-        features: lineFeatures,
-      };
-
-      const ensureGeoJsonSource = (sourceId: string, data: GeoJSON.FeatureCollection) => {
-        const existing = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
-        if (existing) {
-          existing.setData(data);
-          return;
+    const style = map.getStyle();
+    const layerIds = style?.layers?.map((layer) => layer.id) ?? [];
+    layerIds.forEach((layerId) => {
+      if (layerId === BUILDING_LAYER_ID) return;
+      if (!layerId.toLowerCase().includes('building')) return;
+      try {
+        map.removeLayer(layerId);
+      } catch {
+        try {
+          map.setLayoutProperty(layerId, 'visibility', 'none');
+        } catch {
+          // ignore
         }
-        map.addSource(sourceId, {
-          type: 'geojson',
-          data,
-        });
-      };
-
-      ensureGeoJsonSource(lineSourceId, lineCollection);
-
-      if (!map.getLayer(lineLayerId)) {
-        map.addLayer({
-          id: lineLayerId,
-          type: 'line',
-          source: lineSourceId,
-          layout: {
-            'line-cap': 'round',
-            'line-join': 'round',
-            visibility: dataset.visible ? 'visible' : 'none',
-          },
-          paint: {
-            'line-color': dataset.color,
-            'line-width': 2.5,
-            'line-opacity': 0.65,
-          },
-        });
-      } else {
-        map.setPaintProperty(lineLayerId, 'line-color', dataset.color);
-        map.setLayoutProperty(lineLayerId, 'visibility', dataset.visible ? 'visible' : 'none');
       }
-
-      const progressFeatures = buildMobilityProgressFeatures(rows, dataset, currentDate);
-      const progressCollection: GeoJSON.FeatureCollection = {
-        type: 'FeatureCollection',
-        features: progressFeatures,
-      };
-
-      ensureGeoJsonSource(progressSourceId, progressCollection);
-
-      if (!map.getLayer(progressLayerId)) {
-        map.addLayer({
-          id: progressLayerId,
-          type: 'circle',
-          source: progressSourceId,
-          layout: {
-            visibility: dataset.visible ? 'visible' : 'none',
-          },
-          paint: {
-            'circle-radius': 4,
-            'circle-color': dataset.color,
-            'circle-stroke-width': 1,
-            'circle-stroke-color': '#ffffff',
-            'circle-opacity': 0.95,
-          },
-        });
-      } else {
-        map.setPaintProperty(progressLayerId, 'circle-color', dataset.color);
-        map.setLayoutProperty(progressLayerId, 'visibility', dataset.visible ? 'visible' : 'none');
-      }
-
-      activeIds.add(dataset.id);
     });
+  }, []);
 
-    mobilityLayerRegistryRef.current.forEach((datasetId) => {
-      if (activeIds.has(datasetId)) {
-        return;
-      }
-      const ids = [
-        `mobility-${datasetId}-line`,
-        `mobility-${datasetId}-progress-layer`,
-      ];
-      ids.forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.removeLayer(layerId);
-        }
-      });
-      const sources = [
-        `mobility-${datasetId}-source`,
-        `mobility-${datasetId}-progress`,
-      ];
-      sources.forEach((sourceId) => {
-        if (map.getSource(sourceId)) {
-          map.removeSource(sourceId);
-        }
-      });
-    });
-
-    mobilityLayerRegistryRef.current = activeIds;
-  }, [mobilityDatasets, mobilityTraces, currentDate]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    if (!map.isStyleLoaded()) {
-      map.once('styledata', syncMobilityLayers);
-      return () => map.off('styledata', syncMobilityLayers);
-    }
-
-    syncMobilityLayers();
-
-    return undefined;
-  }, [syncMobilityLayers]);
 
   const applyUploadedGeometrySelectionStyles = useCallback((geometryId: string | null) => {
     const map = mapRef.current;
@@ -939,7 +790,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       const result = await getWfsBuildings(boundingBox, 10000) // Increase maxFeatures
       
       if (result.success && result.data) {
-        addBuildingsToMap(result.data)
+        (addBuildingsToMapRef.current ?? addBuildingsToMap)(result.data);
         setBuildingsLoaded(true)
         setStatusMessage(`Loaded ${result.data.features.length} buildings in this session`)
       } else {
@@ -1188,6 +1039,10 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     console.log(' Building ingestion sequence complete');
   }, [refreshWeatherData, buildingStyle.fill, buildingStyle.opacity]);
+
+  useEffect(() => {
+    addBuildingsToMapRef.current = addBuildingsToMap;
+  }, [addBuildingsToMap]);
 
   const restoreBuildingLayerFromCache = useCallback(() => {
     const cached = buildingCache.getAllAsFeatureCollection();
@@ -1952,6 +1807,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
     mapRef.current = map;
     (window as any).__shadowMapInstance = map;
+    window.dispatchEvent(new CustomEvent('shadow-map-ready'));
     baseMapBootstrapRef.current = true;
     lastBaseMapIdRef.current = selectedBaseMapId;
 
@@ -1964,6 +1820,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     const handleLoad = async () => {
       console.log(' Map load complete');
       map.resize();
+      hideNativeBuildingLayers();
       const center = map.getCenter();
       setMapViewRef.current?.([center.lng, center.lat], map.getZoom());
       baseMapBootstrapRef.current = true;
@@ -2023,6 +1880,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     map.on('load', handleLoad);
     map.on('moveend', handleMoveEnd);
     map.on('styledata', handleStyleData);
+    map.on('styledata', hideNativeBuildingLayers);
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -2034,6 +1892,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       map.off('load', handleLoad);
       map.off('moveend', handleMoveEnd);
       map.off('styledata', handleStyleData);
+      map.off('styledata', hideNativeBuildingLayers);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;

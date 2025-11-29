@@ -13,7 +13,11 @@ import type {
   ShadowServiceResponse,
   MobilityDataset,
   MobilityCsvRecord,
+  MobilitySunlightSample,
+  MobilitySunlightProgress,
+  BoundingBox,
 } from '../types/index.ts';
+import { computeMobilitySunlightForRows } from '../services/mobilitySunlightService';
 
 type ViewportAction = (() => void) | (() => Promise<void>);
 
@@ -34,6 +38,12 @@ interface ShadowMapState {
   // Current date-time state
   currentDate: Date;
   setCurrentDate: (date: Date) => void;
+  
+  // Mobility playback (independent from shadow timeline)
+  mobilityPlaybackTime: Date | null;
+  setMobilityPlaybackTime: (date: Date | null) => void;
+  isMobilityPlaying: boolean;
+  setMobilityPlaying: (playing: boolean) => void;
   
   // Map settings
   mapSettings: MapSettings;
@@ -93,6 +103,13 @@ interface ShadowMapState {
   clearMobilityDatasets: () => void;
   activeMobilityDatasetId: string | null;
   setActiveMobilityDataset: (datasetId: string | null) => void;
+  mobilitySunlight: Record<string, MobilitySunlightSample[]>;
+  mobilitySunlightProgress: Record<string, MobilitySunlightProgress>;
+  mobilitySunlightStatus: Record<string, 'idle' | 'loading' | 'success' | 'error'>;
+  mobilitySunlightError: Record<string, string | null>;
+  computeMobilitySunlight: (datasetId: string) => Promise<void>;
+  clearMobilitySunlight: (datasetId?: string) => void;
+  exportMobilitySunlight: (datasetId: string, format: 'csv' | 'json') => void;
 
   // Uploaded geometries & analysis
   uploadedGeometries: UploadedGeometry[];
@@ -151,6 +168,17 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     console.log('⏰ Setting current date:', date);
     set({ currentDate: new Date(date) });
   },
+
+  mobilityPlaybackTime: null,
+  setMobilityPlaybackTime: (date: Date | null) => {
+    if (date && isNaN(date.getTime())) {
+      console.error('❌ Invalid date provided to setMobilityPlaybackTime:', date);
+      return;
+    }
+    set({ mobilityPlaybackTime: date ? new Date(date) : null });
+  },
+  isMobilityPlaying: false,
+  setMobilityPlaying: (playing: boolean) => set({ isMobilityPlaying: playing }),
   
   mapSettings: {
     // Legacy settings (for compatibility)
@@ -336,6 +364,10 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
 
   mobilityDatasets: [],
   mobilityTraces: {},
+  mobilitySunlight: {},
+  mobilitySunlightProgress: {},
+  mobilitySunlightStatus: {},
+  mobilitySunlightError: {},
   addMobilityDataset: (dataset, rows) =>
     set(state => ({
       mobilityDatasets: [...state.mobilityDatasets, dataset],
@@ -344,9 +376,32 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   removeMobilityDataset: (datasetId) =>
     set(state => {
       const { [datasetId]: _removed, ...rest } = state.mobilityTraces;
+      const remainingDatasets = state.mobilityDatasets.filter(dataset => dataset.id !== datasetId);
+      const removedWasActive = state.activeMobilityDatasetId === datasetId;
+      const nextDatasetId = removedWasActive ? (remainingDatasets[0]?.id ?? null) : state.activeMobilityDatasetId;
+      const nextDataset = remainingDatasets.find(dataset => dataset.id === nextDatasetId) ?? null;
       return {
-        mobilityDatasets: state.mobilityDatasets.filter(dataset => dataset.id !== datasetId),
+        mobilityDatasets: remainingDatasets,
         mobilityTraces: rest,
+        mobilitySunlight: Object.fromEntries(
+          Object.entries(state.mobilitySunlight).filter(([key]) => key !== datasetId),
+        ),
+        mobilitySunlightProgress: Object.fromEntries(
+          Object.entries(state.mobilitySunlightProgress).filter(([key]) => key !== datasetId),
+        ),
+        mobilitySunlightStatus: Object.fromEntries(
+          Object.entries(state.mobilitySunlightStatus).filter(([key]) => key !== datasetId),
+        ),
+        mobilitySunlightError: Object.fromEntries(
+          Object.entries(state.mobilitySunlightError).filter(([key]) => key !== datasetId),
+        ),
+        activeMobilityDatasetId: nextDatasetId,
+        mobilityPlaybackTime: removedWasActive
+          ? nextDataset
+            ? new Date(nextDataset.timeRange.start)
+            : null
+          : state.mobilityPlaybackTime,
+        isMobilityPlaying: removedWasActive ? false : state.isMobilityPlaying,
       };
     }),
   setMobilityDatasetVisibility: (datasetId, visible) =>
@@ -355,9 +410,151 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
         dataset.id === datasetId ? { ...dataset, visible } : dataset
       ),
     })),
-  clearMobilityDatasets: () => set({ mobilityDatasets: [], mobilityTraces: {} }),
+  clearMobilityDatasets: () =>
+    set({
+      mobilityDatasets: [],
+      mobilityTraces: {},
+      mobilitySunlight: {},
+      mobilitySunlightProgress: {},
+      mobilitySunlightStatus: {},
+      mobilitySunlightError: {},
+      activeMobilityDatasetId: null,
+      mobilityPlaybackTime: null,
+      isMobilityPlaying: false,
+    }),
   activeMobilityDatasetId: null,
-  setActiveMobilityDataset: (datasetId: string | null) => set({ activeMobilityDatasetId: datasetId }),
+  setActiveMobilityDataset: (datasetId: string | null) =>
+    set(state => {
+      if (!datasetId) {
+        return { activeMobilityDatasetId: null, mobilityPlaybackTime: null, isMobilityPlaying: false };
+      }
+      if (state.activeMobilityDatasetId === datasetId) {
+        return {};
+      }
+      const nextDataset = state.mobilityDatasets.find(dataset => dataset.id === datasetId) ?? null;
+      return {
+        activeMobilityDatasetId: datasetId,
+        mobilityPlaybackTime: nextDataset ? new Date(nextDataset.timeRange.start) : null,
+        isMobilityPlaying: false,
+      };
+    }),
+
+  computeMobilitySunlight: async (datasetId: string) => {
+    const state = get();
+    const rows = state.mobilityTraces[datasetId];
+    if (!rows || !rows.length) {
+      state.addStatusMessage?.('No mobility points available for sunlight analysis.', 'warning');
+      return;
+    }
+
+    set(current => ({
+      mobilitySunlightStatus: { ...current.mobilitySunlightStatus, [datasetId]: 'loading' },
+      mobilitySunlightProgress: { ...current.mobilitySunlightProgress, [datasetId]: { completed: 0, total: 0 } },
+      mobilitySunlightError: { ...current.mobilitySunlightError, [datasetId]: null },
+    }));
+
+    try {
+      let lastProgress: MobilitySunlightProgress | null = null;
+      const samples = await computeMobilitySunlightForRows(rows, {
+        onProgress: (progress) => {
+          lastProgress = progress;
+          set(current => ({
+            mobilitySunlightProgress: { ...current.mobilitySunlightProgress, [datasetId]: progress },
+          }));
+        },
+      });
+      const finalProgress: MobilitySunlightProgress = lastProgress
+        ? { completed: lastProgress.total, total: lastProgress.total }
+        : { completed: samples.length, total: samples.length || 1 };
+      set(current => ({
+        mobilitySunlight: { ...current.mobilitySunlight, [datasetId]: samples },
+        mobilitySunlightProgress: { ...current.mobilitySunlightProgress, [datasetId]: finalProgress },
+        mobilitySunlightStatus: { ...current.mobilitySunlightStatus, [datasetId]: 'success' },
+      }));
+      state.addStatusMessage?.(`Sunlight states ready (${samples.length} points).`, 'info');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      set(current => ({
+        mobilitySunlightStatus: { ...current.mobilitySunlightStatus, [datasetId]: 'error' },
+        mobilitySunlightError: { ...current.mobilitySunlightError, [datasetId]: message },
+      }));
+      state.addStatusMessage?.(`Sunlight computation failed: ${message}`, 'error');
+    }
+  },
+
+  clearMobilitySunlight: (datasetId?: string) => {
+    if (!datasetId) {
+      set({ mobilitySunlight: {}, mobilitySunlightProgress: {}, mobilitySunlightStatus: {}, mobilitySunlightError: {} });
+      return;
+    }
+    set(state => {
+      const { [datasetId]: _removed, ...restSunlight } = state.mobilitySunlight;
+      const { [datasetId]: _progressRemoved, ...restProgress } = state.mobilitySunlightProgress;
+      const { [datasetId]: _statusRemoved, ...restStatus } = state.mobilitySunlightStatus;
+      const { [datasetId]: _errorRemoved, ...restError } = state.mobilitySunlightError;
+      return {
+        mobilitySunlight: restSunlight,
+        mobilitySunlightProgress: restProgress,
+        mobilitySunlightStatus: restStatus,
+        mobilitySunlightError: restError,
+      };
+    });
+  },
+
+  exportMobilitySunlight: (datasetId: string, format: 'csv' | 'json' = 'csv') => {
+    const state = get();
+    const samples = state.mobilitySunlight[datasetId];
+    if (!samples || !samples.length) {
+      state.addStatusMessage?.('⚠️ No sunlight samples to export.', 'warning');
+      return;
+    }
+
+    if (typeof window === 'undefined') return;
+
+    const dataset = state.mobilityDatasets.find(item => item.id === datasetId) ?? null;
+    const filenameBase = (dataset?.name || 'mobility').replace(/\s+/g, '_').toLowerCase();
+
+    if (format === 'json') {
+      const blob = new Blob([JSON.stringify(samples, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filenameBase}-sunlight.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      state.addStatusMessage?.('📄 Exported sunlight samples (JSON).', 'info');
+      return;
+    }
+
+    const header = 'traceId,time,lng,lat,sunlit,shadowPercent,bucketStart,bucketEnd\n';
+    const rows = samples
+      .map(sample => (
+        [
+          sample.traceId,
+          sample.timestamp.toISOString(),
+          sample.coordinates[0],
+          sample.coordinates[1],
+          sample.sunlit,
+          sample.shadowPercent,
+          sample.bucketStart,
+          sample.bucketEnd,
+        ].join(',')
+      ))
+      .join('\n');
+
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filenameBase}-sunlight.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    state.addStatusMessage?.('📄 Exported sunlight samples (CSV).', 'info');
+  },
 
   uploadedGeometries: [],
   addUploadedGeometry: (geometry: UploadedGeometry) => {

@@ -18,9 +18,10 @@
 | REQ-ENGINE-01 | Shadow engine service abstraction | In Progress | `/api/analysis/shadow` + local pybdshadow worker + script bridge landed; Redis/metrics TBD |
 | REQ-ENGINE-02 | Frontend shadow engine integration | In Progress | Zustand stores consume engine metrics, heatmap default-off toggle + overlay redesign shipped |
 | REQ-MAP-BASE | MapLibre basemap switching revamp | Done | `mapSettings.baseMapId` now drives in-place `map.setStyle` calls; overlays + uploads are rehydrated without remounting |
-| REQ-MOBILITY-01 | Mobility data ingestion + UI | Planned | Add CSV uploader, dataset list, and validation pipeline for movement traces |
-| REQ-MOBILITY-02 | Trajectory rendering + playback | Planned | Render uploaded traces on MapLibre, sync with shared timeline, expose metrics in analysis panel |
-| REQ-MOBILITY-03 | Mobility controls & overlays | Planned | Merge mobility upload/controls, add playback UI, heatmap/analysis hooks |
+| REQ-MOBILITY-01 | Mobility data ingestion + UI | In Progress | CSV uploader, dataset list, validation pipeline and sample data refresh in-flight |
+| REQ-MOBILITY-02 | Trajectory rendering + playback | In Progress | MapLibre line/heatmap layers + animation hooks under active development |
+| REQ-MOBILITY-03 | Mobility controls & overlays | In Progress | Unified upload panel, zoom/animate buttons landed; heatmap/analysis hooks next |
+| REQ-MOBILITY-04 | Mobility sunlight export | New | Derive per-minute sunlight/shadow (0/1) along trajectories and export CSV/JSON |
 
 ## Next Steps
 
@@ -33,6 +34,7 @@
    - Merge trace upload into a generic GeoJSON uploader (Clean control + left toolbar).
    - Extend `shadowMapStore` to manage uploaded geometries, analysis results, exports.
    - Prototype sampling + ShadeMap integration for shadow coverage / sunlight hours.
+   - Wire mobility traces to shadow analysis for per-minute sunlight/shadow export (see `REQ-MOBILITY-04`).
 3. After TS build and analysis prototype, run bundle report to confirm no missing imports and size regressions.
 4. Draft shadow-engine migration plan
    - Stage A – Research & Prototype
@@ -57,6 +59,9 @@
      - Capture regression suite: contract tests for `/api/analysis/shadow`, frontend rendering snapshot tests, and store selectors.
      - Define performance SLA (p95 latency per bbox) and benchmark both simulator + real engine.
    - Draft launch checklist covering container build, monitoring dashboards, cache warmup, and rollback plan.
+5. Ship mobility overlays
+   - Refresh `ShadowMap/data/samples/mobility-demo.csv` with denser traces (loop/crossing/walk) for animation QA.
+   - Wire `useMobilityPlayback` heatmap/progress layers into shared timeline, including Animate toggle + heatmap opacity rules.
 5. Launch mobility analysis feature
    - Design CSV schema + validation (id, time ISO8601, lon/lat decimal, optional metrics) and update `ShadowMap/data/samples/mobility-demo.csv` accordingly.
    - Build uploader modal + dataset drawer entries; surface row-level errors similar to Mobmap’s “data type mismatch”.

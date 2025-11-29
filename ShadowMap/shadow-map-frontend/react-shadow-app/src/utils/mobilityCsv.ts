@@ -5,15 +5,32 @@ const OPTIONAL_SPEED_HEADERS = ['speed_kmh', 'speed'] as const;
 
 type HeaderMap = Record<(typeof REQUIRED_HEADERS)[number] | 'speed', number>;
 
+const HEADER_ALIASES: Record<(typeof REQUIRED_HEADERS)[number], string[]> = {
+  id: ['trace_id', 'move_id'],
+  time: ['timestamp', 'time_sec', 'time_second', 'epoch', 'time_epoch'],
+  lng: ['lon', 'longitude', 'fnl_lon', 'gps_lon', 'air_lon'],
+  lat: ['latitude', 'fnl_lat', 'gps_lat', 'air_lat'],
+};
+
 const normaliseHeader = (value: string): string => value?.trim().toLowerCase();
+
+const matchRequiredKey = (value: string): (typeof REQUIRED_HEADERS)[number] | null => {
+  const directMatch = (REQUIRED_HEADERS as readonly string[]).find((key) => key === value);
+  if (directMatch) return directMatch as (typeof REQUIRED_HEADERS)[number];
+  const aliasMatch = (REQUIRED_HEADERS as readonly string[]).find((key) =>
+    HEADER_ALIASES[key as (typeof REQUIRED_HEADERS)[number]]?.includes(value),
+  );
+  return aliasMatch ? (aliasMatch as (typeof REQUIRED_HEADERS)[number]) : null;
+};
 
 const parseHeader = (headerLine: string): HeaderMap => {
   const headers = headerLine.split(',').map(normaliseHeader);
   const map: HeaderMap = { id: -1, time: -1, lng: -1, lat: -1, speed: -1 };
 
   headers.forEach((value, index) => {
-    if (value in map && map[value as keyof HeaderMap] === -1) {
-      map[value as keyof HeaderMap] = index;
+    const requiredKey = matchRequiredKey(value);
+    if (requiredKey && map[requiredKey] === -1) {
+      map[requiredKey] = index;
       return;
     }
     if (map.speed === -1 && OPTIONAL_SPEED_HEADERS.includes(value as any)) {
@@ -39,6 +56,22 @@ const buildBounds = (records: MobilityCsvRecord[]): BoundingBox | undefined => {
   });
 
   return { north, south, east, west };
+};
+
+const parseTimestamp = (rawValue: string | undefined | null): Date | null => {
+  const value = rawValue?.trim();
+  if (!value) return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    const ms = numeric > 1e12 ? numeric : numeric * 1000;
+    const date = new Date(ms);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return null;
 };
 
 export const parseMobilityCsv = (csv: string): MobilityCsvParseResult => {
@@ -68,7 +101,7 @@ export const parseMobilityCsv = (csv: string): MobilityCsvParseResult => {
 
   lines.slice(1).forEach((line, index) => {
     const sourceRow = index + 2; // account for header row
-    if (!line) return;
+    if (!line || line.startsWith('#')) return;
 
     const cells = line.split(',');
 
@@ -78,9 +111,8 @@ export const parseMobilityCsv = (csv: string): MobilityCsvParseResult => {
       return;
     }
 
-    const rawTime = cells[headerMap.time]?.trim();
-    const timestamp = rawTime ? new Date(rawTime) : null;
-    if (!timestamp || Number.isNaN(timestamp.getTime())) {
+    const timestamp = parseTimestamp(cells[headerMap.time]);
+    if (!timestamp) {
       errors.push({ row: sourceRow, field: 'time', message: 'Invalid ISO time value.' });
       return;
     }

@@ -239,6 +239,18 @@ export type MobilityDataset = {
   errors: MobilityValidationError[];
 };
 
+export type MobilitySunlightSample = MobilityCsvRecord & {
+  sunlit: 0 | 1; // 1 = in sunlight, 0 = in shadow
+  shadowPercent: number;
+  bucketStart: string;
+  bucketEnd: string;
+};
+
+export type MobilitySunlightProgress = {
+  completed: number;
+  total: number;
+};
+
 export type MobilityPlaybackState = {
   datasetId: string;
   mode: 'line' | 'heatmap';
