@@ -1,5 +1,6 @@
 import type { FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import { shadowAnalysisClient } from './shadowAnalysisService';
+import SunCalc from 'suncalc';
 import type {
   BoundingBox,
   MobilityCsvRecord,
@@ -37,6 +38,17 @@ const ensureNonZeroBounds = (bounds: BoundingBox): BoundingBox => {
     north += epsilon;
   }
   return { west, east, south, north };
+};
+
+const isNighttimeError = (message: string) =>
+  message.toLowerCase().includes('before sunrise') || message.toLowerCase().includes('after sunset');
+
+const isNighttimeBucket = (bounds: BoundingBox, timestamp: Date): boolean => {
+  const centerLat = (bounds.north + bounds.south) / 2;
+  const centerLng = (bounds.east + bounds.west) / 2;
+  const times = SunCalc.getTimes(timestamp, centerLat, centerLng);
+  if (!times.sunrise || !times.sunset) return false;
+  return timestamp < times.sunrise || timestamp > times.sunset;
 };
 
 const startOfMinuteIso = (date: Date): string => {
@@ -108,33 +120,67 @@ export const computeMobilitySunlightForRows = async (
 
   for (const [bucketStart, bucketRows] of bucketMap.entries()) {
     let response: Awaited<ReturnType<typeof shadowAnalysisClient.requestAnalysis>> | null = null;
+    const bucketStartDate = new Date(bucketStart);
+    const bucketEndDate = new Date(bucketStartDate.getTime() + 60_000);
+    const bounds = ensureNonZeroBounds(buildBounds(bucketRows));
+
+    // Pre-filter: if bucket is nighttime, skip engine and mark as no sunlight
+    if (isNighttimeBucket(bounds, bucketStartDate)) {
+      console.warn('[Mobility Sunlight] Nighttime bucket (pre-check) for', bucketStart, '- marking as no sunlight');
+      bucketRows.forEach((row) => {
+        samples.push({
+          ...row,
+          sunlit: 0,
+          shadowPercent: 100,
+          bucketStart: bucketStartDate.toISOString(),
+          bucketEnd: bucketEndDate.toISOString(),
+          source: 'fallback_night',
+        });
+      });
+      completed += 1;
+      options?.onProgress?.({ completed, total: totalBuckets });
+      continue;
+    }
+
     try {
-      const bounds = ensureNonZeroBounds(buildBounds(bucketRows));
       response = await shadowAnalysisClient.requestAnalysis({
         bbox: [bounds.west, bounds.south, bounds.east, bounds.north],
-        timestamp: new Date(bucketStart),
+        timestamp: bucketStartDate,
         timeGranularityMinutes: 1,
         outputs: { shadowPolygons: true, sunlightGrid: true, heatmap: false },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const noBuildings = message.includes('No building features returned');
-      if (!noBuildings) {
+      const isNight = isNighttimeError(message);
+      if (!noBuildings && !isNight) {
         throw error;
       }
-      // Fallback: treat as fully sunlit when no buildings are returned for the bbox
-      console.warn('[Mobility Sunlight] No buildings for bbox at', bucketStart, '- marking as sunlit');
-      const bucketStartDate = new Date(bucketStart);
-      const bucketEndDate = new Date(bucketStartDate.getTime() + 60_000);
-      bucketRows.forEach((row) => {
-        samples.push({
-          ...row,
-          sunlit: 1,
-          shadowPercent: 0,
-          bucketStart: bucketStartDate.toISOString(),
-          bucketEnd: bucketEndDate.toISOString(),
+      if (noBuildings) {
+        console.warn('[Mobility Sunlight] No buildings for bbox at', bucketStart, '- marking as sunlit');
+        bucketRows.forEach((row) => {
+          samples.push({
+            ...row,
+            sunlit: 1,
+            shadowPercent: 0,
+            bucketStart: bucketStartDate.toISOString(),
+            bucketEnd: bucketEndDate.toISOString(),
+            source: 'fallback_no_buildings',
+          });
         });
-      });
+      } else if (isNight) {
+        console.warn('[Mobility Sunlight] Nighttime for', bucketStart, '- marking as no sunlight');
+        bucketRows.forEach((row) => {
+          samples.push({
+            ...row,
+            sunlit: 0,
+            shadowPercent: 100,
+            bucketStart: bucketStartDate.toISOString(),
+            bucketEnd: bucketEndDate.toISOString(),
+            source: 'fallback_night',
+          });
+        });
+      }
       completed += 1;
       options?.onProgress?.({ completed, total: totalBuckets });
       continue;
@@ -153,6 +199,7 @@ export const computeMobilitySunlightForRows = async (
         shadowPercent,
         bucketStart: response!.bucketStart,
         bucketEnd,
+        source: 'engine',
       });
     });
 

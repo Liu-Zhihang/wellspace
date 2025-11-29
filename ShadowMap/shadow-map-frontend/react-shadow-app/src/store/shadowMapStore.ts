@@ -528,7 +528,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       return;
     }
 
-    const header = 'traceId,time,lng,lat,sunlit,shadowPercent,bucketStart,bucketEnd\n';
+    const header = 'traceId,time,lng,lat,sunlit,shadowPercent,bucketStart,bucketEnd,source\n';
     const rows = samples
       .map(sample => (
         [
@@ -540,6 +540,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
           sample.shadowPercent,
           sample.bucketStart,
           sample.bucketEnd,
+          sample.source,
         ].join(',')
       ))
       .join('\n');
