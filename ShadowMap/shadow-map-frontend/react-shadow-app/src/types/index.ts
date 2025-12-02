@@ -244,7 +244,7 @@ export type MobilitySunlightSample = MobilityCsvRecord & {
   shadowPercent: number;
   bucketStart: string;
   bucketEnd: string;
-  source: 'engine' | 'fallback_no_buildings' | 'fallback_night';
+  source: 'engine' | 'fallback_no_buildings' | 'fallback_night' | 'fallback_error';
 };
 
 export type MobilitySunlightProgress = {

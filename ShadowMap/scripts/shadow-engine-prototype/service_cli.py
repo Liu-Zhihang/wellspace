@@ -9,7 +9,8 @@ The script expects a JSON payload on STDIN with the following structure:
   "backendUrl": "http://localhost:3500",
   "maxFeatures": 8000,
   "geometry": {... optional GeoJSON feature ...},
-  "samples": {"grid": 6}
+  "samples": {"grid": 6},
+  "metadata": {"canopyRasterPath": "/path/to/canopy.tif"}
 }
 """
 
@@ -77,8 +78,12 @@ def validate_payload(payload: Dict[str, Any]) -> AnalysisInput:
     timezone = payload.get("timezone") or "Asia/Hong_Kong"
     max_features = int(payload.get("maxFeatures") or 8000)
     geometry_obj = None
+    canopy_raster_path = None
     if payload.get("geometry") is not None:
         geometry_obj = normalize_geometry_obj(payload["geometry"])
+    metadata = payload.get("metadata") or {}
+    if isinstance(metadata, dict):
+        canopy_raster_path = metadata.get("canopyRasterPath") or metadata.get("canopy_raster_path")
 
     return AnalysisInput(
         bbox={k: float(bbox[k]) for k in required},
@@ -87,6 +92,7 @@ def validate_payload(payload: Dict[str, Any]) -> AnalysisInput:
         timezone=str(timezone),
         max_features=max_features,
         geometry=geometry_obj,
+        canopy_raster_path=str(canopy_raster_path) if canopy_raster_path else None,
     )
 
 

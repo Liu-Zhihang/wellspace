@@ -51,6 +51,13 @@ const isNighttimeBucket = (bounds: BoundingBox, timestamp: Date): boolean => {
   return timestamp < times.sunrise || timestamp > times.sunset;
 };
 
+const isDegenerateBounds = (bounds: BoundingBox): boolean => {
+  const width = Math.abs(bounds.east - bounds.west);
+  const height = Math.abs(bounds.north - bounds.south);
+  const nearZero = Math.abs(bounds.east) < 1e-4 && Math.abs(bounds.west) < 1e-4 && Math.abs(bounds.north) < 1e-4 && Math.abs(bounds.south) < 1e-4;
+  return width < 1e-6 || height < 1e-6 || nearZero;
+};
+
 const startOfMinuteIso = (date: Date): string => {
   const floored = new Date(date);
   floored.setSeconds(0, 0);
@@ -142,6 +149,24 @@ export const computeMobilitySunlightForRows = async (
       continue;
     }
 
+    // Degenerate/zero bounds: mark as error and skip engine
+    if (isDegenerateBounds(bounds)) {
+      console.warn('[Mobility Sunlight] Degenerate bounds for', bucketStart, bounds, '- marking as error');
+      bucketRows.forEach((row) => {
+        samples.push({
+          ...row,
+          sunlit: 0,
+          shadowPercent: 0,
+          bucketStart: bucketStartDate.toISOString(),
+          bucketEnd: bucketEndDate.toISOString(),
+          source: 'fallback_error',
+        });
+      });
+      completed += 1;
+      options?.onProgress?.({ completed, total: totalBuckets });
+      continue;
+    }
+
     try {
       response = await shadowAnalysisClient.requestAnalysis({
         bbox: [bounds.west, bounds.south, bounds.east, bounds.north],
@@ -154,7 +179,20 @@ export const computeMobilitySunlightForRows = async (
       const noBuildings = message.includes('No building features returned');
       const isNight = isNighttimeError(message);
       if (!noBuildings && !isNight) {
-        throw error;
+        console.warn('[Mobility Sunlight] Engine error for', bucketStart, message);
+        bucketRows.forEach((row) => {
+          samples.push({
+            ...row,
+            sunlit: 0,
+            shadowPercent: 0,
+            bucketStart: bucketStartDate.toISOString(),
+            bucketEnd: bucketEndDate.toISOString(),
+            source: 'fallback_error',
+          });
+        });
+        completed += 1;
+        options?.onProgress?.({ completed, total: totalBuckets });
+        continue;
       }
       if (noBuildings) {
         console.warn('[Mobility Sunlight] No buildings for bbox at', bucketStart, '- marking as sunlit');

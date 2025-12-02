@@ -4,16 +4,25 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import geopandas as gpd
+import pandas as pd
+import numpy as np
+import rasterio
+from rasterio.features import shapes as rio_shapes
 import requests
-from shapely.geometry import shape, box
+from shapely.geometry import shape, box, mapping
 from shapely.ops import unary_union
 
 _PYBDSHADOW_API: str | None = None
+# Default canopy raster path (can be overridden by env or request metadata)
+CANOPY_RASTER_PATH = os.getenv('CANOPY_RASTER_PATH', '/home/jinlin/data/HKtree_reprojected4326.tif')
+# Minimum canopy height (meters) to consider
+CANOPY_HEIGHT_THRESHOLD = float(os.getenv('CANOPY_HEIGHT_THRESHOLD', '1'))
 try:  # pragma: no cover - handled at runtime
     import pybdshadow as _PYBDSHADOW_MODULE  # type: ignore
 except ImportError as exc:
@@ -181,6 +190,55 @@ def gdf_to_feature_collection(gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
     return raw
 
 
+def load_canopy_raster() -> Optional[rasterio.io.DatasetReader]:
+    if not CANOPY_RASTER_PATH or not os.path.exists(CANOPY_RASTER_PATH):
+        return None
+    try:
+        return rasterio.open(CANOPY_RASTER_PATH)
+    except Exception as exc:  # pragma: no cover - runtime
+        print(f"[canopy] Failed to open raster {CANOPY_RASTER_PATH}: {exc}")
+        return None
+
+
+def canopy_to_gdf(raster: rasterio.io.DatasetReader, bbox: Mapping[str, float]) -> gpd.GeoDataFrame:
+    # Windowed read of canopy raster to the bbox
+    transform = raster.transform
+    window = raster.window(bbox["west"], bbox["south"], bbox["east"], bbox["north"])
+    if window.width <= 0 or window.height <= 0:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    data = raster.read(1, window=window, boundless=True, fill_value=0)
+    # Mask values below threshold
+    mask = data >= CANOPY_HEIGHT_THRESHOLD
+    if not np.any(mask):
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    # Polygonize the canopy mask
+    shapes_and_values: List[Tuple[dict, float]] = list(
+        rio_shapes(
+            data.astype(np.uint8),
+            mask=mask,
+            transform=raster.window_transform(window),
+        )
+    )
+
+    if not shapes_and_values:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    records = []
+    geoms = []
+    for geom, val in shapes_and_values:
+        if not geom:
+            continue
+        geoms.append(shape(geom))
+        records.append({"height": float(val)})
+
+    gdf = gpd.GeoDataFrame(records, geometry=geoms, crs=raster.crs)
+    if gdf.crs and gdf.crs.to_string() != "EPSG:4326":
+        gdf = gdf.to_crs("EPSG:4326")
+    return gdf
+
+
 @dataclass
 class AnalysisInput:
     bbox: Dict[str, float]
@@ -189,6 +247,7 @@ class AnalysisInput:
     timezone: str = "Asia/Hong_Kong"
     max_features: int = 8000
     geometry: Optional[Dict[str, Any]] = None
+    canopy_raster_path: Optional[str] = None
 
 
 def filter_buildings(buildings: gpd.GeoDataFrame, geometry: Optional[Dict[str, Any]]) -> gpd.GeoDataFrame:
@@ -205,6 +264,24 @@ def run_analysis(params: AnalysisInput) -> Dict[str, Any]:
     buildings_gdf = features_to_gdf(raw.get("features", []))
     if params.geometry:
         buildings_gdf = filter_buildings(buildings_gdf, params.geometry)
+
+    canopy_ds = None
+    try:
+        if params.canopy_raster_path:
+            canopy_ds = rasterio.open(params.canopy_raster_path)
+        else:
+            canopy_ds = load_canopy_raster()
+    except Exception as exc:  # pragma: no cover
+        print(f\"[canopy] Failed to open raster: {exc}\")
+        canopy_ds = None
+
+    canopy_gdf = canopy_to_gdf(canopy_ds, params.bbox) if canopy_ds else gpd.GeoDataFrame(geometry=[], crs=\"EPSG:4326\")
+
+    # Merge buildings and canopy (treat canopy as additional polygons with height)
+    if canopy_gdf is not None and not canopy_gdf.empty:
+        canopy_gdf = canopy_gdf.rename(columns={"height": "height"})
+        buildings_gdf = pd.concat([buildings_gdf, canopy_gdf], ignore_index=True)
+
     if buildings_gdf.empty:
         raise RuntimeError("No building features returned for the specified bounds/geometry")
 

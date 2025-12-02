@@ -14,7 +14,7 @@
 | REQ-CLEAN-02 | Remove unused UI/Control components | Done | Legacy panels removed; verify no stale imports remain |
 | REQ-DOC-03 | Establish structure + plan docs | Done | `CODEBASE_STRUCTURE.md` and this file created |
 | REQ-CLEAN-04 | Consolidate frontend map modes | Done | Mapbox viewport shared; Clean UI retained as styling |
-| REQ-ANALYSIS-01 | Extend upload workflow for geometry-based analysis | In Progress | Uploads auto-select geometry, UI overlays show backend metrics, JSON/CSV export ready |
+| REQ-ANALYSIS-01 | Extend upload workflow for geometry-based analysis | Done | GeoJSON upload paths merged into Clean control + toolbar; overlays/export wired |
 | REQ-ENGINE-01 | Shadow engine service abstraction | In Progress | `/api/analysis/shadow` + local pybdshadow worker + script bridge landed; Redis/metrics TBD |
 | REQ-ENGINE-02 | Frontend shadow engine integration | In Progress | Zustand stores consume engine metrics, heatmap default-off toggle + overlay redesign shipped |
 | REQ-MAP-BASE | MapLibre basemap switching revamp | Done | `mapSettings.baseMapId` now drives in-place `map.setStyle` calls; overlays + uploads are rehydrated without remounting |
@@ -22,21 +22,20 @@
 | REQ-MOBILITY-02 | Trajectory rendering + playback | In Progress | MapLibre line/heatmap layers + animation hooks under active development |
 | REQ-MOBILITY-03 | Mobility controls & overlays | In Progress | Unified upload panel, zoom/animate buttons landed; heatmap/analysis hooks next |
 | REQ-MOBILITY-04 | Mobility sunlight export | New | Derive per-minute sunlight/shadow (0/1) along trajectories and export CSV/JSON |
+| REQ-CANOPY-01 | Tree canopy data ingestion + analysis integration | In Progress | Canopy dataset synced to the workstation; FastAPI engine running in tmux; backend now points to workstation IP/port (see `.env`) |
 
 ## Next Steps
 
-1. Finish `REQ-TS-01`
-   - Guard geometry types when reading `coordinates`.
-   - Replace accesses to private Mapbox internals (`_data`, `_loaded`) with safe helpers.
-   - Normalise timeout types to the browser-safe `number`.
-   - Re-run `pnpm exec tsc -b` and `pnpm run build`.
-2. Kick off `REQ-ANALYSIS-01`
-   - Merge trace upload into a generic GeoJSON uploader (Clean control + left toolbar).
-   - Extend `shadowMapStore` to manage uploaded geometries, analysis results, exports.
-   - Prototype sampling + ShadeMap integration for shadow coverage / sunlight hours.
-   - Wire mobility traces to shadow analysis for per-minute sunlight/shadow export (see `REQ-MOBILITY-04`).
-3. After TS build and analysis prototype, run bundle report to confirm no missing imports and size regressions.
-4. Draft shadow-engine migration plan
+1. Post-merge verification for `REQ-TS-01` and `REQ-ANALYSIS-01`
+   - Re-run `pnpm exec tsc -b` and `pnpm run build` to confirm clean builds.
+   - Smoke test Clean mode (upload + analysis overlays) to ensure no regressions.
+2. Tree canopy integration (`REQ-CANOPY-01`)
+   - Validate canopy dataset on the workstation; define API contract between Express backend and the FastAPI engine.
+   - Keep `.env` pointing to the workstation IP/port; document tmux session layout and restart steps.
+   - Plan frontend overlays/analytics that consume canopy responses.
+   - ✅ 已用 curl 调用 `http://10.13.12.164:9000/shadow`（backend_url 指向 `http://10.13.12.164:3500`，metadata 带 `/home/jinlin/data/HKtree_reprojected4326.tif`）返回有效 JSON，确认树冠栅格被引擎加载。
+3. After TS/analysis completion, run a bundle report to confirm no missing imports and size regressions.
+4. Shadow-engine migration plan
    - Stage A – Research & Prototype
      - Evaluate `pybdshadow` capabilities (shadow polygons, sunshine duration grids, performance on HK CBD subset).
      - Build a minimal Python notebook/service to ingest building footprints + height and output GeoJSON shadows + statistics.
@@ -62,11 +61,18 @@
 5. Ship mobility overlays
    - Refresh `ShadowMap/data/samples/mobility-demo.csv` with denser traces (loop/crossing/walk) for animation QA.
    - Wire `useMobilityPlayback` heatmap/progress layers into shared timeline, including Animate toggle + heatmap opacity rules.
-5. Launch mobility analysis feature
+6. Launch mobility analysis feature
    - Design CSV schema + validation (id, time ISO8601, lon/lat decimal, optional metrics) and update `ShadowMap/data/samples/mobility-demo.csv` accordingly.
    - Build uploader modal + dataset drawer entries; surface row-level errors similar to Mobmap’s “data type mismatch”.
    - Implement GeoJSON/multi-layer rendering for traces, tied to global animation clock; compute per-trace analytics, heatmaps, and export hooks.
    - Unify mobility controls with main upload experience, provide zoom-to-dataset, animation toggle, and timeline-linked heatmap overlays.
+
+## Infra / Environment Updates
+
+- Backend services now run on the workstation (tmux sessions): one for the Express backend, one for the FastAPI engine that supports canopy/shadow workflows.
+- `.env` files contain the workstation IP/port for backend + engine connectivity; keep secrets local and do not commit populated env files.
+- Tree canopy dataset has been transferred to the workstation; integration is tracked under `REQ-CANOPY-01`.
+- 已通过 curl 调用验证 FastAPI 引擎可读取 `/home/jinlin/data/HKtree_reprojected4326.tif`（10.13.12.164:9000/shadow，backend_url=10.13.12.164:3500）。
 
 ## Risks / Blockers
 

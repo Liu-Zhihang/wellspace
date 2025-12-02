@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any, Dict, Optional
 
@@ -29,6 +30,7 @@ from pydantic import BaseModel, Field
 from engine_core import (
     AnalysisInput,
     calculate_shadow_coverage,
+    CANOPY_RASTER_PATH,
     gdf_to_feature_collection,
     get_pybdshadow_version,
     run_analysis,
@@ -69,6 +71,7 @@ class ShadowRequest(BaseModel):
     outputs: Optional[Dict[str, bool]] = None
     geometry: Optional[Dict[str, Any]] = None
     samples: Optional[Dict[str, int]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 def _run_single(payload: ShadowRequest) -> Dict[str, Any]:
@@ -79,6 +82,7 @@ def _run_single(payload: ShadowRequest) -> Dict[str, Any]:
         timezone=payload.timezone or DEFAULT_TZ,
         max_features=payload.maxFeatures or DEFAULT_MAX_FEATURES,
         geometry=payload.geometry,
+        canopy_raster_path=payload.metadata.get("canopyRasterPath") if payload.metadata else None,
     )
 
     result = run_analysis(params)
@@ -126,12 +130,18 @@ pool = ProcessPoolExecutor(max_workers=POOL_SIZE)
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    canopy_path = os.getenv("CANOPY_RASTER_PATH", CANOPY_RASTER_PATH)
+    canopy_exists = Path(canopy_path).exists() if canopy_path else False
     return {
         "status": "ok",
         "engineVersion": get_pybdshadow_version(),
         "backend": DEFAULT_BACKEND,
         "timezone": DEFAULT_TZ,
         "workers": POOL_SIZE,
+        "canopy": {
+          "path": canopy_path,
+          "exists": canopy_exists,
+        },
     }
 
 

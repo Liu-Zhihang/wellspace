@@ -79,6 +79,8 @@ export const AnalysisPanel = () => {
     shadowServiceStatus,
     shadowServiceResult,
     shadowServiceError,
+    includeCanopy,
+    setIncludeCanopy,
   } = useShadowMapStore();
 
   const currentGeometry = selectedGeometryId
@@ -88,10 +90,39 @@ export const AnalysisPanel = () => {
     ? geometryAnalyses[selectedGeometryId]
     : undefined;
 
+  const canopyPathLabel =
+    (import.meta.env.VITE_CANOPY_RASTER_PATH as string | undefined) ?? 'engine default';
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-4 max-h-screen overflow-y-auto">
       <h3 className="text-lg font-medium text-gray-800">Analysis Results</h3>
+
+      <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2">
+        <div className="flex items-center gap-2 text-sm text-gray-700">
+          <span className="font-medium text-gray-800">Canopy mode</span>
+          <div className="inline-flex rounded-full bg-white shadow-sm border border-slate-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setIncludeCanopy(true)}
+              className={`px-3 py-1 text-xs font-semibold transition ${
+                includeCanopy ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-slate-100'
+              }`}
+            >
+              含树冠
+            </button>
+            <button
+              type="button"
+              onClick={() => setIncludeCanopy(false)}
+              className={`px-3 py-1 text-xs font-semibold transition ${
+                !includeCanopy ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-slate-100'
+              }`}
+            >
+              仅建筑
+            </button>
+          </div>
+        </div>
+        <span className="text-xs text-gray-500">Path: {canopyPathLabel}</span>
+      </div>
 
       <ShadowEngineStatusCard
         status={shadowServiceStatus}

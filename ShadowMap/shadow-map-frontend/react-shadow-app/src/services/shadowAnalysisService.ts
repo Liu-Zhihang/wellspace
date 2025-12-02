@@ -7,6 +7,9 @@ export type ShadowAnalysisRequestOptions = {
   timestamp: Date;
   geometry?: Feature<Geometry> | FeatureCollection<Geometry>;
   timeGranularityMinutes?: number;
+  includeCanopy?: boolean;
+  canopyRasterPath?: string;
+  metadata?: Record<string, unknown>;
   outputs?: {
     shadowPolygons?: boolean;
     sunlightGrid?: boolean;
@@ -17,6 +20,7 @@ export type ShadowAnalysisRequestOptions = {
 };
 
 const SHADOW_ENDPOINT = `${API_BASE_URL}/analysis/shadow`;
+const DEFAULT_CANOPY_RASTER_PATH = (import.meta.env.VITE_CANOPY_RASTER_PATH as string | undefined) ?? undefined;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -51,6 +55,13 @@ export class ShadowAnalysisClient {
     const signal = options.signal ?? controller?.signal;
 
     const granularity = clamp(options.timeGranularityMinutes ?? 15, 1, 1440);
+    const includeCanopy = options.includeCanopy ?? true;
+    const canopyPath = options.canopyRasterPath ?? DEFAULT_CANOPY_RASTER_PATH;
+    const metadata: Record<string, unknown> = { ...(options.metadata ?? {}) };
+    if (includeCanopy && canopyPath) {
+      metadata.canopyRasterPath = canopyPath;
+    }
+
     const payload = {
       bbox: {
         west: options.bbox[0],
@@ -62,6 +73,7 @@ export class ShadowAnalysisClient {
       timeGranularityMinutes: granularity,
       geometry: options.geometry,
       outputs: normalizeOutputs(options.outputs),
+      metadata: Object.keys(metadata).length ? metadata : undefined,
       forceRefresh: options.forceRefresh ?? false,
     };
 
@@ -107,7 +119,15 @@ export class ShadowAnalysisClient {
       .map(([key]) => key)
       .sort()
       .join('+');
-    return `${bboxKey}|${timestampKey}|${geometrySignature}|${outputsKey}`;
+    const includeCanopy = options.includeCanopy ?? true;
+    const canopyKey = includeCanopy
+      ? options.canopyRasterPath ?? DEFAULT_CANOPY_RASTER_PATH ?? 'canopy-default'
+      : 'no-canopy';
+    const metadataKey =
+      options.metadata && Object.keys(options.metadata).length > 0
+        ? this.hashString(JSON.stringify(options.metadata))
+        : 'nometa';
+    return `${bboxKey}|${timestampKey}|${geometrySignature}|${outputsKey}|${canopyKey}|${metadataKey}`;
   }
 
   private hashGeometry(geometry?: Feature<Geometry> | FeatureCollection<Geometry>) {
@@ -124,6 +144,15 @@ export class ShadowAnalysisClient {
     } catch {
       return 'geom';
     }
+  }
+
+  private hashString(value: string) {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+      hash = (hash << 5) - hash + value.charCodeAt(i);
+      hash |= 0;
+    }
+    return `m${Math.abs(hash)}`;
   }
 }
 

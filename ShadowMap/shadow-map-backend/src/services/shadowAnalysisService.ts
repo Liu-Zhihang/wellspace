@@ -209,6 +209,20 @@ class ShadowAnalysisService {
     };
   }
 
+  private buildEngineMetadata(normalized: NormalizedShadowRequest) {
+    const metadata: Record<string, unknown> = {};
+
+    if (normalized.metadata && typeof normalized.metadata === 'object') {
+      Object.assign(metadata, normalized.metadata);
+    }
+
+    if (config.analysis.canopyRasterPath && !metadata['canopyRasterPath']) {
+      metadata['canopyRasterPath'] = config.analysis.canopyRasterPath;
+    }
+
+    return metadata;
+  }
+
   private buildCacheMetadata(normalized: NormalizedShadowRequest) {
     const dimensions = [
       `bbox:${normalized.bbox.west.toFixed(6)},${normalized.bbox.south.toFixed(6)},${normalized.bbox.east.toFixed(6)},${normalized.bbox.north.toFixed(6)}`,
@@ -315,6 +329,7 @@ class ShadowAnalysisService {
     }
 
     const url = `${config.analysis.engineBaseUrl.replace(/\/$/, '')}/shadow`;
+    const metadata = this.buildEngineMetadata(normalized);
     const response = await axios.post(
       url,
       {
@@ -323,6 +338,7 @@ class ShadowAnalysisService {
         granularityMinutes: normalized.timeGranularityMinutes,
         outputs: normalized.outputs,
         geometry: normalized.geometry,
+        metadata: Object.keys(metadata).length ? metadata : undefined,
       },
       { timeout: config.analysis.requestTimeoutMs },
     );
@@ -360,6 +376,10 @@ class ShadowAnalysisService {
       maxFeatures: config.analysis.maxFeatures,
       geometry: normalized.geometry ?? undefined,
       samples: { grid: 8 },
+      metadata: (() => {
+        const metadata = this.buildEngineMetadata(normalized);
+        return Object.keys(metadata).length ? metadata : undefined;
+      })(),
     };
 
     const scriptPath = path.isAbsolute(config.analysis.localScriptPath)

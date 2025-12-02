@@ -74,6 +74,8 @@ interface ShadowMapState {
   setShadowServiceStatus: (status: ShadowServiceStatus) => void;
   setShadowServiceResult: (result: ShadowServiceResponse | null) => void;
   setShadowServiceError: (error: string | null) => void;
+  includeCanopy: boolean;
+  setIncludeCanopy: (enabled: boolean) => void;
   
   // Analysis radius
   analysisRadius: number;
@@ -307,9 +309,11 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   shadowServiceStatus: 'idle',
   shadowServiceResult: null,
   shadowServiceError: null,
+  includeCanopy: true,
   setShadowServiceStatus: (status) => set({ shadowServiceStatus: status }),
   setShadowServiceResult: (result) => set({ shadowServiceResult: result }),
   setShadowServiceError: (error) => set({ shadowServiceError: error ?? null }),
+  setIncludeCanopy: (enabled: boolean) => set({ includeCanopy: enabled }),
   
   analysisRadius: 500,
   setAnalysisRadius: (radius: number) => set({ analysisRadius: radius }),

@@ -24,6 +24,7 @@ interface Config {
     timezone: string;
     backendBaseUrl: string;
     maxFeatures: number;
+    canopyRasterPath: string | null;
   };
   cors: {
     origins: string[];
@@ -52,6 +53,7 @@ const config: Config = {
     timezone: process.env['SHADOW_ENGINE_TIMEZONE'] || 'Asia/Hong_Kong',
     backendBaseUrl: process.env['SHADOW_ENGINE_BACKEND_URL'] || 'http://localhost:3500',
     maxFeatures: Number.parseInt(process.env['SHADOW_ENGINE_MAX_FEATURES'] || '8000', 10),
+    canopyRasterPath: process.env['SHADOW_ENGINE_CANOPY_RASTER_PATH'] || null,
   },
   cors: {
     origins: process.env['CORS_ORIGINS']

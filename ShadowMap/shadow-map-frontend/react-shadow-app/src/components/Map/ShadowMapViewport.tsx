@@ -280,6 +280,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     setShadowServiceStatus,
     setShadowServiceResult,
     setShadowServiceError,
+    includeCanopy,
     mapCenter,
     mapZoom,
     setMapView,
@@ -630,6 +631,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         timestamp: currentDate,
         geometry: geometryEntry.feature as Feature<Polygon | MultiPolygon>,
         outputs: { shadowPolygons: true, sunlightGrid: true, heatmap: true },
+        includeCanopy,
         signal: controller.signal,
       })
       .then((response) => {
@@ -736,6 +738,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     bringLayerToFront,
     mapSettings.showSunExposure,
     shadowSettingsState.showSunExposure,
+    includeCanopy,
   ]);
 
   // Load the shadow simulator script on demand
