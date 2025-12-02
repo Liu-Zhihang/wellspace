@@ -82,6 +82,7 @@ ShadowMap/leaflet-shadow-simulator-main/
 ShadowMap/mapbox-gl-shadow-simulator/
 
 # Local data / large assets (keep out of git history)
+dataset/
 ShadowMap/data/
 ShadowMap/storage/
 ShadowMap/shadow-map-backend/data/
