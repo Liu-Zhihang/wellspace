@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from engine_core import (
     AnalysisInput,
     calculate_shadow_coverage,
+    compute_sunlight_profile,
     CANOPY_RASTER_PATH,
     gdf_to_feature_collection,
     get_pybdshadow_version,
