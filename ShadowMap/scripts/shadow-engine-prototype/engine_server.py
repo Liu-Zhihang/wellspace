@@ -76,6 +76,15 @@ class ShadowRequest(BaseModel):
 
 
 def _run_single(payload: ShadowRequest) -> Dict[str, Any]:
+    try:
+        return _run_single_inner(payload)
+    except Exception as exc:  # pragma: no cover - debug logging
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+def _run_single_inner(payload: ShadowRequest) -> Dict[str, Any]:
     include_canopy = True
     if payload.includeCanopy is not None:
         include_canopy = payload.includeCanopy

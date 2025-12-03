@@ -228,6 +228,30 @@ def compute_sunlight_profile(
             },
         }
 
+    if buildings.empty:
+        # If no buildings, all points are in full sun for all steps
+        total_minutes = time_steps * step_minutes
+        features = []
+        for (lon, lat) in points:
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "properties": {
+                        "hoursOfSun": total_minutes / 60.0,
+                        "shadowPercent": 0.0,
+                        "weight": 1.0,
+                    },
+                }
+            )
+        return {
+            "features": features,
+            "metrics": {
+                "sampleCount": len(points),
+                "avgSunlightHours": total_minutes / 60.0,
+            },
+        }
+
     time_steps = max(1, min(time_steps, 48))
     step_minutes = max(5, min(step_minutes, 180))
 
