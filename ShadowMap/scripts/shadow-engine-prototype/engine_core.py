@@ -264,6 +264,9 @@ def run_analysis(params: AnalysisInput) -> Dict[str, Any]:
     buildings_gdf = features_to_gdf(raw.get("features", []))
     if params.geometry:
         buildings_gdf = filter_buildings(buildings_gdf, params.geometry)
+    debug_canopy = os.getenv("DEBUG_CANOPY_LOG", "").lower() in ("1", "true", "yes")
+    if debug_canopy:
+        print(f"[canopy-debug] buildings before canopy: {len(buildings_gdf)}")
 
     canopy_ds = None
     try:
@@ -272,15 +275,20 @@ def run_analysis(params: AnalysisInput) -> Dict[str, Any]:
         else:
             canopy_ds = load_canopy_raster()
     except Exception as exc:  # pragma: no cover
-        print(f\"[canopy] Failed to open raster: {exc}\")
+        print(f"[canopy] Failed to open raster: {exc}")
         canopy_ds = None
 
-    canopy_gdf = canopy_to_gdf(canopy_ds, params.bbox) if canopy_ds else gpd.GeoDataFrame(geometry=[], crs=\"EPSG:4326\")
+    canopy_gdf = canopy_to_gdf(canopy_ds, params.bbox) if canopy_ds else gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
     # Merge buildings and canopy (treat canopy as additional polygons with height)
     if canopy_gdf is not None and not canopy_gdf.empty:
         canopy_gdf = canopy_gdf.rename(columns={"height": "height"})
         buildings_gdf = pd.concat([buildings_gdf, canopy_gdf], ignore_index=True)
+        if debug_canopy:
+            print(f"[canopy-debug] canopy polygons: {len(canopy_gdf)}, merged total: {len(buildings_gdf)}")
+    else:
+        if debug_canopy:
+            print("[canopy-debug] no canopy polygons merged")
 
     if buildings_gdf.empty:
         raise RuntimeError("No building features returned for the specified bounds/geometry")
