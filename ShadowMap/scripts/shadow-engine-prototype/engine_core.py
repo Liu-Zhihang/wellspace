@@ -269,7 +269,15 @@ def compute_sunlight_profile(
 
     for step in range(time_steps):
         ts = base_dt + dt.timedelta(minutes=step * step_minutes)
-        shadows_gdf = generate_shadows(preprocessed, ts.isoformat(), timezone)
+        try:
+            shadows_gdf = generate_shadows(preprocessed, ts.isoformat(), timezone)
+        except Exception as exc:
+            # If sun below horizon or pybdshadow fails, treat as no shadow (full sun) for this step
+            if debug_canopy := os.getenv("DEBUG_CANOPY_LOG", "").lower() in ("1", "true", "yes"):
+                print(f"[sun-profile] skip step {step} ({ts.isoformat()}): {exc}")
+            for idx in range(len(points)):
+                sun_minutes[idx] += step_minutes
+            continue
         union = unary_union(shadows_gdf.geometry) if not shadows_gdf.empty else None
         for idx, (lon, lat) in enumerate(points):
             if union is None or union.is_empty:
