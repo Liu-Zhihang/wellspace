@@ -70,7 +70,7 @@ class ShadowRequest(BaseModel):
     maxFeatures: Optional[int] = None
     outputs: Optional[Dict[str, bool]] = None
     geometry: Optional[Dict[str, Any]] = None
-    samples: Optional[Dict[str, int]] = None
+    samples: Optional[Dict[str, int]] = None  # {grid?, timeSteps?, stepMinutes?}
     metadata: Optional[Dict[str, Any]] = None
     includeCanopy: Optional[bool] = Field(default=None, alias="include_canopy")
 
@@ -110,12 +110,23 @@ def _run_single(payload: ShadowRequest) -> Dict[str, Any]:
 
     grid = payload.samples.get("grid") if payload.samples else None
     grid = grid or DEFAULT_GRID
+    time_steps = payload.samples.get("timeSteps") if payload.samples else None
+    time_steps = time_steps or 12
+    step_minutes = payload.samples.get("stepMinutes") if payload.samples else None
+    step_minutes = step_minutes or 60
 
     coverage_stats = calculate_shadow_coverage(params.bbox, shadows_gdf)
-    samples = analyse_samples(shadows_gdf, params.bbox, grid)
-    samples["metrics"]["avgShadowPercent"] = coverage_stats["coverage_percent"]
-    sunlight_fc = {"type": "FeatureCollection", "features": samples["features"]}
-    heatmap_fc = make_heatmap(samples["features"])
+    sunlight_profile = compute_sunlight_profile(
+        buildings_gdf,
+        params.bbox,
+        params.timestamp,
+        params.timezone,
+        grid=grid,
+        time_steps=time_steps,
+        step_minutes=step_minutes,
+    )
+    sunlight_fc = {"type": "FeatureCollection", "features": sunlight_profile["features"]}
+    heatmap_fc = make_heatmap(sunlight_profile["features"])
 
     return {
         "requestId": f"pybdshadow-{uuid.uuid4().hex[:10]}",
@@ -126,9 +137,9 @@ def _run_single(payload: ShadowRequest) -> Dict[str, Any]:
             "buildings": gdf_to_feature_collection(buildings_gdf),
         },
         "metrics": {
-            "sampleCount": samples["metrics"]["sampleCount"],
+            "sampleCount": sunlight_profile["metrics"]["sampleCount"],
             "avgShadowPercent": coverage_stats["coverage_percent"],
-            "avgSunlightHours": samples["metrics"]["avgSunlightHours"],
+            "avgSunlightHours": sunlight_profile["metrics"]["avgSunlightHours"],
             "engineLatencyMs": 0,
             "engineVersion": get_pybdshadow_version(),
             "shadowAreaSqm": coverage_stats["shadow_area_sqm"],

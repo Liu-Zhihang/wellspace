@@ -73,6 +73,7 @@
 - `.env` files contain the workstation IP/port for backend + engine connectivity; keep secrets local and do not commit populated env files.
 - Tree canopy dataset has been transferred to the workstation; integration is tracked under `REQ-CANOPY-01`.
 - 已通过 curl 调用验证 FastAPI 引擎可读取 `/home/jinlin/data/HKtree_reprojected4326.tif`（10.13.12.164:9000/shadow，backend_url=10.13.12.164:3500）。
+- FastAPI 引擎添加了 `include_canopy` 开关（缺省不加载树冠），携带 metadata `{"canopyRasterPath": "...", "includeCanopy": true}` 可启用树冠；`DEBUG_CANOPY_LOG=1` 时日志会输出建筑/树冠合并数量。实测同一 bbox（114.159,22.277,114.175,22.288）在含树冠与仅建筑下 `avgShadowPercent` 有差异（48.75% vs 46.38%），确认树冠已参与计算。
 
 ## Risks / Blockers
 

@@ -15,7 +15,7 @@ import numpy as np
 import rasterio
 from rasterio.features import shapes as rio_shapes
 import requests
-from shapely.geometry import shape, box, mapping
+from shapely.geometry import shape, box, mapping, Point
 from shapely.ops import unary_union
 
 _PYBDSHADOW_API: str | None = None
@@ -188,6 +188,98 @@ def gdf_to_feature_collection(gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
         return {"type": "FeatureCollection", "features": []}
     raw = json.loads(gdf.to_json())
     return raw
+
+
+def sample_grid(bounds: Dict[str, float], grid: int) -> List[Tuple[float, float]]:
+    grid = max(3, min(grid, 50))
+    lon_span = bounds["east"] - bounds["west"]
+    lat_span = bounds["north"] - bounds["south"]
+    if lon_span <= 0 or lat_span <= 0:
+        return []
+
+    step_lon = lon_span / (grid + 1)
+    step_lat = lat_span / (grid + 1)
+
+    points: List[Tuple[float, float]] = []
+    for i in range(1, grid + 1):
+        for j in range(1, grid + 1):
+            lon = bounds["west"] + step_lon * i
+            lat = bounds["south"] + step_lat * j
+            points.append((lon, lat))
+    return points
+
+
+def compute_sunlight_profile(
+    buildings: gpd.GeoDataFrame,
+    bounds: Dict[str, float],
+    base_timestamp: str,
+    timezone: str,
+    grid: int = 8,
+    time_steps: int = 12,
+    step_minutes: int = 60,
+) -> Dict[str, Any]:
+    points = sample_grid(bounds, grid)
+    if not points:
+        return {
+            "features": [],
+            "metrics": {
+                "sampleCount": 0,
+                "avgSunlightHours": 0.0,
+            },
+        }
+
+    time_steps = max(1, min(time_steps, 48))
+    step_minutes = max(5, min(step_minutes, 180))
+
+    base_dt = parse_timestamp(base_timestamp)
+    tzinfo = ZoneInfo(timezone)
+    if base_dt.tzinfo is None:
+        base_dt = base_dt.replace(tzinfo=tzinfo)
+    else:
+        base_dt = base_dt.astimezone(tzinfo)
+
+    total_minutes = time_steps * step_minutes
+    sun_minutes = [0 for _ in points]
+
+    preprocessed = preprocess_buildings(buildings)
+
+    for step in range(time_steps):
+        ts = base_dt + dt.timedelta(minutes=step * step_minutes)
+        shadows_gdf = generate_shadows(preprocessed, ts.isoformat(), timezone)
+        union = unary_union(shadows_gdf.geometry) if not shadows_gdf.empty else None
+        for idx, (lon, lat) in enumerate(points):
+            if union is None or union.is_empty:
+                sun_minutes[idx] += step_minutes
+            else:
+                pt = Point(lon, lat)
+                if not union.contains(pt):
+                    sun_minutes[idx] += step_minutes
+
+    features = []
+    for (lon, lat), minutes in zip(points, sun_minutes):
+        hours = minutes / 60.0
+        shadow_percent = 100.0 - max(0.0, min(100.0, (minutes / total_minutes) * 100.0))
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {
+                    "hoursOfSun": hours,
+                    "shadowPercent": shadow_percent,
+                    "weight": max(0.1, min(hours / (total_minutes / 60.0), 1.0)),
+                },
+            }
+        )
+
+    avg_sunlight_hours = sum(sun_minutes) / (len(points) * 60.0)
+
+    return {
+        "features": features,
+        "metrics": {
+            "sampleCount": len(points),
+            "avgSunlightHours": avg_sunlight_hours,
+        },
+    }
 
 
 def load_canopy_raster() -> Optional[rasterio.io.DatasetReader]:
