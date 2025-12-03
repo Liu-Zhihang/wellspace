@@ -72,9 +72,27 @@ class ShadowRequest(BaseModel):
     geometry: Optional[Dict[str, Any]] = None
     samples: Optional[Dict[str, int]] = None
     metadata: Optional[Dict[str, Any]] = None
+    includeCanopy: Optional[bool] = Field(default=None, alias="include_canopy")
 
 
 def _run_single(payload: ShadowRequest) -> Dict[str, Any]:
+    include_canopy = True
+    if payload.includeCanopy is not None:
+        include_canopy = payload.includeCanopy
+    elif payload.metadata and "includeCanopy" in payload.metadata:
+        include_canopy = bool(payload.metadata.get("includeCanopy"))
+    # Default to False when no metadata and no includeCanopy flag provided
+    # to allow explicit enabling/disable from clients.
+    else:
+        include_canopy = False
+
+    canopy_path = None
+    if payload.metadata:
+        canopy_path = payload.metadata.get("canopyRasterPath") or payload.metadata.get("canopy_raster_path")
+    if include_canopy and canopy_path is None:
+        # Fall back to env/global path if include_canopy is true but no path supplied
+        canopy_path = None
+
     params = AnalysisInput(
         bbox=payload.bbox.model_dump(),
         timestamp=payload.timestamp,
@@ -82,7 +100,8 @@ def _run_single(payload: ShadowRequest) -> Dict[str, Any]:
         timezone=payload.timezone or DEFAULT_TZ,
         max_features=payload.maxFeatures or DEFAULT_MAX_FEATURES,
         geometry=payload.geometry,
-        canopy_raster_path=payload.metadata.get("canopyRasterPath") if payload.metadata else None,
+        canopy_raster_path=canopy_path,
+        include_canopy=include_canopy,
     )
 
     result = run_analysis(params)
