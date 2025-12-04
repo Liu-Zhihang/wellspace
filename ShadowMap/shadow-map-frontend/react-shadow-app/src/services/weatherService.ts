@@ -1,6 +1,7 @@
 import type { WeatherApiResponse, WeatherMetrics, WeatherSnapshot } from '../types/index.ts';
+import { API_BASE_URL } from './apiService';
 
-const WEATHER_API_BASE = 'http://localhost:3500/api/weather';
+const WEATHER_API_BASE = `${API_BASE_URL}/weather`;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MIN_SUNLIGHT_FACTOR = 0.15;
 const MAX_ATTENUATION_FACTOR = 0.85; // how much cloud cover reduces sunlight

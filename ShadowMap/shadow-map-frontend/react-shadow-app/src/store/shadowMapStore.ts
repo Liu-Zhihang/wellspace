@@ -460,6 +460,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     try {
       let lastProgress: MobilitySunlightProgress | null = null;
       const samples = await computeMobilitySunlightForRows(rows, {
+        includeCanopy: state.includeCanopy,
         onProgress: (progress) => {
           lastProgress = progress;
           set(current => ({

@@ -308,7 +308,6 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   }, [buildingStyle.fill, buildingStyle.opacity]);
 
   // Component initialisation lifecycle
-  console.log(' ShadowMapViewport mounted')
 
   const getActiveSunlightFactor = useCallback(() => (
     shadowSettingsState.autoCloudAttenuation

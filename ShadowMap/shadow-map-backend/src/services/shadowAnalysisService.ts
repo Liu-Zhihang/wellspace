@@ -11,6 +11,36 @@ import {
   ShadowAnalysisLayer,
 } from '../types/shadowAnalysis';
 
+const debugEnabled = process.env['SHADOW_ANALYSIS_DEBUG'] === '1';
+const debugLog = (message: string, details?: unknown) => {
+  if (!debugEnabled) return;
+  if (details !== undefined) {
+    console.log(message, details);
+  } else {
+    console.log(message);
+  }
+};
+
+const summarizeMetadata = (metadata?: Record<string, unknown>) => {
+  if (!metadata) return { keys: [] as string[] };
+  return {
+    keys: Object.keys(metadata),
+    includeCanopy: metadata['includeCanopy'],
+    canopyRasterPath: metadata['canopyRasterPath'],
+  };
+};
+
+const summarizeRequest = (normalized: NormalizedShadowRequest) => ({
+  bbox: normalized.bbox,
+  timestamp: normalized.timestampDate.toISOString(),
+  bucketStart: normalized.bucketStart.toISOString(),
+  bucketEnd: normalized.bucketEnd.toISOString(),
+  granularity: normalized.timeGranularityMinutes,
+  geometryHash: normalized.geometryHash ?? 'none',
+  outputs: normalized.outputs,
+  metadata: summarizeMetadata(normalized.metadata),
+});
+
 type EnginePayload = {
   requestId: string;
   data: ShadowAnalysisResponse['data'];
@@ -40,11 +70,24 @@ class ShadowAnalysisService {
     const normalized = this.normalizeRequest(request);
     const cacheMeta = this.buildCacheMetadata(normalized);
     const now = Date.now();
+    debugLog('[ShadowAnalysisService][run]', {
+      cacheKey: cacheMeta.key,
+      dimensions: cacheMeta.dimensions,
+      request: summarizeRequest(normalized),
+      cacheTtlMs: config.analysis.cacheTtlMs,
+    });
 
     if (!request.forceRefresh) {
       const cached = this.cache.get(cacheMeta.key);
       if (cached && cached.expiresAt > now) {
         cached.lastAccessed = now;
+        debugLog('[ShadowAnalysisService][cache-hit]', {
+          cacheKey: cacheMeta.key,
+          expiresAt: new Date(cached.expiresAt).toISOString(),
+          bucketStart: cached.bucketStart,
+          bucketEnd: cached.bucketEnd,
+          dimensions: cached.dimensions,
+        });
         return this.toResponse(normalized, cached.payload, {
           cacheHit: true,
           cacheKey: cached.key,
@@ -92,6 +135,7 @@ class ShadowAnalysisService {
     dimensions: string[],
   ): Promise<EnginePayload> {
     if (this.inFlight.has(cacheKey)) {
+      debugLog('[ShadowAnalysisService][in-flight-reuse]', { cacheKey, dimensions });
       return this.inFlight.get(cacheKey)!;
     }
 
@@ -280,6 +324,18 @@ class ShadowAnalysisService {
     dimensions: string[],
   ): Promise<EnginePayload> {
     const startedAt = Date.now();
+    const engineMode = config.analysis.engineBaseUrl
+      ? 'external'
+      : config.analysis.localScriptPath
+        ? 'local-script'
+        : 'simulated';
+    debugLog('[ShadowEngine][dispatch]', {
+      mode: engineMode,
+      cacheKey,
+      dimensions,
+      request: summarizeRequest(normalized),
+    });
+
     try {
       const payload = config.analysis.engineBaseUrl
         ? await this.callExternalEngine(normalized)
@@ -320,6 +376,18 @@ class ShadowAnalysisService {
         500,
         error instanceof Error ? error.message : error,
       );
+    } finally {
+      if (debugEnabled) {
+        debugLog('[ShadowEngine][finished]', {
+          cacheKey,
+          mode: config.analysis.engineBaseUrl
+            ? 'external'
+            : config.analysis.localScriptPath
+              ? 'local-script'
+              : 'simulated',
+          durationMs: Date.now() - startedAt,
+        });
+      }
     }
   }
 
@@ -330,6 +398,14 @@ class ShadowAnalysisService {
 
     const url = `${config.analysis.engineBaseUrl.replace(/\/$/, '')}/shadow`;
     const metadata = this.buildEngineMetadata(normalized);
+    debugLog('[ShadowEngine][external][request]', {
+      url,
+      bbox: normalized.bbox,
+      granularity: normalized.timeGranularityMinutes,
+      outputs: normalized.outputs,
+      geometryHash: normalized.geometryHash ?? 'none',
+      metadata: summarizeMetadata(metadata),
+    });
     const response = await axios.post(
       url,
       {
@@ -348,7 +424,7 @@ class ShadowAnalysisService {
       throw new ShadowAnalysisError('Shadow engine returned an empty response body', 502);
     }
 
-    return {
+    const enginePayload: EnginePayload = {
       requestId: payload.requestId ?? crypto.randomUUID(),
       data: payload.data,
       metrics: {
@@ -361,6 +437,13 @@ class ShadowAnalysisService {
       warnings: payload.warnings,
       metadata: payload.metadata,
     };
+    debugLog('[ShadowEngine][external][response]', {
+      requestId: enginePayload.requestId,
+      metrics: enginePayload.metrics,
+      warnings: enginePayload.warnings?.length ?? 0,
+      metadata: summarizeMetadata(enginePayload.metadata),
+    });
+    return enginePayload;
   }
 
   private async callLocalScript(normalized: NormalizedShadowRequest): Promise<EnginePayload> {
@@ -368,6 +451,10 @@ class ShadowAnalysisService {
       throw new ShadowAnalysisError('Local shadow engine script path is not configured', 500);
     }
 
+    const metadata = (() => {
+      const meta = this.buildEngineMetadata(normalized);
+      return Object.keys(meta).length ? meta : undefined;
+    })();
     const payload = {
       bbox: normalized.bbox,
       timestamp: normalized.timestampDate.toISOString(),
@@ -376,15 +463,21 @@ class ShadowAnalysisService {
       maxFeatures: config.analysis.maxFeatures,
       geometry: normalized.geometry ?? undefined,
       samples: { grid: 8 },
-      metadata: (() => {
-        const metadata = this.buildEngineMetadata(normalized);
-        return Object.keys(metadata).length ? metadata : undefined;
-      })(),
+      metadata,
     };
 
     const scriptPath = path.isAbsolute(config.analysis.localScriptPath)
       ? config.analysis.localScriptPath
       : path.resolve(__dirname, '../../', config.analysis.localScriptPath);
+
+    debugLog('[ShadowEngine][local-script][request]', {
+      scriptPath,
+      bbox: normalized.bbox,
+      granularity: normalized.timeGranularityMinutes,
+      outputs: normalized.outputs,
+      geometryHash: normalized.geometryHash ?? 'none',
+      metadata: summarizeMetadata(metadata),
+    });
 
     const child = spawn(config.analysis.pythonPath, [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -412,6 +505,12 @@ class ShadowAnalysisService {
 
     try {
       const parsed = JSON.parse(stdout) as EnginePayload;
+      debugLog('[ShadowEngine][local-script][response]', {
+        requestId: parsed.requestId,
+        metrics: parsed.metrics,
+        warnings: parsed.warnings?.length ?? 0,
+        metadata: summarizeMetadata(parsed.metadata),
+      });
       return parsed;
     } catch (error) {
       throw new ShadowAnalysisError(
@@ -543,6 +642,13 @@ class ShadowAnalysisService {
     if (warnings.length > 0) {
       payload.warnings = warnings;
     }
+
+    debugLog('[ShadowEngine][simulated]', {
+      cacheKey,
+      dimensions,
+      digest: digest.slice(0, 8),
+      outputs: normalized.outputs,
+    });
 
     return payload;
   }

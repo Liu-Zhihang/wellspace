@@ -104,13 +104,26 @@ const pointInPolygon = (point: [number, number], geometry: PolygonGeometry): boo
 
 type SunlightOptions = {
   onProgress?: (progress: MobilitySunlightProgress) => void;
+  includeCanopy?: boolean;
+  canopyRasterPath?: string;
+  debug?: boolean;
 };
+
+const DEFAULT_CANOPY_RASTER_PATH = (import.meta.env.VITE_CANOPY_RASTER_PATH as string | undefined) ?? undefined;
+const DEBUG_ENV =
+  (import.meta.env.VITE_MOBILITY_DEBUG as string | undefined) === '1' ||
+  (import.meta.env.VITE_SHADOW_DEBUG as string | undefined) === '1';
 
 export const computeMobilitySunlightForRows = async (
   rows: MobilityCsvRecord[],
   options?: SunlightOptions,
 ): Promise<MobilitySunlightSample[]> => {
   if (!rows.length) return [];
+
+  const debug = options?.debug ?? DEBUG_ENV;
+  const logDebug = (...args: unknown[]) => {
+    if (debug) console.debug(...args);
+  };
 
   const bucketMap = new Map<string, MobilityCsvRecord[]>();
   rows.forEach((row) => {
@@ -130,9 +143,26 @@ export const computeMobilitySunlightForRows = async (
     const bucketStartDate = new Date(bucketStart);
     const bucketEndDate = new Date(bucketStartDate.getTime() + 60_000);
     const bounds = ensureNonZeroBounds(buildBounds(bucketRows));
+    const includeCanopy = options?.includeCanopy ?? true;
+    const canopyRasterPath = options?.canopyRasterPath ?? DEFAULT_CANOPY_RASTER_PATH;
+    const metadata: Record<string, unknown> = { includeCanopy };
+    if (includeCanopy && canopyRasterPath) {
+      metadata.canopyRasterPath = canopyRasterPath;
+    }
+    const nighttime = isNighttimeBucket(bounds, bucketStartDate);
+
+    logDebug('[MobilitySunlight][bucket][request]', {
+      bucketStart,
+      rows: bucketRows.length,
+      bbox: bounds,
+      includeCanopy,
+      canopyRasterPath: includeCanopy ? canopyRasterPath : null,
+      metadataKeys: Object.keys(metadata),
+    });
 
     // Pre-filter: if bucket is nighttime, skip engine and mark as no sunlight
-    if (isNighttimeBucket(bounds, bucketStartDate)) {
+    if (nighttime) {
+      logDebug('[MobilitySunlight][bucket][nighttime-precheck]', { bucketStart, bbox: bounds });
       console.warn('[Mobility Sunlight] Nighttime bucket (pre-check) for', bucketStart, '- marking as no sunlight');
       bucketRows.forEach((row) => {
         samples.push({
@@ -151,6 +181,7 @@ export const computeMobilitySunlightForRows = async (
 
     // Degenerate/zero bounds: mark as error and skip engine
     if (isDegenerateBounds(bounds)) {
+      logDebug('[MobilitySunlight][bucket][degenerate]', { bucketStart, bbox: bounds });
       console.warn('[Mobility Sunlight] Degenerate bounds for', bucketStart, bounds, '- marking as error');
       bucketRows.forEach((row) => {
         samples.push({
@@ -168,16 +199,43 @@ export const computeMobilitySunlightForRows = async (
     }
 
     try {
+      logDebug('[MobilitySunlight][bucket][engine-request]', {
+        bucketStart,
+        request: {
+          bbox: bounds,
+          timestamp: bucketStartDate.toISOString(),
+          outputs: { shadowPolygons: true, sunlightGrid: true, heatmap: false },
+          metadata,
+        },
+      });
       response = await shadowAnalysisClient.requestAnalysis({
         bbox: [bounds.west, bounds.south, bounds.east, bounds.north],
         timestamp: bucketStartDate,
         timeGranularityMinutes: 1,
         outputs: { shadowPolygons: true, sunlightGrid: true, heatmap: false },
+        metadata,
+      });
+      logDebug('[MobilitySunlight][bucket][engine-response]', {
+        bucketStart,
+        cacheHit: response.cache.hit,
+        cacheKey: response.cache.key,
+        bucketStartIso: response.bucketStart,
+        bucketEndIso: response.bucketEnd,
+        metrics: response.metrics,
+        warnings: response.warnings?.length ?? 0,
+        metadata: response.metadata,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const noBuildings = message.includes('No building features returned');
       const isNight = isNighttimeError(message);
+      logDebug('[MobilitySunlight][bucket][error]', {
+        bucketStart,
+        message,
+        noBuildings,
+        isNight,
+        metadata,
+      });
       if (!noBuildings && !isNight) {
         console.warn('[Mobility Sunlight] Engine error for', bucketStart, message);
         bucketRows.forEach((row) => {

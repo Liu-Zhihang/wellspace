@@ -10,6 +10,7 @@ import {
   BuildingOfficeIcon,
   SunIcon,
   TrashIcon,
+  MapPinIcon,
 } from '@heroicons/react/24/outline'
 import { useShadowMapStore } from '../../store/shadowMapStore'
 import type { MobilityTracePoint } from '../../store/shadowMapStore'
@@ -18,7 +19,7 @@ import type { Feature, Geometry } from 'geojson'
 import { BASE_MAPS } from '../../services/baseMapManager'
 import { parseMobilityCsv } from '../../utils/mobilityCsv'
 
-type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'analysis' | null;
+type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'analysis' | 'mobility' | null;
 
 const presetHours = [
   { hour: 6, label: 'Sunrise' },
@@ -68,6 +69,8 @@ export const LeftIconToolbar: React.FC = () => {
     mobilitySunlightError,
     computeMobilitySunlight,
     exportMobilitySunlight,
+    includeCanopy,
+    setIncludeCanopy,
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
@@ -506,6 +509,28 @@ export const LeftIconToolbar: React.FC = () => {
       );
     }
 
+    if (panelId === 'upload') {
+      return (
+        <div className="w-full space-y-4 p-4 text-slate-700">
+          <div>
+            <span className="text-sm font-semibold text-slate-900">Geo data uploads</span>
+            <p className="text-xs text-slate-400">Supported: .tif .tiff .gpx .kml .json .geojson</p>
+          </div>
+          <Button
+            type="primary"
+            icon={<ArrowUpTrayIcon className="h-4 w-4" />}
+            onClick={handleUploadClick}
+            className="h-11 w-full rounded-xl"
+          >
+            Choose files
+          </Button>
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            Drag & drop coming soon. Uploads align to current viewport.
+          </p>
+        </div>
+      );
+    }
+
     if (panelId === 'shadow') {
       return (
         <div className="w-full space-y-4 p-4 text-slate-700">
@@ -542,6 +567,156 @@ export const LeftIconToolbar: React.FC = () => {
               className="h-7 w-12 cursor-pointer rounded border border-gray-300"
             />
           </div>
+        </div>
+      );
+    }
+
+    if (panelId === 'mobility') {
+      return (
+        <div className="w-full space-y-4 p-4 text-slate-700">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-900">Mobility datasets</span>
+            <Button size="small" onClick={handleMobilityUploadClick} icon={<ArrowUpTrayIcon className="h-4 w-4" />}>
+              Upload
+            </Button>
+          </div>
+          <p className="text-xs text-slate-400">CSV schema: id,time,lng,lat[,speed_kmh]</p>
+          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <span>Canopy is included by default for mobility sunlight</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">{includeCanopy ? 'Canopy on' : 'Buildings only'}</span>
+              <Switch size="small" checked={includeCanopy} onChange={(checked) => setIncludeCanopy(checked)} />
+            </div>
+          </div>
+          {mobilityDatasets.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">
+              No mobility datasets yet. Use the Upload button to add CSV traces.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {mobilityDatasets.map((dataset) => {
+                const datasetIsActive = activeMobilityDatasetId === dataset.id;
+                const datasetIsPlaying = datasetIsActive && isMobilityPlaying;
+                const sunlightStatus = mobilitySunlightStatus[dataset.id] ?? 'idle';
+                const hasSunlight = (mobilitySunlight[dataset.id]?.length ?? 0) > 0;
+                const sunlightError = mobilitySunlightError[dataset.id];
+                const sunlightProgress = mobilitySunlightProgress[dataset.id];
+                const progressPercent = sunlightProgress && sunlightProgress.total > 0
+                  ? Math.round((sunlightProgress.completed / sunlightProgress.total) * 100)
+                  : 0;
+                return (
+                  <div
+                    key={dataset.id}
+                    className={`rounded-xl border ${
+                      datasetIsActive ? 'border-blue-400 shadow-sm' : 'border-slate-200'
+                    } bg-white p-3 transition-shadow`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{dataset.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {dataset.pointCount} points · {dataset.traceIds.length} traces
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            size="small"
+                            checked={dataset.visible}
+                            onChange={(checked) => setMobilityDatasetVisibility(dataset.id, checked)}
+                          />
+                          <Button size="small" onClick={() => zoomToMobilityDataset(dataset.id)}>
+                            Focus
+                          </Button>
+                          <button
+                            type="button"
+                            className="rounded-lg border border-slate-200 p-1 text-slate-500 hover:text-red-500"
+                            onClick={() => removeMobilityDataset(dataset.id)}
+                            aria-label={`Remove ${dataset.name}`}
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {dataset.timeRange.start.toISOString()} → {dataset.timeRange.end.toISOString()}
+                    </p>
+                    {dataset.errors.length > 0 && (
+                      <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+                        {dataset.errors.length} validation warning(s). First: {dataset.errors[0].message}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleMobilityPlaybackToggle(dataset)}
+                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
+                          datasetIsPlaying
+                            ? 'border-blue-200 bg-blue-50 text-blue-700'
+                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        {datasetIsPlaying ? (
+                          <>
+                            <PauseCircleIcon className="h-4 w-4" /> Pause
+                          </>
+                        ) : (
+                          <>
+                            <PlayCircleIcon className="h-4 w-4" /> Play
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMobilityDataset(dataset.id)}
+                        className="rounded-full border border-slate-200 px-3 py-1 text-[11px] text-slate-600 hover:border-slate-300"
+                      >
+                        Set active
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => computeMobilitySunlight(dataset.id)}
+                        className="rounded-full border border-blue-200 px-3 py-1 text-[11px] text-blue-700 hover:border-blue-300"
+                      >
+                        Compute sunlight
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportMobilitySunlight(dataset.id, 'csv')}
+                        disabled={!hasSunlight}
+                        className="rounded-full border border-slate-200 px-3 py-1 text-[11px] text-slate-600 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Export CSV
+                      </button>
+                    </div>
+
+                    {sunlightStatus !== 'idle' && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] text-slate-500">
+                          <span>Sunlight analysis</span>
+                          <span>
+                            {sunlightProgress ? `${sunlightProgress.completed}/${sunlightProgress.total}` : 'Starting...'}
+                          </span>
+                        </div>
+                        <Progress percent={progressPercent} size="small" showInfo={false} status="active" />
+                      </div>
+                    )}
+                    {sunlightError && (
+                      <p className="mt-1 rounded-lg bg-rose-50 px-3 py-2 text-[11px] text-rose-600">
+                        {sunlightError}
+                      </p>
+                    )}
+                    {sunlightStatus === 'success' && hasSunlight && (
+                      <p className="mt-1 text-[11px] text-emerald-600">
+                        Sunlight states ready ({mobilitySunlight[dataset.id].length} points, per-minute).
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
     }
@@ -741,7 +916,7 @@ export const LeftIconToolbar: React.FC = () => {
           Choose files
         </Button>
         <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          Drag & drop support and on-map placement tools are coming soon; for now layers align to the current viewport.
+          Drag & drop coming soon. Uploads align to current viewport.
         </p>
         <Divider plain className="text-[11px] text-slate-400">Mobility traces</Divider>
         <div className="flex items-center justify-between">
@@ -912,7 +1087,8 @@ export const LeftIconToolbar: React.FC = () => {
     { id: 'buildings', label: 'Building data', icon: <BuildingOfficeIcon className="h-5 w-5" /> },
     { id: 'analysis', label: 'Heatmap & analysis', icon: <SunIcon className="h-5 w-5" /> },
     { id: 'style', label: 'Map style', icon: <GlobeAltIcon className="h-5 w-5" /> },
-    { id: 'upload', label: 'Uploads & mobility', icon: <ArrowUpTrayIcon className="h-5 w-5" /> },
+    { id: 'upload', label: 'Geo uploads', icon: <ArrowUpTrayIcon className="h-5 w-5" /> },
+    { id: 'mobility', label: 'Mobility', icon: <MapPinIcon className="h-5 w-5" /> },
   ];
 
   const baseButtonClasses =

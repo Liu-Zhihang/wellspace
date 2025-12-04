@@ -1,4 +1,5 @@
 import { buildingCache } from '../cache/buildingCache';
+import { API_BASE_URL } from './apiService';
 import type {
   BoundingBox,
   BuildingFeatureCollection,
@@ -6,7 +7,7 @@ import type {
   BuildingServiceResponse,
 } from '../types/index.ts';
 
-const API_BASE = 'http://localhost:3500/api';
+const API_BASE = API_BASE_URL;
 
 type RawBuildingServiceResponse = BuildingServiceResponse & {
   data: BuildingFeatureCollection & {

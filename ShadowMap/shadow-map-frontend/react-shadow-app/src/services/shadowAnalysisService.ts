@@ -2,6 +2,13 @@ import type { Feature, FeatureCollection, Geometry } from 'geojson';
 import { API_BASE_URL } from './apiService';
 import type { ShadowServiceResponse } from '../types/index.ts';
 
+const SHADOW_DEBUG_ENABLED = (import.meta.env.VITE_SHADOW_DEBUG as string | undefined) === '1';
+const debugLog = (...args: unknown[]) => {
+  if (SHADOW_DEBUG_ENABLED) {
+    console.debug(...args);
+  }
+};
+
 export type ShadowAnalysisRequestOptions = {
   bbox: [number, number, number, number];
   timestamp: Date;
@@ -51,6 +58,7 @@ export class ShadowAnalysisClient {
   }
 
   private async execute(options: ShadowAnalysisRequestOptions): Promise<ShadowServiceResponse> {
+    const requestKey = this.buildRequestKey(options);
     const controller = options.signal ? undefined : new AbortController();
     const signal = options.signal ?? controller?.signal;
 
@@ -77,6 +85,18 @@ export class ShadowAnalysisClient {
       forceRefresh: options.forceRefresh ?? false,
     };
 
+    debugLog('[ShadowClient][request]', {
+      requestKey,
+      bbox: payload.bbox,
+      timestamp: payload.timestamp,
+      granularity,
+      outputs: payload.outputs,
+      geometry: options.geometry ? 'provided' : 'none',
+      includeCanopy,
+      canopyRasterPath: includeCanopy ? canopyPath : null,
+      metadataKeys: payload.metadata ? Object.keys(payload.metadata) : [],
+    });
+
     try {
       const response = await fetch(SHADOW_ENDPOINT, {
         method: 'POST',
@@ -96,8 +116,22 @@ export class ShadowAnalysisClient {
       if (!data || !data.cache || !data.metrics) {
         throw new Error('Shadow analysis response missing required fields.');
       }
+      debugLog('[ShadowClient][response]', {
+        requestKey,
+        cacheHit: data.cache.hit,
+        cacheKey: data.cache.key,
+        bucketStart: data.bucketStart,
+        bucketEnd: data.bucketEnd,
+        metrics: data.metrics,
+        warnings: data.warnings?.length ?? 0,
+        metadata: data.metadata,
+      });
       return data;
     } catch (error) {
+      debugLog('[ShadowClient][error]', {
+        requestKey,
+        message: error instanceof Error ? error.message : String(error),
+      });
       if ((error as Error).name === 'AbortError') {
         throw error;
       }

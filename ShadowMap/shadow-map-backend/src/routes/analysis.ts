@@ -4,6 +4,39 @@ import type { ShadowAnalysisRequestBody, BoundingBox } from '../types/shadowAnal
 import { ShadowAnalysisError } from '../types/shadowAnalysis';
 
 const router: Router = Router();
+const debugEnabled = process.env['SHADOW_ANALYSIS_DEBUG'] === '1';
+const debugLog = (...args: unknown[]) => {
+  if (debugEnabled) {
+    console.log(...args);
+  }
+};
+
+const summarizeGeometry = (geometry: unknown): string => {
+  if (!geometry || typeof geometry !== 'object') return 'none';
+  const geo = geometry as Record<string, unknown>;
+  const type = typeof geo['type'] === 'string' ? String(geo['type']) : 'unknown';
+  if (type === 'FeatureCollection') {
+    const features = Array.isArray((geo as any).features) ? (geo as any).features.length : 0;
+    return `FeatureCollection(${features})`;
+  }
+  if (type === 'Feature') {
+    const geomType =
+      geo['geometry'] && typeof geo['geometry'] === 'object' && (geo['geometry'] as any).type
+        ? String((geo['geometry'] as any).type)
+        : 'unknown';
+    return `Feature(${geomType})`;
+  }
+  return type;
+};
+
+const summarizeMetadata = (metadata?: Record<string, unknown>) => {
+  if (!metadata) return { keys: [] as string[] };
+  return {
+    keys: Object.keys(metadata),
+    includeCanopy: metadata['includeCanopy'],
+    canopyRasterPath: metadata['canopyRasterPath'],
+  };
+};
 
 const normalizeBoolean = (value: unknown): boolean | undefined => {
   if (typeof value === 'boolean') {
@@ -82,6 +115,7 @@ const normalizeBody = (raw: unknown) => {
 };
 
 router.post('/shadow', async (req, res, next) => {
+  const debugTag = `shadow:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   try {
     const body = normalizeBody(req.body ?? {});
     const bbox = normalizeBoundingBox(body.bbox ?? body.bounds ?? body.boundingBox);
@@ -127,9 +161,41 @@ router.post('/shadow', async (req, res, next) => {
       payload.metadata = body.metadata;
     }
 
+    debugLog('[ShadowAnalysis][request]', debugTag, {
+      bbox,
+      timestamp: payload.timestamp,
+      granularity: payload.timeGranularityMinutes ?? 'default',
+      outputs: payload.outputs,
+      forceRefresh: payload.forceRefresh ?? false,
+      geometry: summarizeGeometry(payload.geometry),
+      metadata: summarizeMetadata(payload.metadata),
+    });
+
     const response = await shadowAnalysisService.run(payload);
+
+    debugLog('[ShadowAnalysis][response]', debugTag, {
+      requestId: response.requestId,
+      status: response.cache.hit ? 'cache' : 'engine',
+      cacheKey: response.cache.key,
+      bucket: {
+        start: response.bucketStart,
+        end: response.bucketEnd,
+        sizeMinutes: response.timeGranularityMinutes,
+      },
+      metrics: {
+        avgShadowPercent: response.metrics.avgShadowPercent,
+        avgSunlightHours: response.metrics.avgSunlightHours,
+        sampleCount: response.metrics.sampleCount,
+        engineLatencyMs: response.metrics.engineLatencyMs,
+        engineVersion: response.metrics.engineVersion,
+      },
+      warnings: response.warnings?.length ?? 0,
+      metadata: summarizeMetadata(response.metadata),
+    });
+
     res.status(response.cache.hit ? 200 : 201).json(response);
   } catch (error) {
+    debugLog('[ShadowAnalysis][error]', debugTag, error);
     if (error instanceof ShadowAnalysisError) {
       res.status(error.statusCode).json({
         error: 'ShadowAnalysisError',

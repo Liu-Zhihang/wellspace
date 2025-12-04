@@ -1,0 +1,345 @@
+#!/usr/bin/env node
+
+/**
+ * 批量调用 /api/analysis/shadow 计算 GLAN 轨迹的日照/阴影，并输出带字段的 CSV。
+ *
+ * 默认假设目录结构：
+ *   输入：../GLAN （与 ShadowMap 同级）
+ *   输出：../GLAN_processed
+ * 可通过 CLI 参数覆盖。
+ *
+ * 参数：
+ *   --input       输入根目录（递归处理 .csv）           默认 ../GLAN
+ *   --output      输出根目录（镜像子路径，文件加 -sunlight.csv） 默认 ../GLAN_processed
+ *   --backend     后端 shadow API 地址                   默认 http://localhost:3001/api/analysis/shadow
+ *   --canopy      canopy 栅格路径                       默认 /home/jinlin/data/HKtree_reprojected4326.tif
+ *   --concurrency 并发桶数                             默认 4
+ */
+
+import fs from 'fs/promises';
+import path from 'path';
+
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
+const parseArgs = () => {
+  const args = process.argv.slice(2);
+  const result = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.startsWith('--')) continue;
+    const key = arg.slice(2);
+    const next = args[i + 1];
+    if (next && !next.startsWith('--')) {
+      result[key] = next;
+      i++;
+    } else {
+      result[key] = true;
+    }
+  }
+  return result;
+};
+
+const args = parseArgs();
+const defaultInput = path.resolve(__dirname, '..', '..', 'GLAN');
+const defaultOutput = path.resolve(__dirname, '..', '..', 'GLAN_processed');
+
+const config = {
+  inputRoot: path.resolve(args['input'] ?? defaultInput),
+  outputRoot: path.resolve(args['output'] ?? defaultOutput),
+  backendUrl: (args['backend'] ?? 'http://localhost:3001/api/analysis/shadow').replace(/\/$/, ''),
+  canopyRasterPath: args['canopy'] ?? '/home/jinlin/data/HKtree_reprojected4326.tif',
+  concurrency: Number.parseInt(args['concurrency'] ?? '4', 10),
+};
+
+const headersToAppend = ['sunlit', 'shadowPercent', 'bucketStart', 'bucketEnd', 'source'];
+
+const ensureDir = async (dir) => fs.mkdir(dir, { recursive: true });
+
+const listCsvFiles = async (dir) => {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await listCsvFiles(full);
+      files.push(...nested);
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.csv')) {
+      files.push(full);
+    }
+  }
+  return files;
+};
+
+const parseCsv = (content) => {
+  const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const headers = lines[0].split(',');
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',');
+    const row = {};
+    headers.forEach((h, idx) => {
+      row[h] = cols[idx] ?? '';
+    });
+    rows.push(row);
+  }
+  return { headers, rows };
+};
+
+const floorToMinuteIso = (epochSeconds) => {
+  const date = new Date(Math.floor(Number(epochSeconds) * 1000));
+  if (Number.isNaN(date.getTime())) return null;
+  date.setSeconds(0, 0);
+  return date.toISOString();
+};
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const pointInRing = (point, ring) => {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0];
+    const yi = ring[i][1];
+    const xj = ring[j][0];
+    const yj = ring[j][1];
+    const intersect =
+      yi > point[1] !== yj > point[1] &&
+      point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi + Number.EPSILON) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+const pointInPolygon = (point, geometry) => {
+  if (!geometry) return false;
+  if (geometry.type === 'Polygon') {
+    const [outerRing, ...holes] = geometry.coordinates || [];
+    if (!outerRing) return false;
+    if (!pointInRing(point, outerRing)) return false;
+    return !holes.some((hole) => pointInRing(point, hole));
+  }
+  if (geometry.type === 'MultiPolygon') {
+    return (geometry.coordinates || []).some((polygon) => {
+      const [outerRing, ...holes] = polygon;
+      if (!outerRing) return false;
+      if (!pointInRing(point, outerRing)) return false;
+      return !holes.some((hole) => pointInRing(point, hole));
+    });
+  }
+  return false;
+};
+
+const flattenPolygons = (layer) => {
+  if (!layer || layer.type !== 'FeatureCollection' || !Array.isArray(layer.features)) return [];
+  return layer.features
+    .map((feature) => feature?.geometry)
+    .filter((geom) => geom && (geom.type === 'Polygon' || geom.type === 'MultiPolygon'));
+};
+
+const buildBuckets = (rows) => {
+  const buckets = new Map();
+  rows.forEach((row, index) => {
+    const ts = row['timestamp'];
+    const lon = row['fnl_lon'] || row['gps_lon'] || row['gpx_lon'] || row['air_lon'];
+    const lat = row['fnl_lat'] || row['gps_lat'] || row['gpx_lat'] || row['air_lat'];
+    if (!lon || !lat) {
+      row.__error = 'missing_coords';
+      return;
+    }
+    const lonNum = Number(lon);
+    const latNum = Number(lat);
+    if (!Number.isFinite(lonNum) || !Number.isFinite(latNum)) {
+      row.__error = 'invalid_coords';
+      return;
+    }
+    const bucketStart = floorToMinuteIso(ts);
+    if (!bucketStart) {
+      row.__error = 'invalid_timestamp';
+      return;
+    }
+    const bucket = buckets.get(bucketStart) ?? [];
+    bucket.push({ index, lon: lonNum, lat: latNum });
+    buckets.set(bucketStart, bucket);
+  });
+  return buckets;
+};
+
+const ensureNonZeroBounds = (bounds) => {
+  const epsilon = 1e-5;
+  let { west, east, south, north } = bounds;
+  if (east - west <= 0) {
+    west -= epsilon;
+    east += epsilon;
+  }
+  if (north - south <= 0) {
+    south -= epsilon;
+    north += epsilon;
+  }
+  return { west, east, south, north };
+};
+
+const buildRequestPayload = (bucketKey, bucketRows, allRows) => {
+  let north = -Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let west = Infinity;
+  bucketRows.forEach(({ lon, lat }) => {
+    north = Math.max(north, lat);
+    south = Math.min(south, lat);
+    east = Math.max(east, lon);
+    west = Math.min(west, lon);
+  });
+  const bounds = ensureNonZeroBounds({ west, east, south, north });
+  return {
+    bucketKey,
+    bbox: bounds,
+    timestamp: bucketKey,
+    rows: bucketRows,
+  };
+};
+
+const fetchShadow = async (payload) => {
+  const body = {
+    bbox: payload.bbox,
+    timestamp: payload.timestamp,
+    timeGranularityMinutes: 1,
+    outputs: { shadowPolygons: true, sunlightGrid: true, heatmap: false },
+    metadata: {
+      includeCanopy: true,
+      canopyRasterPath: config.canopyRasterPath,
+    },
+  };
+
+  const res = await fetch(config.backendUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+  }
+
+  const data = await res.json();
+  return data;
+};
+
+const processBucket = async (payload, rows, fileLabel) => {
+  try {
+    const response = await fetchShadow(payload);
+    const polygons = flattenPolygons(response?.data?.shadows);
+    const fallbackShadowPercent = clamp(response?.metrics?.avgShadowPercent ?? 0, 0, 100);
+    const bucketEnd = response?.bucketEnd ?? response?.bucketStart ?? payload.bucketKey;
+
+    payload.rows.forEach(({ index, lon, lat }) => {
+      const point = [lon, lat];
+      const inShadow = polygons.some((polygon) => pointInPolygon(point, polygon));
+      const shadowPercent = polygons.length ? (inShadow ? 100 : 0) : fallbackShadowPercent;
+      rows[index]['sunlit'] = inShadow ? 0 : 1;
+      rows[index]['shadowPercent'] = shadowPercent;
+      rows[index]['bucketStart'] = response?.bucketStart ?? payload.bucketKey;
+      rows[index]['bucketEnd'] = bucketEnd;
+      rows[index]['source'] = 'engine';
+    });
+  } catch (error) {
+    console.warn(`[Bucket error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`);
+    payload.rows.forEach(({ index }) => {
+      rows[index]['sunlit'] = 0;
+      rows[index]['shadowPercent'] = 0;
+      rows[index]['bucketStart'] = payload.bucketKey;
+      rows[index]['bucketEnd'] = payload.bucketKey;
+      rows[index]['source'] = 'fallback_error';
+    });
+  }
+};
+
+const runWithConcurrency = async (tasks, limit) => {
+  const queue = [];
+  for (const task of tasks) {
+    const p = task().finally(() => {
+      const idx = queue.indexOf(p);
+      if (idx >= 0) queue.splice(idx, 1);
+    });
+    queue.push(p);
+    if (queue.length >= limit) {
+      await Promise.race(queue);
+    }
+  }
+  await Promise.all(queue);
+};
+
+const processFile = async (filePath) => {
+  const relative = path.relative(config.inputRoot, filePath);
+  const outDir = path.join(config.outputRoot, path.dirname(relative));
+  const base = path.basename(filePath, path.extname(filePath));
+  const outFile = path.join(outDir, `${base}-sunlight.csv`);
+
+  const content = await fs.readFile(filePath, 'utf-8');
+  const { headers, rows } = parseCsv(content);
+  if (!rows.length) {
+    console.warn(`[Skip][${relative}] empty file`);
+    return;
+  }
+
+  // 初始化输出字段
+  rows.forEach((row) => {
+    headersToAppend.forEach((key) => {
+      row[key] = '';
+    });
+  });
+
+  const buckets = buildBuckets(rows);
+  const tasks = [];
+  for (const [bucketKey, bucketRows] of buckets.entries()) {
+    if (!bucketRows.length) continue;
+    const payload = buildRequestPayload(bucketKey, bucketRows, rows);
+    tasks.push(() => processBucket(payload, rows, relative));
+  }
+
+  // 对缺失数据的行填充标记
+  rows.forEach((row) => {
+    if (row['sunlit'] !== '' && row['sunlit'] !== undefined) return;
+    if (row.__error) {
+      row['sunlit'] = 0;
+      row['shadowPercent'] = 0;
+      row['bucketStart'] = '';
+      row['bucketEnd'] = '';
+      row['source'] = row.__error;
+    }
+  });
+
+  console.log(`[Process] ${relative} buckets=${tasks.length}`);
+  await runWithConcurrency(tasks, Math.max(1, config.concurrency));
+
+  await ensureDir(outDir);
+  const finalHeaders = [...headers, ...headersToAppend];
+  const lines = [finalHeaders.join(',')];
+  rows.forEach((row) => {
+    const line = finalHeaders.map((h) => row[h] ?? '').join(',');
+    lines.push(line);
+  });
+  await fs.writeFile(outFile, lines.join('\n'), 'utf-8');
+  console.log(`[Done] ${relative} -> ${path.relative(config.outputRoot, outFile)}`);
+};
+
+const main = async () => {
+  console.log('Batch mobility shadow');
+  console.log(JSON.stringify(config, null, 2));
+
+  const files = await listCsvFiles(config.inputRoot);
+  if (!files.length) {
+    console.error(`No CSV files found under ${config.inputRoot}`);
+    process.exit(1);
+  }
+
+  for (const file of files) {
+    await processFile(file);
+  }
+
+  console.log('All files completed.');
+};
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
