@@ -6,10 +6,12 @@ const ERA5_DEFAULT_PATH =
   process.env['ERA5_FILE_PATH'] || '/home/jinlin/data/era5/era5_202111_hk.nc';
 const ERA5_FILE_TEMPLATE =
   process.env['ERA5_FILE_TEMPLATE'] || '/home/jinlin/data/era5/era5_%Y%m_hk.nc'; // 支持 %Y %m
-// 脚本默认指向仓库根的 scripts/era5_extract.py
-const ERA5_SCRIPT =
-  process.env['ERA5_PYTHON_SCRIPT'] ||
-  path.resolve(__dirname, '../../scripts/era5_extract.py');
+// 优先环境变量；否则尝试 backend 根的 ../scripts/era5_extract.py；再回退 dist/scripts
+const ERA5_SCRIPT_CANDIDATES = [
+  process.env['ERA5_PYTHON_SCRIPT'],
+  path.resolve(process.cwd(), '../scripts/era5_extract.py'),
+  path.resolve(__dirname, '../../scripts/era5_extract.py'),
+].filter(Boolean) as string[];
 const PYTHON_BIN = process.env['ERA5_PYTHON_BIN'] || 'python3';
 
 export class Era5Service {
@@ -27,8 +29,9 @@ export class Era5Service {
     if (!fs.existsSync(filePath)) {
       throw new Error(`ERA5 file not found at ${filePath}`);
     }
-    if (!fs.existsSync(ERA5_SCRIPT)) {
-      throw new Error(`ERA5 extract script not found at ${ERA5_SCRIPT}`);
+    const scriptPath = this.resolveScriptPath();
+    if (!scriptPath) {
+      throw new Error(`ERA5 extract script not found in candidates: ${ERA5_SCRIPT_CANDIDATES.join(', ')}`);
     }
     const isoTime = time.toISOString();
     const payload = JSON.stringify({
@@ -38,7 +41,7 @@ export class Era5Service {
       isoTime,
     });
 
-    const child = spawn(PYTHON_BIN, [ERA5_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(PYTHON_BIN, [scriptPath], { stdio: ['pipe', 'pipe', 'pipe'] });
     const stdoutPromise = this.collect(child.stdout);
     const stderrPromise = this.collect(child.stderr);
     child.stdin.write(payload);
@@ -80,5 +83,14 @@ export class Era5Service {
       return templated;
     }
     return ERA5_DEFAULT_PATH;
+  }
+
+  private resolveScriptPath(): string | null {
+    for (const candidate of ERA5_SCRIPT_CANDIDATES) {
+      if (candidate && fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
   }
 }
