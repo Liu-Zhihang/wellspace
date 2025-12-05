@@ -2,10 +2,14 @@ import path from 'path';
 import fs from 'fs';
 import { spawn } from 'child_process';
 
-const ERA5_DEFAULT_PATH = process.env['ERA5_FILE_PATH'] || '/home/jinlin/data/era5/era5_202111_hk.nc';
+const ERA5_DEFAULT_PATH =
+  process.env['ERA5_FILE_PATH'] || '/home/jinlin/data/era5/era5_202111_hk.nc';
 const ERA5_FILE_TEMPLATE =
   process.env['ERA5_FILE_TEMPLATE'] || '/home/jinlin/data/era5/era5_%Y%m_hk.nc'; // 支持 %Y %m
-const ERA5_SCRIPT = process.env['ERA5_PYTHON_SCRIPT'] || path.join(__dirname, '../../scripts/era5_extract.py');
+// 脚本默认指向仓库根的 scripts/era5_extract.py
+const ERA5_SCRIPT =
+  process.env['ERA5_PYTHON_SCRIPT'] ||
+  path.resolve(__dirname, '../../scripts/era5_extract.py');
 const PYTHON_BIN = process.env['ERA5_PYTHON_BIN'] || 'python3';
 
 export class Era5Service {
