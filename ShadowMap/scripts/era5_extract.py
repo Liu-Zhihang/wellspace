@@ -22,35 +22,36 @@ def open_ds(file_path: str):
     raise RuntimeError(f"open_failed: {last_err}")
 
 
+def respond(obj):
+    print(json.dumps(obj))
+    sys.exit(0)
+
+
 def main():
     raw = sys.stdin.read()
     try:
         req = json.loads(raw)
     except Exception as e:
-        print(json.dumps({"error": "invalid_input", "message": str(e)}))
-        sys.exit(1)
+        respond({"error": "invalid_input", "message": str(e)})
 
     file = req.get("file")
     lat = req.get("lat")
     lon = req.get("lon")
     iso_time = req.get("isoTime")
     if not file or iso_time is None or lat is None or lon is None:
-        print(json.dumps({"error": "missing_fields"}))
-        sys.exit(1)
+        respond({"error": "missing_fields"})
 
     try:
         lat = float(lat)
         lon = float(lon)
         target = datetime.fromisoformat(str(iso_time).replace("Z", "+00:00"))
     except Exception as e:
-        print(json.dumps({"error": "invalid_params", "message": str(e)}))
-        sys.exit(1)
+        respond({"error": "invalid_params", "message": str(e)})
 
     try:
         ds, engine_used = open_ds(file)
     except Exception as e:
-        print(json.dumps({"error": "open_failed", "message": str(e)}))
-        sys.exit(1)
+        respond({"error": "open_failed", "message": str(e)})
 
     # 经度转换（如数据为 0-360）
     lon_values = ds["longitude"].values
@@ -59,8 +60,7 @@ def main():
 
     times = ds["time"].values
     if len(times) < 2:
-        print(json.dumps({"error": "insufficient_time_steps"}))
-        sys.exit(1)
+        respond({"error": "insufficient_time_steps"})
 
     # 最近时间步
     time_diffs = np.abs(np.array([(np.datetime64(target) - t).astype("timedelta64[s]").astype(int) for t in times]))
@@ -76,9 +76,12 @@ def main():
     t1 = ds.isel(time=idx1)
 
     # 插值取 tcc
-    point_tcc = float(t1["tcc"].sel(latitude=lat, longitude=lon, method="nearest").values)
-    ssrd0 = float(t0["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values)
-    ssrd1 = float(t1["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values)
+    try:
+        point_tcc = float(t1["tcc"].sel(latitude=lat, longitude=lon, method="nearest").values)
+        ssrd0 = float(t0["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values)
+        ssrd1 = float(t1["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values)
+    except Exception as e:
+        respond({"error": "variable_missing", "message": str(e)})
 
     time0 = np.datetime64(t0["time"].values).astype("datetime64[s]").astype(int)
     time1 = np.datetime64(t1["time"].values).astype("datetime64[s]").astype(int)
@@ -97,7 +100,7 @@ def main():
             "dt_seconds": dt,
         },
     }
-    print(json.dumps(out))
+    respond(out)
 
 
 if __name__ == "__main__":
