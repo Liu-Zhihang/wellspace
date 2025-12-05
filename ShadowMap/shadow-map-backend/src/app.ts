@@ -44,7 +44,11 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(morgan('combined'));
+if (process.env['MORGAN_DISABLED'] !== '1') {
+  app.use(morgan('combined'));
+} else {
+  console.log('[Logging] Morgan disabled (MORGAN_DISABLED=1)');
+}
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));

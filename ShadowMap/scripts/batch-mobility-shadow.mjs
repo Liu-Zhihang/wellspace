@@ -14,6 +14,7 @@
  *   --backend     后端 shadow API 地址                   默认 http://localhost:3001/api/analysis/shadow
  *   --canopy      canopy 栅格路径                       默认 /home/jinlin/data/HKtree_reprojected4326.tif
  *   --concurrency 并发桶数                             默认 4
+ *   --force       是否覆盖已存在的输出文件             默认 false（存在则跳过）
  */
 
 import fs from 'fs/promises';
@@ -49,6 +50,7 @@ const config = {
   weatherUrl: (args['weather'] ?? 'http://localhost:3001/api/weather/current').replace(/\/$/, ''),
   canopyRasterPath: args['canopy'] ?? '/home/jinlin/data/HKtree_reprojected4326.tif',
   concurrency: Number.parseInt(args['concurrency'] ?? '4', 10),
+  force: args['force'] === 'true' || args['force'] === true,
 };
 
 const headersToAppend = [
@@ -252,6 +254,20 @@ const fetchWeather = async (lat, lon, timestampIso) => {
   return data;
 };
 
+const weatherCache = new Map();
+const getWeatherCached = async (lat, lon, timestampIso) => {
+  const t = new Date(timestampIso);
+  const hour = new Date(t);
+  hour.setMinutes(0, 0, 0);
+  const key = `${hour.toISOString()}|${lat.toFixed(4)}|${lon.toFixed(4)}`;
+  if (weatherCache.has(key)) {
+    return weatherCache.get(key);
+  }
+  const data = await fetchWeather(lat, lon, timestampIso);
+  weatherCache.set(key, data);
+  return data;
+};
+
 const processBucket = async (payload, rows, fileLabel) => {
   let cloudCover = null;
   let sunlightFactor = null;
@@ -260,7 +276,7 @@ const processBucket = async (payload, rows, fileLabel) => {
   const centerLat = (payload.bbox.north + payload.bbox.south) / 2;
   const centerLng = (payload.bbox.east + payload.bbox.west) / 2;
   try {
-    const weather = await fetchWeather(centerLat, centerLng, payload.timestamp);
+    const weather = await getWeatherCached(centerLat, centerLng, payload.timestamp);
     cloudCover = weather?.weather?.cloud_cover ?? null;
     const cf = typeof cloudCover === 'number' ? Math.max(0, Math.min(1, cloudCover)) : null;
     sunlightFactor = cf == null ? null : Math.max(0.15, 1 - cf * 0.85);
@@ -329,16 +345,27 @@ const runWithConcurrency = async (tasks, limit) => {
   await Promise.all(queue);
 };
 
-const processFile = async (filePath) => {
+const processFile = async (filePath, idx, total) => {
   const relative = path.relative(config.inputRoot, filePath);
   const outDir = path.join(config.outputRoot, path.dirname(relative));
   const base = path.basename(filePath, path.extname(filePath));
   const outFile = path.join(outDir, `${base}-sunlight.csv`);
+  const startedAt = Date.now();
+
+  if (!config.force) {
+    try {
+      await fs.access(outFile);
+      console.log(`[Skip existing][${idx + 1}/${total}] ${relative}`);
+      return;
+    } catch {
+      // no existing file, continue
+    }
+  }
 
   const content = await fs.readFile(filePath, 'utf-8');
   const { headers, rows } = parseCsv(content);
   if (!rows.length) {
-    console.warn(`[Skip][${relative}] empty file`);
+    console.warn(`[Skip][${idx + 1}/${total}] ${relative} empty file`);
     return;
   }
 
@@ -375,7 +402,7 @@ const processFile = async (filePath) => {
     }
   });
 
-  console.log(`[Process] ${relative} buckets=${tasks.length}`);
+  console.log(`[Process][${idx + 1}/${total}] ${relative} buckets=${tasks.length}`);
   await runWithConcurrency(tasks, Math.max(1, config.concurrency));
 
   await ensureDir(outDir);
@@ -424,7 +451,11 @@ const processFile = async (filePath) => {
     lines.push(line);
   });
   await fs.writeFile(outFile, lines.join('\n'), 'utf-8');
-  console.log(`[Done] ${relative} -> ${path.relative(config.outputRoot, outFile)}`);
+  console.log(
+    `[Done][${idx + 1}/${total}] ${relative} -> ${path.relative(config.outputRoot, outFile)} (${Math.round(
+      (Date.now() - startedAt) / 1000,
+    )}s)`,
+  );
 };
 
 const main = async () => {
@@ -437,8 +468,10 @@ const main = async () => {
     process.exit(1);
   }
 
-  for (const file of files) {
-    await processFile(file);
+  const total = files.length;
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    await processFile(file, i, total);
   }
 
   console.log('All files completed.');
