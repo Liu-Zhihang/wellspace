@@ -203,6 +203,16 @@ app = FastAPI(title="PyShadow Engine", version=get_pybdshadow_version())
 pool = ProcessPoolExecutor(max_workers=POOL_SIZE)
 
 
+def _reset_pool() -> None:
+    global pool
+    try:
+        pool.shutdown(wait=False, cancel_futures=True)
+    except Exception:  # pragma: no cover - best effort
+        pass
+    pool = ProcessPoolExecutor(max_workers=POOL_SIZE)
+    logger.info("[pool] reset process pool with %s workers", POOL_SIZE)
+
+
 @app.get("/health")
 def health() -> Dict[str, Any]:
     canopy_path = os.getenv("CANOPY_RASTER_PATH", CANOPY_RASTER_PATH)
@@ -255,6 +265,7 @@ def shadow(payload: ShadowRequest) -> Dict[str, Any]:
             request_id,
             POOL_SIZE,
         )
+        _reset_pool()
         raise HTTPException(
             status_code=500,
             detail=f"Process pool broken; restart engine. cause={exc}",
