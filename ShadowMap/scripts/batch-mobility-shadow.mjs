@@ -4,7 +4,7 @@
  * 批量调用 /api/analysis/shadow 计算 GLAN 轨迹的日照/阴影，并输出带字段的 CSV。
  *
  * 默认假设目录结构：
- *   输入：../GLAN （与 ShadowMap 同级）
+ *   输入：../GLAN/PHASE1/spatial_temporal_merge （与 ShadowMap 同级，可用 --input 覆盖）
  *   输出：../GLAN_processed
  * 可通过 CLI 参数覆盖。
  *
@@ -39,7 +39,7 @@ const parseArgs = () => {
 };
 
 const args = parseArgs();
-const defaultInput = path.resolve(__dirname, '..', '..', 'GLAN', 'spatial_temporal_merge');
+const defaultInput = path.resolve(__dirname, '..', '..', 'GLAN', 'PHASE1', 'spatial_temporal_merge');
 const defaultOutput = path.resolve(__dirname, '..', '..', 'GLAN_processed');
 
 const config = {
