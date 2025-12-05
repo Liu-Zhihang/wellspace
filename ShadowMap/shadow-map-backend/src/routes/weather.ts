@@ -84,6 +84,11 @@ router.get('/current', async (req: Request, res: Response) => {
       targetTime,
     );
     const { metrics, sunlightFactor } = buildWeatherPayload(cloudCover);
+    // 将辐照度也放入 weather，便于前端直接读取
+    const weatherPayload = {
+      ...metrics,
+      solarIrradianceWm2: irradianceWm2,
+    };
 
     res.json({
       location: {
@@ -91,7 +96,7 @@ router.get('/current', async (req: Request, res: Response) => {
         longitude,
       },
       timestamp: targetTime.toISOString(),
-      weather: metrics,
+      weather: weatherPayload,
       metadata: {
         source,
         sunlightFactor,

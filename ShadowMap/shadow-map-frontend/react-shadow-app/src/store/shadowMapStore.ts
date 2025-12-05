@@ -533,21 +533,53 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       return;
     }
 
-    const header = 'traceId,time,lng,lat,sunlit,shadowPercent,bucketStart,bucketEnd,source\n';
+    const header = [
+      'traceId',
+      'time',
+      'lng',
+      'lat',
+      'sunlit',
+      'shadowPercent',
+      'bucketStart',
+      'bucketEnd',
+      'source',
+      'cloudCover',
+      'sunlightFactor',
+      'sunlitEffective',
+      'shadowPercentEffective',
+      'solarIrradianceWm2',
+      'irradianceEffective',
+      'durationSeconds',
+      'sunlightSeconds',
+      'shadowSeconds',
+      'irradianceJ',
+    ].join(',') + '\n';
+
     const rows = samples
-      .map(sample => (
-        [
-          sample.traceId,
-          sample.timestamp.toISOString(),
-          sample.coordinates[0],
-          sample.coordinates[1],
+      .map(sample => {
+        const coords = sample.coordinates ?? [null, null];
+        return [
+          sample.traceId ?? '',
+          sample.timestamp instanceof Date ? sample.timestamp.toISOString() : '',
+          coords[0],
+          coords[1],
           sample.sunlit,
           sample.shadowPercent,
           sample.bucketStart,
           sample.bucketEnd,
           sample.source,
-        ].join(',')
-      ))
+          sample.cloudCover ?? '',
+          sample.sunlightFactor ?? '',
+          sample.sunlitEffective ?? '',
+          sample.shadowPercentEffective ?? '',
+          sample.solarIrradianceWm2 ?? '',
+          sample.irradianceEffective ?? '',
+          sample.durationSeconds ?? '',
+          sample.sunlightSeconds ?? '',
+          sample.shadowSeconds ?? '',
+          sample.irradianceJ ?? '',
+        ].join(',');
+      })
       .join('\n');
 
     const blob = new Blob([header + rows], { type: 'text/csv' });
