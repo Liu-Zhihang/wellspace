@@ -59,6 +59,7 @@ const headersToAppend = [
   'bucketStart',
   'bucketEnd',
   'source',
+  'errorDetail',
   'cloudCover',
   'sunlightFactor',
   'sunlitEffective',
@@ -314,12 +315,17 @@ const processBucket = async (payload, rows, fileLabel) => {
     });
   } catch (error) {
     console.warn(`[Bucket error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`);
+    const message = error instanceof Error ? error.message : String(error);
+    const statusMatch = message.match(/HTTP\\s+(\\d{3})/i);
+    const sourceLabel = statusMatch ? `fallback_error:${statusMatch[1]}` : 'fallback_error';
+    const detail = message.slice(0, 200);
     payload.rows.forEach(({ index }) => {
       rows[index]['sunlit'] = 0;
       rows[index]['shadowPercent'] = 0;
       rows[index]['bucketStart'] = payload.bucketKey;
       rows[index]['bucketEnd'] = payload.bucketKey;
-      rows[index]['source'] = 'fallback_error';
+      rows[index]['source'] = sourceLabel;
+      rows[index]['errorDetail'] = detail;
       rows[index]['cloudCover'] = cloudCover ?? '';
       rows[index]['sunlightFactor'] = sunlightFactor ?? '';
       rows[index]['sunlitEffective'] = '';
