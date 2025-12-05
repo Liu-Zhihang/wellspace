@@ -75,14 +75,14 @@ def main():
     time_diffs = np.abs(np.array([(np.datetime64(target) - t).astype("timedelta64[s]").astype(int) for t in times]))
     idx = int(np.argmin(time_diffs))
     if idx == 0:
-        idx0, idx1 = 0, 1
+        idx0, idx1 = 0, min(1, len(times) - 1)
     elif idx == len(times) - 1:
         idx0, idx1 = len(times) - 2, len(times) - 1
     else:
         idx0, idx1 = idx - 1, idx
 
-    t0 = ds.isel(time=idx0)
-    t1 = ds.isel(time=idx1)
+    t0 = ds.isel({time_var: idx0})
+    t1 = ds.isel({time_var: idx1})
 
     # 插值取 tcc
     try:
