@@ -21,7 +21,9 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
+import logging
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -55,6 +57,22 @@ DEFAULT_MAX_FEATURES = _env_int("MAX_FEATURES", 8000)
 DEFAULT_GRID = _env_int("SAMPLE_GRID", 6)
 POOL_SIZE = _env_int("WORKERS", os.cpu_count() or 4)
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger("pyshadow.engine")
+
+
+def _summarise_geometry(geometry: Optional[Dict[str, Any]]) -> str:
+    if not geometry:
+        return "none"
+    gtype = geometry.get("type")
+    if gtype == "FeatureCollection":
+        count = len(geometry.get("features") or [])
+        return f"FeatureCollection({count})"
+    return gtype or "unknown"
+
 
 class BoundingBox(BaseModel):
     west: float
@@ -76,16 +94,17 @@ class ShadowRequest(BaseModel):
     includeCanopy: Optional[bool] = Field(default=None, alias="include_canopy")
 
 
-def _run_single(payload: ShadowRequest) -> Dict[str, Any]:
+def _run_single(payload: ShadowRequest, request_id: str) -> Dict[str, Any]:
     try:
-        return _run_single_inner(payload)
+        return _run_single_inner(payload, request_id)
     except Exception as exc:  # pragma: no cover - debug logging
         import traceback
+        logger.exception("[child %s] unhandled exception", request_id)
         traceback.print_exc()
         raise
 
 
-def _run_single_inner(payload: ShadowRequest) -> Dict[str, Any]:
+def _run_single_inner(payload: ShadowRequest, request_id: str) -> Dict[str, Any]:
     include_canopy = True
     if payload.includeCanopy is not None:
         include_canopy = payload.includeCanopy
@@ -102,6 +121,22 @@ def _run_single_inner(payload: ShadowRequest) -> Dict[str, Any]:
     if include_canopy and canopy_path is None:
         # Fall back to env/global path if include_canopy is true but no path supplied
         canopy_path = None
+
+    logger.info(
+        "[child %s] start ts=%s bbox=(%.6f,%.6f,%.6f,%.6f) includeCanopy=%s canopyPath=%s geometry=%s grid=%s timeSteps=%s stepMinutes=%s",
+        request_id,
+        payload.timestamp,
+        payload.bbox.west,
+        payload.bbox.south,
+        payload.bbox.east,
+        payload.bbox.north,
+        include_canopy,
+        canopy_path or os.getenv("CANOPY_RASTER_PATH", CANOPY_RASTER_PATH) or "<none>",
+        _summarise_geometry(payload.geometry),
+        (payload.samples or {}).get("grid", DEFAULT_GRID),
+        (payload.samples or {}).get("timeSteps", 12),
+        (payload.samples or {}).get("stepMinutes", 60),
+    )
 
     params = AnalysisInput(
         bbox=payload.bbox.model_dump(),
@@ -139,7 +174,7 @@ def _run_single_inner(payload: ShadowRequest) -> Dict[str, Any]:
     heatmap_fc = make_heatmap(sunlight_profile["features"])
 
     return {
-        "requestId": f"pybdshadow-{uuid.uuid4().hex[:10]}",
+        "requestId": f"pybdshadow-{request_id}",
         "data": {
             "shadows": gdf_to_feature_collection(shadows_gdf),
             "sunlight": sunlight_fc,
@@ -187,10 +222,45 @@ def health() -> Dict[str, Any]:
 
 @app.post("/shadow")
 def shadow(payload: ShadowRequest) -> Dict[str, Any]:
+    request_id = uuid.uuid4().hex[:10]
+    logger.info(
+        "[shadow %s] incoming ts=%s bbox=(%.6f,%.6f,%.6f,%.6f) includeCanopy=%s canopyPath=%s geometry=%s outputs=%s",
+        request_id,
+        payload.timestamp,
+        payload.bbox.west,
+        payload.bbox.south,
+        payload.bbox.east,
+        payload.bbox.north,
+        payload.includeCanopy,
+        (payload.metadata or {}).get("canopyRasterPath")
+        or (payload.metadata or {}).get("canopy_raster_path")
+        or os.getenv("CANOPY_RASTER_PATH", CANOPY_RASTER_PATH),
+        _summarise_geometry(payload.geometry),
+        payload.outputs,
+    )
     try:
-        future = pool.submit(_run_single, payload)
-        return future.result()
+        future = pool.submit(_run_single, payload, request_id)
+        resp = future.result()
+        logger.info(
+            "[shadow %s] success avgShadow=%.3f sampleCount=%s engineVersion=%s",
+            request_id,
+            resp["metrics"].get("avgShadowPercent"),
+            resp["metrics"].get("sampleCount"),
+            resp["metrics"].get("engineVersion"),
+        )
+        return resp
+    except BrokenProcessPool as exc:  # pragma: no cover - surfaced to client
+        logger.exception(
+            "[shadow %s] process pool broken; worker likely crashed (workers=%s)",
+            request_id,
+            POOL_SIZE,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Process pool broken; restart engine. cause={exc}",
+        ) from exc
     except Exception as exc:  # pragma: no cover - surfaced to client
+        logger.exception("[shadow %s] request failed", request_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
