@@ -1,6 +1,7 @@
 import type { FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import { shadowAnalysisClient } from './shadowAnalysisService';
 import SunCalc from 'suncalc';
+import { weatherService } from './weatherService';
 import type {
   BoundingBox,
   MobilityCsvRecord,
@@ -107,12 +108,15 @@ type SunlightOptions = {
   includeCanopy?: boolean;
   canopyRasterPath?: string;
   debug?: boolean;
+  includeCloud?: boolean;
+  includeRadiation?: boolean;
 };
 
 const DEFAULT_CANOPY_RASTER_PATH = (import.meta.env.VITE_CANOPY_RASTER_PATH as string | undefined) ?? undefined;
 const DEBUG_ENV =
   (import.meta.env.VITE_MOBILITY_DEBUG as string | undefined) === '1' ||
   (import.meta.env.VITE_SHADOW_DEBUG as string | undefined) === '1';
+const DEFAULT_DURATION_FALLBACK = 60; // seconds for last/invalid interval
 
 export const computeMobilitySunlightForRows = async (
   rows: MobilityCsvRecord[],
@@ -124,6 +128,8 @@ export const computeMobilitySunlightForRows = async (
   const logDebug = (...args: unknown[]) => {
     if (debug) console.debug(...args);
   };
+  const includeCloud = options?.includeCloud ?? true;
+  const includeRadiation = options?.includeRadiation ?? true;
 
   const bucketMap = new Map<string, MobilityCsvRecord[]>();
   rows.forEach((row) => {
@@ -150,6 +156,41 @@ export const computeMobilitySunlightForRows = async (
       metadata.canopyRasterPath = canopyRasterPath;
     }
     const nighttime = isNighttimeBucket(bounds, bucketStartDate);
+    let cloudCover: number | null = null;
+    let sunlightFactor = 1;
+    let solarIrradianceWm2: number | null = null;
+
+    if (includeCloud || includeRadiation) {
+      const centerLat = (bounds.north + bounds.south) / 2;
+      const centerLng = (bounds.east + bounds.west) / 2;
+      try {
+        const weather = await weatherService.getCurrentWeather(centerLat, centerLng, bucketStartDate);
+        cloudCover = weather.snapshot.cloudCover;
+        sunlightFactor = weather.snapshot.sunlightFactor ?? 1;
+        solarIrradianceWm2 = includeRadiation ? weather.snapshot.solarIrradianceWm2 ?? null : null;
+        logDebug('[MobilitySunlight][bucket][weather]', {
+          bucketStart,
+          cloudCover,
+          sunlightFactor,
+          solarIrradianceWm2,
+        });
+      } catch (error) {
+        logDebug('[MobilitySunlight][bucket][weather-error]', {
+          bucketStart,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const applyCloud = (sunlitValue: number, shadowPercentValue: number) => {
+      const factor = Math.min(Math.max(sunlightFactor ?? 1, 0), 1);
+      const sunlitEffective = sunlitValue * factor;
+      const shadowPercentEffective = Math.min(100, Math.max(0, 100 - sunlitEffective * 100));
+      // dswrf 已包含云量影响，这里只做阴影掩码：阴影=0，日照=dswrf
+      const irradianceEffective =
+        solarIrradianceWm2 != null ? Math.max(0, sunlitValue === 0 ? 0 : solarIrradianceWm2) : null;
+      return { sunlitEffective, shadowPercentEffective, irradianceEffective };
+    };
 
     logDebug('[MobilitySunlight][bucket][request]', {
       bucketStart,
@@ -165,6 +206,7 @@ export const computeMobilitySunlightForRows = async (
       logDebug('[MobilitySunlight][bucket][nighttime-precheck]', { bucketStart, bbox: bounds });
       console.warn('[Mobility Sunlight] Nighttime bucket (pre-check) for', bucketStart, '- marking as no sunlight');
       bucketRows.forEach((row) => {
+        const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0, 100);
         samples.push({
           ...row,
           sunlit: 0,
@@ -172,6 +214,12 @@ export const computeMobilitySunlightForRows = async (
           bucketStart: bucketStartDate.toISOString(),
           bucketEnd: bucketEndDate.toISOString(),
           source: 'fallback_night',
+          cloudCover,
+          sunlightFactor,
+          sunlitEffective,
+          shadowPercentEffective,
+          solarIrradianceWm2,
+          irradianceEffective,
         });
       });
       completed += 1;
@@ -184,6 +232,7 @@ export const computeMobilitySunlightForRows = async (
       logDebug('[MobilitySunlight][bucket][degenerate]', { bucketStart, bbox: bounds });
       console.warn('[Mobility Sunlight] Degenerate bounds for', bucketStart, bounds, '- marking as error');
       bucketRows.forEach((row) => {
+        const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0, 0);
         samples.push({
           ...row,
           sunlit: 0,
@@ -191,6 +240,12 @@ export const computeMobilitySunlightForRows = async (
           bucketStart: bucketStartDate.toISOString(),
           bucketEnd: bucketEndDate.toISOString(),
           source: 'fallback_error',
+          cloudCover,
+          sunlightFactor,
+          sunlitEffective,
+          shadowPercentEffective,
+          solarIrradianceWm2,
+          irradianceEffective,
         });
       });
       completed += 1;
@@ -239,6 +294,7 @@ export const computeMobilitySunlightForRows = async (
       if (!noBuildings && !isNight) {
         console.warn('[Mobility Sunlight] Engine error for', bucketStart, message);
         bucketRows.forEach((row) => {
+          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0, 0);
           samples.push({
             ...row,
             sunlit: 0,
@@ -246,6 +302,12 @@ export const computeMobilitySunlightForRows = async (
             bucketStart: bucketStartDate.toISOString(),
             bucketEnd: bucketEndDate.toISOString(),
             source: 'fallback_error',
+            cloudCover,
+            sunlightFactor,
+            sunlitEffective,
+            shadowPercentEffective,
+            solarIrradianceWm2,
+            irradianceEffective,
           });
         });
         completed += 1;
@@ -255,6 +317,7 @@ export const computeMobilitySunlightForRows = async (
       if (noBuildings) {
         console.warn('[Mobility Sunlight] No buildings for bbox at', bucketStart, '- marking as sunlit');
         bucketRows.forEach((row) => {
+          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(1, 0);
           samples.push({
             ...row,
             sunlit: 1,
@@ -262,11 +325,18 @@ export const computeMobilitySunlightForRows = async (
             bucketStart: bucketStartDate.toISOString(),
             bucketEnd: bucketEndDate.toISOString(),
             source: 'fallback_no_buildings',
+            cloudCover,
+            sunlightFactor,
+            sunlitEffective,
+            shadowPercentEffective,
+            solarIrradianceWm2,
+            irradianceEffective,
           });
         });
       } else if (isNight) {
         console.warn('[Mobility Sunlight] Nighttime for', bucketStart, '- marking as no sunlight');
         bucketRows.forEach((row) => {
+          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0, 100);
           samples.push({
             ...row,
             sunlit: 0,
@@ -274,6 +344,12 @@ export const computeMobilitySunlightForRows = async (
             bucketStart: bucketStartDate.toISOString(),
             bucketEnd: bucketEndDate.toISOString(),
             source: 'fallback_night',
+            cloudCover,
+            sunlightFactor,
+            sunlitEffective,
+            shadowPercentEffective,
+            solarIrradianceWm2,
+            irradianceEffective,
           });
         });
       }
@@ -289,6 +365,10 @@ export const computeMobilitySunlightForRows = async (
     bucketRows.forEach((row) => {
       const inShadow = polygons.some((polygon) => pointInPolygon(row.coordinates, polygon));
       const shadowPercent = polygons.length ? (inShadow ? 100 : 0) : fallbackShadowPercent;
+      const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(
+        inShadow ? 0 : 1,
+        shadowPercent,
+      );
       samples.push({
         ...row,
         sunlit: inShadow ? 0 : 1,
@@ -296,6 +376,12 @@ export const computeMobilitySunlightForRows = async (
         bucketStart: response!.bucketStart,
         bucketEnd,
         source: 'engine',
+        cloudCover,
+        sunlightFactor,
+        sunlitEffective,
+        shadowPercentEffective,
+        solarIrradianceWm2,
+        irradianceEffective,
       });
     });
 
@@ -303,5 +389,31 @@ export const computeMobilitySunlightForRows = async (
     options?.onProgress?.({ completed, total: totalBuckets });
   }
 
-  return samples.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  // 按时间排序并计算相邻时间片时长与积分
+  const sorted = samples.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
+
+  for (let i = 0; i < sorted.length; i++) {
+    const current = sorted[i];
+    const next = sorted[i + 1];
+    let durationSeconds = DEFAULT_DURATION_FALLBACK;
+    if (next) {
+      const diff = (next.timestamp.getTime() - current.timestamp.getTime()) / 1000;
+      if (Number.isFinite(diff) && diff > 0) {
+        durationSeconds = Math.min(diff, 300); // 上限 5 分钟，避免长间隔放大
+      }
+    }
+
+    const effectiveSunlit = current.sunlitEffective ?? current.sunlit ?? 0;
+    const effectiveShadowPercent = clampPercent(current.shadowPercentEffective ?? current.shadowPercent ?? 0);
+    const irradianceEffective = current.irradianceEffective;
+
+    current.durationSeconds = durationSeconds;
+    current.sunlightSeconds = effectiveSunlit * durationSeconds;
+    current.shadowSeconds = (effectiveShadowPercent / 100) * durationSeconds;
+    current.irradianceJ =
+      irradianceEffective != null ? Math.max(0, irradianceEffective) * durationSeconds : null;
+  }
+
+  return sorted;
 };

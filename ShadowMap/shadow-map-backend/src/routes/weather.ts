@@ -1,9 +1,9 @@
 import express from 'express';
 import type { Request, Response } from 'express';
-import { GfsCloudService } from '../services/gfsCloudService';
+import { Era5Service } from '../services/era5Service';
 
 const router = express.Router();
-const gfsService = GfsCloudService.getInstance();
+const era5Service = Era5Service.getInstance();
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -61,8 +61,12 @@ router.get('/current', async (req: Request, res: Response) => {
   const targetTime = timestamp ? new Date(String(timestamp)) : new Date();
 
   try {
-    const result = await gfsService.getCloudCover(latitude, longitude, targetTime);
-    const { metrics, sunlightFactor } = buildWeatherPayload(result.cloudCoverRatio);
+    const { cloudCover, irradianceWm2, source, details } = await era5Service.getWeather(
+      latitude,
+      longitude,
+      targetTime,
+    );
+    const { metrics, sunlightFactor } = buildWeatherPayload(cloudCover ?? 0);
 
     res.json({
       location: {
@@ -72,12 +76,10 @@ router.get('/current', async (req: Request, res: Response) => {
       timestamp: targetTime.toISOString(),
       weather: metrics,
       metadata: {
-        source: 'gfs_nomads',
-        queryUrl: result.queryUrl,
-        forecastHour: result.forecastHour,
-        runTimestamp: result.runTimestamp.toISOString(),
-        runOffsetHours: result.runOffsetHours,
+        source,
         sunlightFactor,
+        solarIrradianceWm2: irradianceWm2,
+        era5Details: details,
       },
       units: {
         temperature: '°C',
@@ -89,13 +91,48 @@ router.get('/current', async (req: Request, res: Response) => {
         visibility: 'meters',
         precipitation: 'mm/h',
         pressure: 'hPa',
+        solarIrradianceWm2: 'W/m^2',
       },
     });
   } catch (error) {
-    console.error('[Weather] Failed to fetch GFS data', error);
-    res.status(502).json({
-      error: 'UpstreamUnavailable',
-      message: 'Failed to fetch weather data from GFS',
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[Weather] Failed to fetch weather data', message);
+    // 返回明确的空值和来源，避免假象
+    res.status(200).json({
+      location: {
+        latitude,
+        longitude,
+      },
+      timestamp: targetTime.toISOString(),
+      weather: {
+        temperature: null,
+        humidity: null,
+        cloud_cover: null,
+        uv_index: null,
+        wind_speed: null,
+        wind_direction: null,
+        visibility: null,
+        precipitation: null,
+        pressure: null,
+        solarIrradianceWm2: null,
+      },
+      metadata: {
+        source: 'unavailable',
+        error: message,
+        sunlightFactor: null,
+      },
+      units: {
+        temperature: '°C',
+        humidity: '%',
+        cloud_cover: 'ratio (0-1)',
+        uv_index: 'index (0-15)',
+        wind_speed: 'm/s',
+        wind_direction: 'degrees',
+        visibility: 'meters',
+        precipitation: 'mm/h',
+        pressure: 'hPa',
+        solarIrradianceWm2: 'W/m^2',
+      },
     });
   }
 });

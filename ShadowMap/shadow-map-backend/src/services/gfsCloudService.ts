@@ -16,6 +16,14 @@ interface GfsCloudCoverResult {
   runOffsetHours: number;
 }
 
+interface GfsRadiationResult {
+  irradianceWm2: number; // surface downwelling shortwave radiation W/m^2
+  forecastHour: number;
+  runTimestamp: Date;
+  queryUrl: string;
+  runOffsetHours: number;
+}
+
 export class GfsCloudService {
   private static instance: GfsCloudService;
 
@@ -109,6 +117,74 @@ export class GfsCloudService {
       throw lastError;
     }
     throw new Error('GFS cloud cover unavailable');
+  }
+
+  /**
+   * Fetch downward shortwave radiation (DSWRF) W/m^2 from GFS OPeNDAP ASCII endpoint.
+   */
+  public async getDownwardShortwave(lat: number, lon: number, targetTime: Date): Promise<GfsRadiationResult> {
+    this.validateCoordinates(lat, lon);
+
+    let lastError: unknown = null;
+
+    for (const offsetHours of this.fallbackOffsetsHours) {
+      const queryTime = new Date(targetTime.getTime() - offsetHours * 60 * 60 * 1000);
+      const { runTimestamp, cycleHourUtc, forecastHour, timeIndex } = this.resolveRunAndTimeIndex(queryTime);
+      const { latIndex, lonIndex } = this.computeGridIndices(lat, lon);
+      const datasetPath = this.buildDatasetPath(runTimestamp, cycleHourUtc);
+
+      const variable = 'dswrf';
+      const query = `${variable}[${timeIndex}:1:${timeIndex}][${latIndex}:1:${latIndex}][${lonIndex}:1:${lonIndex}]`;
+      const requestUrl = `${datasetPath}.ascii?${query}`;
+
+      try {
+        const response = await axios.get(requestUrl, this.buildAxiosConfig(requestUrl));
+        const value = this.parseAsciiResponse(response.data);
+
+        if (offsetHours > 0 && GFS_VERBOSE) {
+          console.warn(`[gfs] dswrf 落回 ${offsetHours}h 前的运行 (cycle ${cycleHourUtc}Z)`);
+        }
+
+        return {
+          irradianceWm2: value,
+          forecastHour,
+          runTimestamp,
+          queryUrl: requestUrl,
+          runOffsetHours: offsetHours
+        };
+      } catch (error) {
+        lastError = error;
+        const message = error instanceof Error ? error.message : String(error);
+        if (GFS_VERBOSE) {
+          console.warn(`[gfs] dswrf 获取失败 (cycle ${cycleHourUtc}Z, offset ${offsetHours}h): ${message}`);
+        }
+
+        // Attempt curl fallback for network issues
+        if (message.includes('Client network socket') || message.includes('Request failed with status code 503')) {
+          const curlValue = await this.fetchViaCurl(requestUrl);
+          if (curlValue !== null) {
+            const ratio = curlValue;
+            if (GFS_VERBOSE) {
+              console.warn('[gfs] dswrf 使用 curl fallback 成功');
+            }
+            return {
+              irradianceWm2: ratio,
+              forecastHour,
+              runTimestamp,
+              queryUrl: requestUrl,
+              runOffsetHours: offsetHours
+            };
+          }
+        }
+
+        continue;
+      }
+    }
+
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+    throw new Error('GFS dswrf unavailable');
   }
 
   private validateCoordinates(lat: number, lon: number): void {

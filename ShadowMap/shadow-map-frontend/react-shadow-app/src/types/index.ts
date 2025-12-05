@@ -150,6 +150,7 @@ export type WeatherMetrics = {
   visibility: number;
   precipitation: number;
   pressure: number;
+  solarIrradianceWm2?: number | null;
 };
 
 export type WeatherApiResponse = {
@@ -167,6 +168,7 @@ export type WeatherSnapshot = {
   sunlightFactor: number;
   fetchedAt: Date | null;
   source?: string;
+  solarIrradianceWm2?: number | null;
   raw?: WeatherMetrics | null;
 };
 
@@ -245,6 +247,16 @@ export type MobilitySunlightSample = MobilityCsvRecord & {
   bucketStart: string;
   bucketEnd: string;
   source: 'engine' | 'fallback_no_buildings' | 'fallback_night' | 'fallback_error';
+  cloudCover?: number | null; // ratio 0-1
+  sunlightFactor?: number | null; // attenuation factor 0.15-1
+  sunlitEffective?: number; // sunlit * sunlightFactor
+  shadowPercentEffective?: number; // derived from sunlitEffective
+  solarIrradianceWm2?: number | null; // dswrf
+  irradianceEffective?: number | null; // dswrf masked by shadow (no extra cloud attenuation)
+  durationSeconds?: number; // interval to next timestamp (clamped), seconds
+  sunlightSeconds?: number; // durationSeconds * sunlitEffective (or sunlit)
+  shadowSeconds?: number; // durationSeconds * shadowPercentEffective/100 (or shadowPercent)
+  irradianceJ?: number | null; // irradianceEffective * durationSeconds
 };
 
 export type MobilitySunlightProgress = {

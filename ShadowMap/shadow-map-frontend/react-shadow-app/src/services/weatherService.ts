@@ -49,12 +49,17 @@ const computeSunlightFactor = (cloudCover: number | null | undefined): number =>
 const buildSnapshot = (weather: WeatherMetrics, timestamp: string | Date): WeatherSnapshot => {
   const cloudCover = normaliseCloudCover(weather.cloud_cover);
   const sunlightFactor = computeSunlightFactor(cloudCover);
+  const solarIrradianceWm2 =
+    typeof weather.solarIrradianceWm2 === 'number' && Number.isFinite(weather.solarIrradianceWm2)
+      ? weather.solarIrradianceWm2
+      : null;
 
   return {
     cloudCover,
     sunlightFactor,
     fetchedAt: timestamp ? new Date(timestamp) : new Date(),
     raw: weather,
+    solarIrradianceWm2,
   };
 };
 
