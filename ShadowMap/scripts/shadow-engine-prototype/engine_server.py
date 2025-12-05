@@ -260,8 +260,20 @@ def shadow(payload: ShadowRequest) -> Dict[str, Any]:
             detail=f"Process pool broken; restart engine. cause={exc}",
         ) from exc
     except Exception as exc:  # pragma: no cover - surfaced to client
+        msg = str(exc)
+        if isinstance(exc, ValueError) and "sunrise" in msg:
+            logger.warning(
+                "[shadow %s] timestamp outside daylight (sunrise/sunset): %s",
+                request_id,
+                msg,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Outside daylight window: {msg}",
+            ) from exc
+
         logger.exception("[shadow %s] request failed", request_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=msg) from exc
 
 
 @app.on_event("shutdown")
