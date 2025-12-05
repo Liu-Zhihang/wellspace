@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-#!/usr/bin/env python3
 import sys
 import json
 from datetime import datetime
@@ -22,9 +21,18 @@ def open_ds(file_path: str):
     raise RuntimeError(f"open_failed: {last_err}")
 
 
-def respond(obj):
-    print(json.dumps(obj))
-    sys.exit(0)
+def respond(obj, exit_code: int = 0):
+    def convert(o):
+        if isinstance(o, np.generic):
+            return o.item()
+        if isinstance(o, dict):
+            return {k: convert(v) for k, v in o.items()}
+        if isinstance(o, (list, tuple)):
+            return [convert(v) for v in o]
+        return o
+
+    print(json.dumps(convert(obj)))
+    sys.exit(exit_code)
 
 
 def main():
@@ -32,44 +40,44 @@ def main():
     try:
         req = json.loads(raw)
     except Exception as e:
-        respond({"error": "invalid_input", "message": str(e)})
+        respond({"error": "invalid_input", "message": str(e)}, exit_code=1)
 
     file = req.get("file")
     lat = req.get("lat")
     lon = req.get("lon")
     iso_time = req.get("isoTime")
     if not file or iso_time is None or lat is None or lon is None:
-        respond({"error": "missing_fields"})
+        respond({"error": "missing_fields"}, exit_code=1)
 
     try:
         lat = float(lat)
         lon = float(lon)
         target = datetime.fromisoformat(str(iso_time).replace("Z", "+00:00"))
     except Exception as e:
-        respond({"error": "invalid_params", "message": str(e)})
+        respond({"error": "invalid_params", "message": str(e)}, exit_code=1)
 
     try:
         ds, engine_used = open_ds(file)
     except Exception as e:
-        respond({"error": "open_failed", "message": str(e)})
+        respond({"error": "open_failed", "message": str(e)}, exit_code=1)
 
-    # 经度转换（如数据为 0-360）
-    lon_values = ds["longitude"].values
-    if lon < 0 and lon_values.max() > 180:
-        lon = (lon + 360) % 360
-
-    # 兼容不同时间维度命名（常见 time / valid_time）
+    # 兼容 time 或 valid_time
     time_var = None
     for candidate in ("time", "valid_time"):
         if candidate in ds:
             time_var = candidate
             break
     if time_var is None:
-        respond({"error": "missing_time_coord", "message": f"no time/valid_time in {list(ds.variables)}"})
+        respond({"error": "missing_time_coord", "message": f"no time/valid_time in {list(ds.variables)}"}, exit_code=1)
 
     times = ds[time_var].values
     if len(times) < 2:
-        respond({"error": "insufficient_time_steps"})
+        respond({"error": "insufficient_time_steps"}, exit_code=1)
+
+    # 处理经度 0-360
+    lon_values = ds["longitude"].values
+    if lon < 0 and lon_values.max() > 180:
+        lon = (lon + 360) % 360
 
     # 最近时间步
     time_diffs = np.abs(np.array([(np.datetime64(target) - t).astype("timedelta64[s]").astype(int) for t in times]))
@@ -84,17 +92,16 @@ def main():
     t0 = ds.isel({time_var: idx0})
     t1 = ds.isel({time_var: idx1})
 
-    # 插值取 tcc
     try:
         point_tcc = float(t1["tcc"].sel(latitude=lat, longitude=lon, method="nearest").values)
         ssrd0 = float(t0["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values)
         ssrd1 = float(t1["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values)
     except Exception as e:
-        respond({"error": "variable_missing", "message": str(e)})
+        respond({"error": "variable_missing", "message": str(e)}, exit_code=1)
 
     time0 = np.datetime64(t0[time_var].values).astype("datetime64[s]").astype(int)
     time1 = np.datetime64(t1[time_var].values).astype("datetime64[s]").astype(int)
-    dt = max(time1 - time0, 1)
+    dt = max(int(time1 - time0), 1)
     irradiance = max((ssrd1 - ssrd0) / dt, 0.0)
 
     out = {
@@ -104,13 +111,17 @@ def main():
         "details": {
             "file": file,
             "engine": engine_used,
-            "idx0": idx0,
-            "idx1": idx1,
+            "idx0": int(idx0),
+            "idx1": int(idx1),
             "dt_seconds": dt,
+            "time_var": time_var,
         },
     }
     respond(out)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        respond({"error": "unknown_error", "message": str(e)}, exit_code=1)
