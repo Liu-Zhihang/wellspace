@@ -58,7 +58,16 @@ def main():
     if lon < 0 and lon_values.max() > 180:
         lon = (lon + 360) % 360
 
-    times = ds["time"].values
+    # 兼容不同时间维度命名（常见 time / valid_time）
+    time_var = None
+    for candidate in ("time", "valid_time"):
+        if candidate in ds:
+            time_var = candidate
+            break
+    if time_var is None:
+        respond({"error": "missing_time_coord", "message": f"no time/valid_time in {list(ds.variables)}"})
+
+    times = ds[time_var].values
     if len(times) < 2:
         respond({"error": "insufficient_time_steps"})
 
@@ -83,8 +92,8 @@ def main():
     except Exception as e:
         respond({"error": "variable_missing", "message": str(e)})
 
-    time0 = np.datetime64(t0["time"].values).astype("datetime64[s]").astype(int)
-    time1 = np.datetime64(t1["time"].values).astype("datetime64[s]").astype(int)
+    time0 = np.datetime64(t0[time_var].values).astype("datetime64[s]").astype(int)
+    time1 = np.datetime64(t1[time_var].values).astype("datetime64[s]").astype(int)
     dt = max(time1 - time0, 1)
     irradiance = max((ssrd1 - ssrd0) / dt, 0.0)
 
