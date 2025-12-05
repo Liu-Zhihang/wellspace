@@ -1,50 +1,70 @@
 #!/usr/bin/env python3
+#!/usr/bin/env python3
 import sys
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import numpy as np
 import xarray as xr
+
+
+def open_ds(file_path: str):
+    """尝试不同 engine 打开 NetCDF，返回 (dataset, engine)。"""
+    engines = ["netcdf4", "h5netcdf", "scipy"]
+    last_err = None
+    for eng in engines:
+        try:
+            ds = xr.open_dataset(file_path, engine=eng)
+            return ds, eng
+        except Exception as exc:
+            last_err = exc
+            continue
+    raise RuntimeError(f"open_failed: {last_err}")
+
 
 def main():
     raw = sys.stdin.read()
     try:
         req = json.loads(raw)
     except Exception as e:
-        print(f"{{\"error\":\"invalid_input\",\"message\":\"{e}\"}}")
+        print(json.dumps({"error": "invalid_input", "message": str(e)}))
         sys.exit(1)
 
     file = req.get("file")
-    lat = float(req.get("lat"))
-    lon = float(req.get("lon"))
+    lat = req.get("lat")
+    lon = req.get("lon")
     iso_time = req.get("isoTime")
-    if not file or iso_time is None:
+    if not file or iso_time is None or lat is None or lon is None:
         print(json.dumps({"error": "missing_fields"}))
         sys.exit(1)
 
     try:
-        target = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+        lat = float(lat)
+        lon = float(lon)
+        target = datetime.fromisoformat(str(iso_time).replace("Z", "+00:00"))
     except Exception as e:
-        print(json.dumps({"error": "invalid_time", "message": str(e)}))
+        print(json.dumps({"error": "invalid_params", "message": str(e)}))
         sys.exit(1)
 
-    ds = xr.open_dataset(file)
-    # ERA5 使用经度 0-360，必要时转换
-    lon_values = ds['longitude'].values
+    try:
+        ds, engine_used = open_ds(file)
+    except Exception as e:
+        print(json.dumps({"error": "open_failed", "message": str(e)}))
+        sys.exit(1)
+
+    # 经度转换（如数据为 0-360）
+    lon_values = ds["longitude"].values
     if lon < 0 and lon_values.max() > 180:
         lon = (lon + 360) % 360
 
-    # 取目标时间的最近两步做 ssrd 差分（小时数据）
-    times = ds['time'].values
+    times = ds["time"].values
     if len(times) < 2:
         print(json.dumps({"error": "insufficient_time_steps"}))
         sys.exit(1)
 
-    # 找到最近的时间索引
-    time_diffs = np.abs(np.array([(np.datetime64(target) - t).astype('timedelta64[s]').astype(int) for t in times]))
+    # 最近时间步
+    time_diffs = np.abs(np.array([(np.datetime64(target) - t).astype("timedelta64[s]").astype(int) for t in times]))
     idx = int(np.argmin(time_diffs))
-
-    # 确定差分的前后步
     if idx == 0:
         idx0, idx1 = 0, 1
     elif idx == len(times) - 1:
@@ -55,14 +75,13 @@ def main():
     t0 = ds.isel(time=idx0)
     t1 = ds.isel(time=idx1)
 
-    # 插值位置
-    point_tcc = float(t1['tcc'].sel(latitude=lat, longitude=lon, method='nearest').values)
-    ssrd0 = float(t0['ssrd'].sel(latitude=lat, longitude=lon, method='nearest').values)
-    ssrd1 = float(t1['ssrd'].sel(latitude=lat, longitude=lon, method='nearest').values)
+    # 插值取 tcc
+    point_tcc = float(t1["tcc"].sel(latitude=lat, longitude=lon, method="nearest").values)
+    ssrd0 = float(t0["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values)
+    ssrd1 = float(t1["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values)
 
-    # 计算时间差（秒）和辐照度（W/m2）
-    time0 = np.datetime64(t0['time'].values).astype('datetime64[s]').astype(int)
-    time1 = np.datetime64(t1['time'].values).astype('datetime64[s]').astype(int)
+    time0 = np.datetime64(t0["time"].values).astype("datetime64[s]").astype(int)
+    time1 = np.datetime64(t1["time"].values).astype("datetime64[s]").astype(int)
     dt = max(time1 - time0, 1)
     irradiance = max((ssrd1 - ssrd0) / dt, 0.0)
 
@@ -71,13 +90,15 @@ def main():
         "irradianceWm2": irradiance,
         "source": "era5_single",
         "details": {
-          "file": file,
-          "idx0": idx0,
-          "idx1": idx1,
-          "dt_seconds": dt
-        }
+            "file": file,
+            "engine": engine_used,
+            "idx0": idx0,
+            "idx1": idx1,
+            "dt_seconds": dt,
+        },
     }
     print(json.dumps(out))
+
 
 if __name__ == "__main__":
     main()
