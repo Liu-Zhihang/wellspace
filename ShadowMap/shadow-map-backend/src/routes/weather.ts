@@ -7,22 +7,39 @@ const era5Service = Era5Service.getInstance();
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-const buildWeatherPayload = (cloudCoverRatio: number) => {
+const buildWeatherPayload = (cloudCoverRatio: number | null) => {
+  if (cloudCoverRatio == null) {
+    return {
+      metrics: {
+        temperature: null,
+        humidity: null,
+        cloud_cover: null,
+        uv_index: null,
+        wind_speed: null,
+        wind_direction: null,
+        visibility: null,
+        precipitation: null,
+        pressure: null,
+      },
+      sunlightFactor: null,
+    };
+  }
+
   const cloud = clamp(cloudCoverRatio, 0, 1);
   const humidity = Math.round(cloud * 100);
   const sunlightFactor = Math.max(0.15, 1 - cloud * 0.85);
 
   return {
     metrics: {
-      temperature: 24 - cloud * 6,
+      temperature: null, // 无真实温度数据
       humidity,
       cloud_cover: cloud,
-      uv_index: Math.max(0, Math.round((1 - cloud) * 10)),
-      wind_speed: 2 + cloud * 3,
-      wind_direction: 180,
-      visibility: 10000 - Math.round(cloud * 4000),
-      precipitation: Math.max(0, cloud * 3),
-      pressure: 1013 - Math.round(cloud * 6),
+      uv_index: null,
+      wind_speed: null,
+      wind_direction: null,
+      visibility: null,
+      precipitation: null,
+      pressure: null,
     },
     sunlightFactor,
   };
@@ -66,7 +83,7 @@ router.get('/current', async (req: Request, res: Response) => {
       longitude,
       targetTime,
     );
-    const { metrics, sunlightFactor } = buildWeatherPayload(cloudCover ?? 0);
+    const { metrics, sunlightFactor } = buildWeatherPayload(cloudCover);
 
     res.json({
       location: {
