@@ -9,7 +9,7 @@
  * 可通过 CLI 参数覆盖。
  *
  * 参数：
- *   --input       输入根目录（递归处理 .csv）           默认 ../GLAN
+ *   --input       输入根目录（递归处理 .csv）           默认 ../GLAN/spatial_temporal_merge
  *   --output      输出根目录（镜像子路径，文件加 -sunlight.csv） 默认 ../GLAN_processed
  *   --backend     后端 shadow API 地址                   默认 http://localhost:3001/api/analysis/shadow
  *   --canopy      canopy 栅格路径                       默认 /home/jinlin/data/HKtree_reprojected4326.tif
@@ -39,18 +39,35 @@ const parseArgs = () => {
 };
 
 const args = parseArgs();
-const defaultInput = path.resolve(__dirname, '..', '..', 'GLAN');
+const defaultInput = path.resolve(__dirname, '..', '..', 'GLAN', 'spatial_temporal_merge');
 const defaultOutput = path.resolve(__dirname, '..', '..', 'GLAN_processed');
 
 const config = {
   inputRoot: path.resolve(args['input'] ?? defaultInput),
   outputRoot: path.resolve(args['output'] ?? defaultOutput),
   backendUrl: (args['backend'] ?? 'http://localhost:3001/api/analysis/shadow').replace(/\/$/, ''),
+  weatherUrl: (args['weather'] ?? 'http://localhost:3001/api/weather/current').replace(/\/$/, ''),
   canopyRasterPath: args['canopy'] ?? '/home/jinlin/data/HKtree_reprojected4326.tif',
   concurrency: Number.parseInt(args['concurrency'] ?? '4', 10),
 };
 
-const headersToAppend = ['sunlit', 'shadowPercent', 'bucketStart', 'bucketEnd', 'source'];
+const headersToAppend = [
+  'sunlit',
+  'shadowPercent',
+  'bucketStart',
+  'bucketEnd',
+  'source',
+  'cloudCover',
+  'sunlightFactor',
+  'sunlitEffective',
+  'shadowPercentEffective',
+  'solarIrradianceWm2',
+  'irradianceEffective',
+  'durationSeconds',
+  'sunlightSeconds',
+  'shadowSeconds',
+  'irradianceJ',
+];
 
 const ensureDir = async (dir) => fs.mkdir(dir, { recursive: true });
 
@@ -224,7 +241,34 @@ const fetchShadow = async (payload) => {
   return data;
 };
 
+const fetchWeather = async (lat, lon, timestampIso) => {
+  const url = `${config.weatherUrl}?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lon)}&timestamp=${encodeURIComponent(timestampIso)}`;
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Weather HTTP ${res.status}: ${text || res.statusText}`);
+  }
+  const data = await res.json();
+  return data;
+};
+
 const processBucket = async (payload, rows, fileLabel) => {
+  let cloudCover = null;
+  let sunlightFactor = null;
+  let solarIrradianceWm2 = null;
+  // 取桶中心点
+  const centerLat = (payload.bbox.north + payload.bbox.south) / 2;
+  const centerLng = (payload.bbox.east + payload.bbox.west) / 2;
+  try {
+    const weather = await fetchWeather(centerLat, centerLng, payload.timestamp);
+    cloudCover = weather?.weather?.cloud_cover ?? null;
+    const cf = typeof cloudCover === 'number' ? Math.max(0, Math.min(1, cloudCover)) : null;
+    sunlightFactor = cf == null ? null : Math.max(0.15, 1 - cf * 0.85);
+    solarIrradianceWm2 = weather?.metadata?.solarIrradianceWm2 ?? weather?.weather?.solarIrradianceWm2 ?? null;
+  } catch (error) {
+    console.warn(`[Weather error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`);
+  }
+
   try {
     const response = await fetchShadow(payload);
     const polygons = flattenPolygons(response?.data?.shadows);
@@ -235,11 +279,22 @@ const processBucket = async (payload, rows, fileLabel) => {
       const point = [lon, lat];
       const inShadow = polygons.some((polygon) => pointInPolygon(point, polygon));
       const shadowPercent = polygons.length ? (inShadow ? 100 : 0) : fallbackShadowPercent;
-      rows[index]['sunlit'] = inShadow ? 0 : 1;
+      const sunlit = inShadow ? 0 : 1;
+      const sunlitEffective = sunlightFactor == null ? sunlit : sunlit * sunlightFactor;
+      const shadowPercentEffective = 100 - sunlitEffective * 100;
+      const irradianceEffective =
+        solarIrradianceWm2 != null ? (sunlit === 0 ? 0 : solarIrradianceWm2) : null;
+      rows[index]['sunlit'] = sunlit;
       rows[index]['shadowPercent'] = shadowPercent;
       rows[index]['bucketStart'] = response?.bucketStart ?? payload.bucketKey;
       rows[index]['bucketEnd'] = bucketEnd;
       rows[index]['source'] = 'engine';
+      rows[index]['cloudCover'] = cloudCover ?? '';
+      rows[index]['sunlightFactor'] = sunlightFactor ?? '';
+      rows[index]['sunlitEffective'] = sunlitEffective;
+      rows[index]['shadowPercentEffective'] = shadowPercentEffective;
+      rows[index]['solarIrradianceWm2'] = solarIrradianceWm2 ?? '';
+      rows[index]['irradianceEffective'] = irradianceEffective ?? '';
     });
   } catch (error) {
     console.warn(`[Bucket error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`);
@@ -249,6 +304,12 @@ const processBucket = async (payload, rows, fileLabel) => {
       rows[index]['bucketStart'] = payload.bucketKey;
       rows[index]['bucketEnd'] = payload.bucketKey;
       rows[index]['source'] = 'fallback_error';
+      rows[index]['cloudCover'] = cloudCover ?? '';
+      rows[index]['sunlightFactor'] = sunlightFactor ?? '';
+      rows[index]['sunlitEffective'] = '';
+      rows[index]['shadowPercentEffective'] = '';
+      rows[index]['solarIrradianceWm2'] = solarIrradianceWm2 ?? '';
+      rows[index]['irradianceEffective'] = '';
     });
   }
 };
@@ -305,6 +366,12 @@ const processFile = async (filePath) => {
       row['bucketStart'] = '';
       row['bucketEnd'] = '';
       row['source'] = row.__error;
+      row['cloudCover'] = '';
+      row['sunlightFactor'] = '';
+      row['sunlitEffective'] = '';
+      row['shadowPercentEffective'] = '';
+      row['solarIrradianceWm2'] = '';
+      row['irradianceEffective'] = '';
     }
   });
 
@@ -313,6 +380,44 @@ const processFile = async (filePath) => {
 
   await ensureDir(outDir);
   const finalHeaders = [...headers, ...headersToAppend];
+  // 计算 durationSeconds 等（按时间升序）
+  const tsField = headers.includes('timestamp') ? 'timestamp' : headers.includes('time') ? 'time' : null;
+  let sortedIndices = rows.map((_, idx) => idx);
+  if (tsField) {
+    sortedIndices = rows
+      .map((row, idx) => {
+        const ts = Number(row[tsField]);
+        const date = Number.isFinite(ts) ? ts * 1000 : Date.parse(row[tsField]);
+        return { idx, ms: date };
+      })
+      .sort((a, b) => (a.ms ?? 0) - (b.ms ?? 0))
+      .map((item) => item.idx);
+  }
+
+  const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+  for (let i = 0; i < sortedIndices.length; i++) {
+    const idx = sortedIndices[i];
+    const nextIdx = sortedIndices[i + 1];
+    const current = rows[idx];
+    let durationSeconds = 60;
+    if (tsField && nextIdx !== undefined) {
+      const curMs = Number(rows[idx][tsField]) * 1000 || Date.parse(rows[idx][tsField]);
+      const nxtMs = Number(rows[nextIdx][tsField]) * 1000 || Date.parse(rows[nextIdx][tsField]);
+      const diff = (nxtMs - curMs) / 1000;
+      if (Number.isFinite(diff) && diff > 0) {
+        durationSeconds = clamp(diff, 1, 300);
+      }
+    }
+    const sunlitEffective = Number(current['sunlitEffective']) || 0;
+    const shadowPercentEffective = Number(current['shadowPercentEffective']) || 0;
+    const irradianceEffective = Number(current['irradianceEffective']);
+    current['durationSeconds'] = durationSeconds;
+    current['sunlightSeconds'] = sunlitEffective * durationSeconds;
+    current['shadowSeconds'] = (shadowPercentEffective / 100) * durationSeconds;
+    current['irradianceJ'] =
+      Number.isFinite(irradianceEffective) ? Math.max(0, irradianceEffective) * durationSeconds : '';
+  }
+
   const lines = [finalHeaders.join(',')];
   rows.forEach((row) => {
     const line = finalHeaders.map((h) => row[h] ?? '').join(',');
