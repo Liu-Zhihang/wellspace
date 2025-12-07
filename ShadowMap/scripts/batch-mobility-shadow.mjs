@@ -52,6 +52,7 @@ const config = {
   concurrency: Number.parseInt(args['concurrency'] ?? '4', 10),
   force: args['force'] === 'true' || args['force'] === true,
   bucketsFile: args['buckets-file'] ?? args['bucketsFile'],
+  targetFile: args['target-file'] ?? args['targetFile'],
 };
 
 const headersToAppend = [
@@ -523,7 +524,13 @@ const main = async () => {
   console.log('Batch mobility shadow');
   console.log(JSON.stringify(config, null, 2));
 
-  const files = await listCsvFiles(config.inputRoot);
+  let files = await listCsvFiles(config.inputRoot);
+  if (config.targetFile) {
+    files = files.filter((f) => path.basename(f) === config.targetFile);
+    if (!files.length) {
+      console.warn(`[Warning] Target file "${config.targetFile}" not found under ${config.inputRoot}`);
+    }
+  }
   if (!files.length) {
     console.error(`No CSV files found under ${config.inputRoot}`);
     process.exit(1);
