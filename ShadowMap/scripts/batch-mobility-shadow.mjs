@@ -51,6 +51,7 @@ const config = {
   canopyRasterPath: args['canopy'] ?? '/home/jinlin/data/HKtree_reprojected4326.tif',
   concurrency: Number.parseInt(args['concurrency'] ?? '4', 10),
   force: args['force'] === 'true' || args['force'] === true,
+  bucketsFile: args['buckets-file'] ?? args['bucketsFile'],
 };
 
 const headersToAppend = [
@@ -113,6 +114,32 @@ const floorToMinuteIso = (epochSeconds) => {
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const readBucketsFromFile = async (filePath) => {
+  if (!filePath) return null;
+  try {
+    const text = await fs.readFile(filePath, 'utf-8');
+    const set = new Set(
+      text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0),
+    );
+    return set;
+  } catch (err) {
+    console.warn(`[Buckets] failed to read ${filePath}: ${err.message}`);
+    return null;
+  }
+};
+
+const loadExistingOutput = async (outFile) => {
+  try {
+    const content = await fs.readFile(outFile, 'utf-8');
+    const { headers, rows } = parseCsv(content);
+    return { headers, rows };
+  } catch (err) {
+    return null;
+  }
+};
 
 const pointInRing = (point, ring) => {
   let inside = false;
@@ -283,7 +310,13 @@ const processBucket = async (payload, rows, fileLabel) => {
     sunlightFactor = cf == null ? null : Math.max(0.15, 1 - cf * 0.85);
     solarIrradianceWm2 = weather?.metadata?.solarIrradianceWm2 ?? weather?.weather?.solarIrradianceWm2 ?? null;
   } catch (error) {
-    console.warn(`[Weather error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`);
+    console.warn(
+      `[Weather error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`,
+    );
+    // 保留标记，让后续输出知道天气失败
+    cloudCover = cloudCover ?? '';
+    sunlightFactor = sunlightFactor ?? '';
+    solarIrradianceWm2 = solarIrradianceWm2 ?? '';
   }
 
   try {
@@ -314,7 +347,9 @@ const processBucket = async (payload, rows, fileLabel) => {
       rows[index]['irradianceEffective'] = irradianceEffective ?? '';
     });
   } catch (error) {
-    console.warn(`[Bucket error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`);
+    console.warn(
+      `[Bucket error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`,
+    );
     const message = error instanceof Error ? error.message : String(error);
     const statusMatch = message.match(/HTTP\\s+(\\d{3})/i);
     const sourceLabel = statusMatch ? `fallback_error:${statusMatch[1]}` : 'fallback_error';
@@ -358,7 +393,9 @@ const processFile = async (filePath, idx, total) => {
   const outFile = path.join(outDir, `${base}-sunlight.csv`);
   const startedAt = Date.now();
 
-  if (!config.force) {
+  // 如果指定 bucketsFile，则即便已有输出也会尝试增量覆盖
+  const filterBuckets = config.bucketsFile ? await readBucketsFromFile(config.bucketsFile) : null;
+  if (!config.force && !filterBuckets) {
     try {
       await fs.access(outFile);
       console.log(`[Skip existing][${idx + 1}/${total}] ${relative}`);
@@ -375,10 +412,23 @@ const processFile = async (filePath, idx, total) => {
     return;
   }
 
-  // 初始化输出字段
+  // 如果已有输出且需要增量重跑，预填充旧值
+  const existing = filterBuckets ? await loadExistingOutput(outFile) : null;
+  if (existing && existing.rows.length === rows.length) {
+    const existingHeaders = existing.headers;
+    existing.rows.forEach((oldRow, i) => {
+      const target = rows[i];
+      existingHeaders.forEach((h, idx) => {
+        target[h] = oldRow[h] ?? oldRow[existingHeaders[idx]];
+      });
+    });
+    console.log(`[Seed existing][${idx + 1}/${total}] ${relative}`);
+  }
+
+  // 初始化输出字段（不覆盖已存在的值）
   rows.forEach((row) => {
     headersToAppend.forEach((key) => {
-      row[key] = '';
+      if (row[key] === undefined) row[key] = '';
     });
   });
 
@@ -386,6 +436,9 @@ const processFile = async (filePath, idx, total) => {
   const tasks = [];
   for (const [bucketKey, bucketRows] of buckets.entries()) {
     if (!bucketRows.length) continue;
+    if (filterBuckets && !filterBuckets.has(bucketKey)) {
+      continue;
+    }
     const payload = buildRequestPayload(bucketKey, bucketRows, rows);
     tasks.push(() => processBucket(payload, rows, relative));
   }
@@ -460,7 +513,7 @@ const processFile = async (filePath, idx, total) => {
   console.log(
     `[Done][${idx + 1}/${total}] ${relative} -> ${path.relative(config.outputRoot, outFile)} (${Math.round(
       (Date.now() - startedAt) / 1000,
-    )}s)`,
+    )}s) buckets=${tasks.length}${filterBuckets ? ' (filtered)' : ''}`,
   );
 };
 
