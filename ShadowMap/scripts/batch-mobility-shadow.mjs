@@ -347,10 +347,12 @@ const processBucket = async (payload, rows, fileLabel) => {
       rows[index]['irradianceEffective'] = irradianceEffective ?? '';
     });
   } catch (error) {
-    console.warn(
-      `[Bucket error][${fileLabel}][${payload.bucketKey}] ${error instanceof Error ? error.message : error}`,
-    );
-    const message = error instanceof Error ? error.message : String(error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const isExpectedError = errMsg.includes('HTTP 500') || errMsg.includes('HTTP 400');
+    if (!isExpectedError) {
+      console.warn(`[Bucket error][${fileLabel}][${payload.bucketKey}] ${errMsg}`);
+    }
+    const message = errMsg;
     const statusMatch = message.match(/HTTP\\s+(\\d{3})/i);
     const sourceLabel = statusMatch ? `fallback_error:${statusMatch[1]}` : 'fallback_error';
     const detail = message.slice(0, 200);
