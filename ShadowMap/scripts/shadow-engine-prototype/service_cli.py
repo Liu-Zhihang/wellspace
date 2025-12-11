@@ -6,7 +6,7 @@ The script expects a JSON payload on STDIN with the following structure:
   "bbox": {"west": ..., "south": ..., "east": ..., "north": ...},
   "timestamp": "2025-01-01T03:00:00",
   "timezone": "Asia/Hong_Kong",
-  "backendUrl": "http://localhost:3500",
+        "backendUrl": "http://localhost:3001",
   "maxFeatures": 8000,
   "geometry": {... optional GeoJSON feature ...},
   "samples": {"grid": 6},

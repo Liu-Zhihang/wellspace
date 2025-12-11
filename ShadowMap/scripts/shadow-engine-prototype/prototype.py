@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
         help="ISO-8601 timestamp (local time unless --timezone supplied)",
     )
     parser.add_argument("--timezone", type=str, default="Asia/Hong_Kong")
-    parser.add_argument("--backend-url", type=str, default="http://localhost:3500")
+    parser.add_argument("--backend-url", type=str, default="http://localhost:3001")
     parser.add_argument("--max-features", type=int, default=8000)
     parser.add_argument(
         "--output-dir",

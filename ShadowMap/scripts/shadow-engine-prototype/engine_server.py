@@ -6,7 +6,7 @@ long-lived HTTP server. It is intended to be pointed to by the Node backend via
 better use of multi-core hosts.
 
 Environment variables:
-  BACKEND_BASE_URL   URL for building fetches (default: http://localhost:3500)
+  BACKEND_BASE_URL   URL for building fetches (default: http://localhost:3001)
   TIMEZONE           Timezone string (default: Asia/Hong_Kong)
   MAX_FEATURES       Max building features to load (default: 8000)
   WORKERS            Process pool size (default: CPU count)
@@ -51,7 +51,7 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-DEFAULT_BACKEND = os.getenv("BACKEND_BASE_URL", "http://localhost:3500")
+DEFAULT_BACKEND = os.getenv("BACKEND_BASE_URL", "http://localhost:3001")
 DEFAULT_TZ = os.getenv("TIMEZONE", "Asia/Hong_Kong")
 DEFAULT_MAX_FEATURES = _env_int("MAX_FEATURES", 8000)
 DEFAULT_GRID = _env_int("SAMPLE_GRID", 6)
