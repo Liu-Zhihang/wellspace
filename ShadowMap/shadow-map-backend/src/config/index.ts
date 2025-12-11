@@ -47,8 +47,8 @@ const config: Config = {
     weatherBaseUrl: process.env['WEATHER_API_URL'] || null,
   },
   analysis: {
-    // 优先 ENV，缺省为 null（worker 模式时不走 external）
-    engineBaseUrl: process.env['SHADOW_ENGINE_BASE_URL'] || null,
+    // 强制为 null，避免 .env 注入导致误走 external，worker 模式请配置 localScriptPath
+    engineBaseUrl: null,
     requestTimeoutMs: Number.parseInt(process.env['SHADOW_ENGINE_TIMEOUT_MS'] || '45000', 10),
     cacheTtlMs: Number.parseInt(process.env['SHADOW_ENGINE_CACHE_TTL_MS'] || '120000', 10),
     maxCacheEntries: Number.parseInt(process.env['SHADOW_ENGINE_CACHE_MAX_KEYS'] || '200', 10),
