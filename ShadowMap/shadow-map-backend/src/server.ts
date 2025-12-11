@@ -4,8 +4,9 @@ import app from './app';
 dotenv.config();
 
 const port = Number(process.env['PORT'] || 3500);
+const SKIP_DB = process.env['SKIP_DB'] === 'true';
 
-function bootServer(startPort: number): void {
+async function bootServer(startPort: number): Promise<void> {
   const server = app.listen(startPort, () => {
     console.log(`🚀 Shadow Map Backend Server is running on port ${startPort}`);
     console.log(`📍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
@@ -30,7 +31,35 @@ function bootServer(startPort: number): void {
   (global as any).server = server;
 }
 
-bootServer(port);
+async function startServer(): Promise<void> {
+  if (SKIP_DB) {
+    console.log('[DB] SKIP_DB=true, skipping database initialization');
+    await bootServer(port);
+    return;
+  }
+
+  // Try to initialize database if the module exists; ignore failures in non-DB environments.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const maybeDb = require('./config/database');
+    const initializer =
+      (maybeDb && maybeDb.initializeDatabase) ||
+      (maybeDb && maybeDb.default && maybeDb.default.initializeDatabase);
+
+    if (initializer) {
+      await initializer();
+      console.log('[DB] Database initialized');
+    } else {
+      console.warn('[DB] No database initializer found, continuing without DB');
+    }
+  } catch (err) {
+    console.warn('[DB] Database initialization skipped due to error:', err instanceof Error ? err.message : err);
+  }
+
+  await bootServer(port);
+}
+
+startServer();
 
 // 监听未捕获的异常
 process.on('uncaughtException', (error) => {
