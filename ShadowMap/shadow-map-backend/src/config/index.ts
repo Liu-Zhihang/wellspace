@@ -37,13 +37,18 @@ const config: Config = {
   port: Number.parseInt(process.env['PORT'] || '3500', 10),
   data: {
     demPath: process.env['DEM_DATA_PATH'] || path.join(__dirname, '../../data/dem'),
-    buildingsPath: process.env['BUILDINGS_DATA_PATH'] || path.join(__dirname, '../../data/local-buildings'),
+    // 优先使用 BUILDING_LOCAL_GEOJSON，其次 BUILDINGS_DATA_PATH，最后默认路径
+    buildingsPath:
+      process.env['BUILDING_LOCAL_GEOJSON'] ||
+      process.env['BUILDINGS_DATA_PATH'] ||
+      path.join(__dirname, '../../data/local-buildings'),
   },
   api: {
     weatherBaseUrl: process.env['WEATHER_API_URL'] || null,
   },
   analysis: {
-    engineBaseUrl: process.env['SHADOW_ENGINE_BASE_URL'] || null,
+    // 优先 ENV，缺省指向本机 9000
+    engineBaseUrl: process.env['SHADOW_ENGINE_BASE_URL'] || 'http://localhost:9000',
     requestTimeoutMs: Number.parseInt(process.env['SHADOW_ENGINE_TIMEOUT_MS'] || '45000', 10),
     cacheTtlMs: Number.parseInt(process.env['SHADOW_ENGINE_CACHE_TTL_MS'] || '120000', 10),
     maxCacheEntries: Number.parseInt(process.env['SHADOW_ENGINE_CACHE_MAX_KEYS'] || '200', 10),
