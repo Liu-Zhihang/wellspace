@@ -12,7 +12,7 @@
  *   --input       输入根目录（递归处理 .csv）           默认 ../GLAN/spatial_temporal_merge
  *   --output      输出根目录（镜像子路径，文件加 -sunlight.csv） 默认 ../GLAN_processed
  *   --backend     后端 shadow API 地址                   默认 http://localhost:3001/api/analysis/shadow
- *   --canopy      canopy 栅格路径                       默认 /home/jinlin/data/HKtree_reprojected4326.tif
+ *   --canopy      canopy 栅格路径                       默认 /media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif
  *   --concurrency 并发桶数                             默认 4
  *   --force       是否覆盖已存在的输出文件             默认 false（存在则跳过）
  */
@@ -40,16 +40,18 @@ const parseArgs = () => {
 };
 
 const args = parseArgs();
-const defaultInput = path.resolve(__dirname, '..', '..', 'GLAN', 'PHASE1', 'spatial_temporal_merge');
-const defaultOutput = path.resolve(__dirname, '..', '..', 'GLAN_processed');
+// 默认路径使用英文 repo，避免中文目录被 URL 编码
+const DEFAULT_INPUT_ROOT = '/media/liuzhihang/repo/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge';
+const DEFAULT_OUTPUT_ROOT = '/media/liuzhihang/repo/projects/wellspace/GLAN_processed';
+const DEFAULT_CANOPY = '/media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif';
 
 const config = {
-  inputRoot: path.resolve(args['input'] ?? defaultInput),
-  outputRoot: path.resolve(args['output'] ?? defaultOutput),
-  backendUrl: (args['backend'] ?? 'http://localhost:3001/api/analysis/shadow').replace(/\/$/, ''),
-  weatherUrl: (args['weather'] ?? 'http://localhost:3001/api/weather/current').replace(/\/$/, ''),
-  canopyRasterPath: args['canopy'] ?? '/home/jinlin/data/HKtree_reprojected4326.tif',
-  concurrency: Number.parseInt(args['concurrency'] ?? '4', 10),
+  inputRoot: path.resolve(args['input'] ?? process.env.INPUT_ROOT ?? DEFAULT_INPUT_ROOT),
+  outputRoot: path.resolve(args['output'] ?? process.env.OUTPUT_ROOT ?? DEFAULT_OUTPUT_ROOT),
+  backendUrl: (args['backend'] ?? process.env.BACKEND_URL ?? 'http://localhost:3001/api/analysis/shadow').replace(/\/$/, ''),
+  weatherUrl: (args['weather'] ?? process.env.WEATHER_URL ?? 'http://localhost:3001/api/weather/current').replace(/\/$/, ''),
+  canopyRasterPath: args['canopy'] ?? process.env.CANOPY_RASTER_PATH ?? DEFAULT_CANOPY,
+  concurrency: Number.parseInt(args['concurrency'] ?? process.env.CONC ?? '4', 10),
   force: args['force'] === 'true' || args['force'] === true,
   bucketsFile: args['buckets-file'] ?? args['bucketsFile'],
   targetFile: args['target-file'] ?? args['targetFile'],
