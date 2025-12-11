@@ -18,6 +18,9 @@ import requests
 from shapely.geometry import shape, box, mapping, Point
 from shapely.ops import unary_union
 
+# Optional local buildings override (bypass HTTP)
+ENGINE_BUILDING_LOCAL_GEOJSON = os.getenv("ENGINE_BUILDING_LOCAL_GEOJSON")
+
 _PYBDSHADOW_API: str | None = None
 # Default canopy raster path (can be overridden by env or request metadata)
 CANOPY_RASTER_PATH = os.getenv('CANOPY_RASTER_PATH', '/home/jinlin/data/HKtree_reprojected4326.tif')
@@ -45,7 +48,27 @@ else:
     _PYBDSHADOW_API = "submodule"
 
 
+def _read_local_buildings(bounds: Mapping[str, float], local_path: str) -> Dict[str, Any]:
+    """Read buildings from a local GeoJSON/GPKG and return FeatureCollection-like dict."""
+    bbox = (bounds["west"], bounds["south"], bounds["east"], bounds["north"])
+    gdf = gpd.read_file(local_path, bbox=bbox)
+    features = json.loads(gdf.to_json()) if not gdf.empty else {"type": "FeatureCollection", "features": []}
+    return {
+        "type": "FeatureCollection",
+        "features": features["features"] if isinstance(features, dict) else [],
+        "metadata": {
+            "source": "local-file",
+            "totalFeatures": len(gdf),
+            "numberReturned": len(gdf),
+        },
+    }
+
+
 def fetch_buildings(bounds: Mapping[str, float], backend_url: str, max_features: int) -> Dict[str, Any]:
+    # Prefer local override if provided
+    if ENGINE_BUILDING_LOCAL_GEOJSON:
+        return _read_local_buildings(bounds, ENGINE_BUILDING_LOCAL_GEOJSON)
+
     url = f"{backend_url.rstrip('/')}/api/buildings/bounds"
     payload = {**bounds, "maxFeatures": max_features}
     response = requests.post(url, json=payload, timeout=60)
