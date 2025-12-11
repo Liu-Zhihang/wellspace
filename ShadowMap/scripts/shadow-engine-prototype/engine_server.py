@@ -27,7 +27,7 @@ from concurrent.futures.process import BrokenProcessPool
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from engine_core import (
     AnalysisInput,
@@ -82,7 +82,7 @@ class BoundingBox(BaseModel):
 
 
 class ShadowRequest(BaseModel):
-    bbox: BoundingBox
+    bbox: BoundingBox | list[float] | dict[str, float]
     timestamp: str
     timezone: Optional[str] = Field(default=None)
     backendUrl: Optional[str] = Field(default=None, alias="backend_url")
@@ -92,6 +92,27 @@ class ShadowRequest(BaseModel):
     samples: Optional[Dict[str, int]] = None  # {grid?, timeSteps?, stepMinutes?}
     metadata: Optional[Dict[str, Any]] = None
     includeCanopy: Optional[bool] = Field(default=None, alias="include_canopy")
+
+    @model_validator(mode="after")
+    def coerce_bbox(self) -> "ShadowRequest":
+        """接受 bbox 为对象或长度为4的数组。"""
+        if isinstance(self.bbox, list) and len(self.bbox) == 4:
+            w, s, e, n = self.bbox
+            self.bbox = BoundingBox(west=w, south=s, east=e, north=n)
+        elif isinstance(self.bbox, dict):
+            # 允许 keys 混合大小写
+            lower = {k.lower(): v for k, v in self.bbox.items()}
+            self.bbox = BoundingBox(
+                west=float(lower["west"]),
+                south=float(lower["south"]),
+                east=float(lower["east"]),
+                north=float(lower["north"]),
+            )
+        elif isinstance(self.bbox, BoundingBox):
+            pass
+        else:
+            raise ValueError("bbox must be [west,south,east,north] or object with west/south/east/north")
+        return self
 
 
 def _run_single(payload: ShadowRequest, request_id: str) -> Dict[str, Any]:
