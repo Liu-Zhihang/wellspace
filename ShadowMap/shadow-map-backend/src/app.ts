@@ -9,6 +9,7 @@ import demRoutes from './routes/dem';
 import healthRoutes from './routes/health';
 import buildingRoutes from './routes/buildings';
 import buildingWfsRoutes from './routes/buildingWfs';
+import tileRoutes from './routes/tiles';
 import weatherRoutes from './routes/weather';
 import analysisRoutes from './routes/analysis';
 
@@ -58,6 +59,7 @@ app.use('/api/health', healthRoutes);
 app.use('/api/dem', demRoutes);
 app.use('/api/buildings', buildingRoutes);
 app.use('/api/wfs-buildings', buildingWfsRoutes);
+app.use('/api/tiles', tileRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/analysis', analysisRoutes);
 
