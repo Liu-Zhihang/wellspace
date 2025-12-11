@@ -7,10 +7,14 @@ import {
   type BoundingBox
 } from '../services/buildingWfsService';
 import { resolveTilesForBounds } from '../services/tileCatalogService';
+import { queryLocalBuildings } from '../services/localBuildingService';
 
 const router = express.Router();
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const BUILDING_SOURCE = (process.env['BUILDING_SOURCE'] ?? 'wfs').toLowerCase();
+const LOCAL_BUILDING_FILE = process.env['BUILDING_LOCAL_GEOJSON'];
 
 function tileToBounds(z: number, x: number, y: number): BoundingBox {
   const safeZ = clamp(Math.floor(z), 0, 22);
@@ -49,7 +53,34 @@ router.get('/:z/:x/:y.json', async (req: Request, res: Response) => {
 
   try {
     const bounds = tileToBounds(z, x, y);
-    const wfsResponse = await fetchWfsBuildingsPaginated(bounds, 2000);
+    const maxFeatures = 2000;
+
+    if (BUILDING_SOURCE === 'local' && LOCAL_BUILDING_FILE) {
+      const local = await queryLocalBuildings(LOCAL_BUILDING_FILE, bounds, maxFeatures);
+      const bbox: [number, number, number, number] = [bounds.west, bounds.south, bounds.east, bounds.north];
+
+      res.set({
+        'Content-Type': 'application/json',
+        'Cache-Control': 'public, max-age=120',
+        'X-Building-Count': local.features.length.toString(),
+        'X-Data-Source': 'local',
+      });
+
+      res.json({
+        type: 'FeatureCollection',
+        features: local.features,
+        bbox,
+        tileInfo: { z, x, y },
+        metadata: {
+          source: 'local',
+          totalFeatures: local.metadata.totalFeatures,
+          numberReturned: local.metadata.numberReturned,
+        },
+      });
+      return;
+    }
+
+    const wfsResponse = await fetchWfsBuildingsPaginated(bounds, maxFeatures);
     const normalized = convertWfsToStandardGeoJSON(wfsResponse);
 
     const bbox: [number, number, number, number] = [bounds.west, bounds.south, bounds.east, bounds.north];
@@ -105,7 +136,28 @@ router.post('/bounds', async (req: Request, res: Response) => {
   };
 
   try {
-    const wfsResponse = await fetchWfsBuildings(bounds, Number(maxFeatures) || 5000);
+    const limit = Number(maxFeatures) || 5000;
+
+    if (BUILDING_SOURCE === 'local' && LOCAL_BUILDING_FILE) {
+      const local = await queryLocalBuildings(LOCAL_BUILDING_FILE, bounds, limit);
+      res.json({
+        success: true,
+        data: {
+          type: 'FeatureCollection',
+          features: local.features,
+          metadata: local.metadata,
+        },
+        metadata: {
+          source: 'local',
+          bounds,
+          tilesQueried: resolveTilesForBounds(bounds).tileIds,
+          totalFeatures: local.metadata.totalFeatures,
+        },
+      });
+      return;
+    }
+
+    const wfsResponse = await fetchWfsBuildings(bounds, limit);
     const normalized = convertWfsToStandardGeoJSON(wfsResponse);
 
     res.json({

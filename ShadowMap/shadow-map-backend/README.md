@@ -45,6 +45,8 @@
 | `BUILDING_WFS_TILE_CATALOG_PATH` | Path to GeoServer tile catalogue JSON (optional) |
 | `BUILDING_WFS_TILE_STRATEGY` | `optional` (default) or `required` for strict tile matching |
 | `BUILDING_WFS_BASE_URL` | GeoServer base URL for WFS queries |
+| `BUILDING_SOURCE` | `wfs` (default) or `local` to read a local GeoJSON instead of WFS |
+| `BUILDING_LOCAL_GEOJSON` | Path to local buildings GeoJSON when `BUILDING_SOURCE=local` |
 | `GFS_API_BASE_URL` | Upstream endpoint for weather snapshots (defaults to NOAA GFS proxy) |
 
 (`.env.example` documents the full list.)
