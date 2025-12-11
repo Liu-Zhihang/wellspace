@@ -56,7 +56,8 @@ const config: Config = {
     localScriptPath: process.env['SHADOW_ENGINE_SCRIPT_PATH'] || null,
     pythonPath: process.env['SHADOW_ENGINE_PYTHON_PATH'] || 'python3',
     timezone: process.env['SHADOW_ENGINE_TIMEZONE'] || 'Asia/Hong_Kong',
-    backendBaseUrl: process.env['SHADOW_ENGINE_BACKEND_URL'] || 'http://localhost:3500',
+    // 本地脚本调用后端的基址，默认改为 3001，可被 env 覆盖
+    backendBaseUrl: process.env['SHADOW_ENGINE_BACKEND_URL'] || 'http://localhost:3001',
     maxFeatures: Number.parseInt(process.env['SHADOW_ENGINE_MAX_FEATURES'] || '8000', 10),
     canopyRasterPath: process.env['SHADOW_ENGINE_CANOPY_RASTER_PATH'] || null,
   },
