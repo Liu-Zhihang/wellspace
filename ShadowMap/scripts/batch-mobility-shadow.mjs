@@ -351,14 +351,16 @@ const processBucket = async (payload, rows, fileLabel) => {
     });
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    const isExpectedError = errMsg.includes('HTTP 500') || errMsg.includes('HTTP 400');
+    // 可忽略的预期错误：夜间 / 无建筑（可能返回 400/500/502）
+    const isNight = errMsg.includes('Given time before sunrise or after sunset') || errMsg.toLowerCase().includes('outside daylight');
+    const noBldg = errMsg.includes('No building features returned');
+    const isExpectedError = errMsg.includes('HTTP 500') || errMsg.includes('HTTP 400') || errMsg.includes('HTTP 502') || isNight || noBldg;
     if (!isExpectedError) {
       console.warn(`[Bucket error][${fileLabel}][${payload.bucketKey}] ${errMsg}`);
     }
-    const message = errMsg;
-    const statusMatch = message.match(/HTTP\\s+(\\d{3})/i);
+    const statusMatch = errMsg.match(/HTTP\\s+(\\d{3})/i);
     const sourceLabel = statusMatch ? `fallback_error:${statusMatch[1]}` : 'fallback_error';
-    const detail = message.slice(0, 200);
+    const detail = errMsg.slice(0, 200);
     payload.rows.forEach(({ index }) => {
       rows[index]['sunlit'] = 0;
       rows[index]['shadowPercent'] = 0;
