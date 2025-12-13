@@ -13,6 +13,7 @@ large multi-core machines.
 from __future__ import annotations
 
 import argparse
+import atexit
 import csv
 import json
 import math
@@ -268,6 +269,8 @@ def build_bucket_payload(bucket_key: str, points: Sequence[BucketPoint]) -> Dict
 @dataclass(frozen=True)
 class WorkerConfig:
     buildings_path: str
+    buildings_layer: Optional[str]
+    buildings_mode: str
     canopy_raster_path: Optional[str]
     include_canopy: bool
     timezone: str
@@ -301,6 +304,30 @@ class BucketResult:
 _WEATHER_CACHE: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
 _ERA5_DATASET_CACHE: Dict[str, Tuple[Any, str]] = {}
 _CANOPY_DATASET_CACHE: Dict[str, Any] = {}
+_BUILDINGS_PRELOAD_CACHE: Dict[Tuple[str, Optional[str]], Dict[str, Any]] = {}
+
+
+def _cleanup_caches() -> None:
+    for ds, _engine in list(_ERA5_DATASET_CACHE.values()):
+        try:
+            close = getattr(ds, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            pass
+    _ERA5_DATASET_CACHE.clear()
+
+    for ds in list(_CANOPY_DATASET_CACHE.values()):
+        try:
+            close = getattr(ds, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            pass
+    _CANOPY_DATASET_CACHE.clear()
+
+
+atexit.register(_cleanup_caches)
 
 
 def _open_era5_dataset(file_path: str):
@@ -420,14 +447,85 @@ def _open_canopy_dataset(path: str):
     return ds
 
 
-def _load_buildings(bounds: Dict[str, float], buildings_path: str, max_features: int):
+def _load_buildings(
+    bounds: Dict[str, float],
+    buildings_path: str,
+    max_features: int,
+    layer: Optional[str],
+):
     import geopandas as gpd
 
     bbox = (bounds["west"], bounds["south"], bounds["east"], bounds["north"])
-    gdf = gpd.read_file(buildings_path, bbox=bbox)
+    gdf = gpd.read_file(buildings_path, bbox=bbox, layer=layer) if layer else gpd.read_file(buildings_path, bbox=bbox)
     if max_features > 0 and len(gdf) > max_features:
         gdf = gdf.iloc[:max_features].copy()
     return gdf
+
+
+def _preload_buildings(buildings_path: str, layer: Optional[str]) -> None:
+    key = (buildings_path, layer)
+    if key in _BUILDINGS_PRELOAD_CACHE:
+        return
+
+    import geopandas as gpd
+    import numpy as np
+
+    gdf = gpd.read_file(buildings_path, layer=layer) if layer else gpd.read_file(buildings_path)
+    geometry_col = gdf.geometry.name
+
+    keep_columns = [geometry_col]
+    for col in ("height", "HEIGHT", "height_mean", "levels", "height_m"):
+        if col in gdf.columns and col not in keep_columns:
+            keep_columns.append(col)
+    gdf = gdf[keep_columns]
+
+    bounds_df = gdf.geometry.bounds
+    cache = {
+        "gdf": gdf,
+        "minx": bounds_df["minx"].to_numpy(dtype=np.float64, copy=True),
+        "miny": bounds_df["miny"].to_numpy(dtype=np.float64, copy=True),
+        "maxx": bounds_df["maxx"].to_numpy(dtype=np.float64, copy=True),
+        "maxy": bounds_df["maxy"].to_numpy(dtype=np.float64, copy=True),
+    }
+    _BUILDINGS_PRELOAD_CACHE[key] = cache
+
+
+def _load_buildings_preloaded(
+    bounds: Dict[str, float],
+    buildings_path: str,
+    max_features: int,
+    layer: Optional[str],
+):
+    import numpy as np
+
+    key = (buildings_path, layer)
+    if key not in _BUILDINGS_PRELOAD_CACHE:
+        _preload_buildings(buildings_path, layer)
+    cache = _BUILDINGS_PRELOAD_CACHE[key]
+    gdf = cache["gdf"]
+
+    west = bounds["west"]
+    south = bounds["south"]
+    east = bounds["east"]
+    north = bounds["north"]
+
+    minx = cache["minx"]
+    miny = cache["miny"]
+    maxx = cache["maxx"]
+    maxy = cache["maxy"]
+
+    mask = (minx <= east) & (maxx >= west) & (miny <= north) & (maxy >= south)
+    idx = np.nonzero(mask)[0]
+    subset = gdf.iloc[idx]
+    if max_features > 0 and len(subset) > max_features:
+        subset = subset.iloc[:max_features]
+    return subset
+
+
+def _get_buildings(bounds: Dict[str, float], worker: WorkerConfig):
+    if worker.buildings_mode == "preload":
+        return _load_buildings_preloaded(bounds, worker.buildings_path, worker.max_features, worker.buildings_layer)
+    return _load_buildings(bounds, worker.buildings_path, worker.max_features, worker.buildings_layer)
 
 
 def _process_bucket(job: BucketJob) -> BucketResult:
@@ -472,7 +570,7 @@ def _process_bucket(job: BucketJob) -> BucketResult:
 
         from engine_core import canopy_to_gdf, calculate_shadow_coverage, generate_shadows
 
-        buildings = _load_buildings(job.bbox, job.worker.buildings_path, job.worker.max_features)
+        buildings = _get_buildings(job.bbox, job.worker)
         if buildings.empty:
             raise RuntimeError("No building features returned for the specified bounds/geometry")
 
@@ -561,31 +659,86 @@ def _process_bucket(job: BucketJob) -> BucketResult:
         return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
 
 
-def run_bucket_jobs(jobs: Sequence[BucketJob], max_workers: int) -> Iterable[BucketResult]:
+def _job_failure_result(job: BucketJob, error: BaseException) -> BucketResult:
+    detail = str(error)[:200]
+    updates: List[RowUpdate] = []
+    for point in job.points:
+        updates.append(
+            RowUpdate(
+                index=point.index,
+                values={
+                    "sunlit": 0,
+                    "shadowPercent": 0,
+                    "bucketStart": job.bucket_key,
+                    "bucketEnd": job.bucket_key,
+                    "source": "fallback_error",
+                    "errorDetail": detail,
+                    "cloudCover": "",
+                    "sunlightFactor": "",
+                    "sunlitEffective": "",
+                    "shadowPercentEffective": "",
+                    "solarIrradianceWm2": "",
+                    "irradianceEffective": "",
+                },
+            )
+        )
+    warnings = [f"[Bucket crash][{job.file_label}][{job.bucket_key}] {detail}"]
+    return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
+
+
+def run_bucket_jobs(
+    jobs: Sequence[BucketJob],
+    max_workers: int,
+    executor: Optional[ProcessPoolExecutor] = None,
+) -> Iterable[BucketResult]:
     if not jobs:
         return []
     max_workers = max(1, max_workers)
-    iterator = iter(jobs)
-    in_flight = set()
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    iterator = iter(jobs)
+    in_flight: set[Any] = set()
+    future_to_job: Dict[Any, BucketJob] = {}
+
+    def submit_next(target_executor: ProcessPoolExecutor) -> bool:
+        try:
+            next_job = next(iterator)
+        except StopIteration:
+            return False
+        future = target_executor.submit(_process_bucket, next_job)
+        in_flight.add(future)
+        future_to_job[future] = next_job
+        return True
+
+    def run(target_executor: ProcessPoolExecutor) -> Iterable[BucketResult]:
         for _ in range(max_workers):
-            try:
-                job = next(iterator)
-            except StopIteration:
+            if not submit_next(target_executor):
                 break
-            in_flight.add(executor.submit(_process_bucket, job))
 
         while in_flight:
-            done, in_flight = wait(in_flight, return_when=FIRST_COMPLETED)
+            done, pending = wait(in_flight, return_when=FIRST_COMPLETED)
+            in_flight.clear()
+            in_flight.update(pending)
             for future in done:
-                result = future.result()
-                yield result
+                job = future_to_job.pop(future, None)
                 try:
-                    job = next(iterator)
-                except StopIteration:
-                    continue
-                in_flight.add(executor.submit(_process_bucket, job))
+                    yield future.result()
+                except Exception as exc:
+                    if job is None:
+                        yield BucketResult(
+                            bucket_key="unknown",
+                            row_updates=[],
+                            warnings=[f"[Bucket crash][unknown] {str(exc)[:200]}"],
+                        )
+                    else:
+                        yield _job_failure_result(job, exc)
+                submit_next(target_executor)
+
+    if executor is not None:
+        yield from run(executor)
+        return
+
+    with ProcessPoolExecutor(max_workers=max_workers) as local_executor:
+        yield from run(local_executor)
 
 
 def compute_duration_fields(headers: Sequence[str], rows: List[Dict[str, Any]]) -> None:
@@ -641,6 +794,8 @@ class Config:
     backend_url: str
     weather_url: str
     buildings_path: str
+    buildings_layer: Optional[str]
+    buildings_mode: str
     canopy_raster_path: Optional[str]
     include_canopy: bool
     era5_file_template: Optional[str]
@@ -680,6 +835,19 @@ def parse_args(argv: Sequence[str]) -> Config:
         dest="buildings_path",
         default=os.getenv("BUILDING_LOCAL_GEOJSON", "") or os.getenv("ENGINE_BUILDING_LOCAL_GEOJSON", ""),
         help="Local buildings dataset (GPKG/GeoJSON). Defaults to $BUILDING_LOCAL_GEOJSON.",
+    )
+    parser.add_argument(
+        "--buildings-layer",
+        dest="buildings_layer",
+        default=os.getenv("BUILDING_GPKG_LAYER", "") or os.getenv("BUILDINGS_LAYER", ""),
+        help="Optional layer name for multi-layer GPKG (e.g. hk_buildings).",
+    )
+    parser.add_argument(
+        "--buildings-mode",
+        dest="buildings_mode",
+        default=os.getenv("MOBILITY_BUILDINGS_MODE", "bbox"),
+        choices=("bbox", "preload"),
+        help="Building query strategy: bbox (read window) or preload (load once in memory).",
     )
     parser.add_argument(
         "--canopy",
@@ -735,6 +903,8 @@ def parse_args(argv: Sequence[str]) -> Config:
         backend_url=str(args.backend_url).rstrip("/"),
         weather_url=str(args.weather_url).rstrip("/"),
         buildings_path=str(args.buildings_path),
+        buildings_layer=str(args.buildings_layer).strip() or None,
+        buildings_mode=str(args.buildings_mode),
         canopy_raster_path=canopy_path,
         include_canopy=parse_bool(args.include_canopy, default=True),
         era5_file_template=str(args.era5_file_template).strip() or None,
@@ -748,7 +918,13 @@ def parse_args(argv: Sequence[str]) -> Config:
     )
 
 
-def process_file(file_path: Path, idx: int, total: int, config: Config) -> None:
+def process_file(
+    file_path: Path,
+    idx: int,
+    total: int,
+    config: Config,
+    executor: Optional[ProcessPoolExecutor] = None,
+) -> None:
     relative = os.path.relpath(file_path, config.input_root)
     out_dir = Path(config.output_root) / Path(relative).parent
     base = file_path.stem
@@ -790,6 +966,8 @@ def process_file(file_path: Path, idx: int, total: int, config: Config) -> None:
 
     worker_cfg = WorkerConfig(
         buildings_path=config.buildings_path,
+        buildings_layer=config.buildings_layer,
+        buildings_mode=config.buildings_mode,
         canopy_raster_path=config.canopy_raster_path,
         include_canopy=config.include_canopy,
         timezone=config.timezone,
@@ -819,7 +997,7 @@ def process_file(file_path: Path, idx: int, total: int, config: Config) -> None:
         f"{' (filtered)' if filter_buckets else ''}"
     )
 
-    for result in run_bucket_jobs(jobs, config.concurrency):
+    for result in run_bucket_jobs(jobs, config.concurrency, executor=executor):
         for warn in result.warnings:
             print(warn, file=sys.stderr)
         for update in result.row_updates:
@@ -874,9 +1052,51 @@ def main(argv: Sequence[str]) -> int:
         print(f"No CSV files found under {config.input_root}", file=sys.stderr)
         return 1
 
+    import multiprocessing as mp
+
+    if config.buildings_mode == "preload":
+        if sys.platform != "linux":
+            print(
+                f"[Warning] preload mode relies on forked processes for memory sharing; platform={sys.platform}",
+                file=sys.stderr,
+            )
+        try:
+            if "fork" not in mp.get_all_start_methods():
+                print(
+                    "[Warning] preload mode cannot use fork on this platform; each worker may reload the buildings file",
+                    file=sys.stderr,
+                )
+        except Exception:
+            pass
+
+        if not config.buildings_path:
+            print("Missing buildings path: set --buildings or $BUILDING_LOCAL_GEOJSON", file=sys.stderr)
+            return 2
+        try:
+            # IMPORTANT:
+            # Preloading must happen in the parent process BEFORE creating the ProcessPoolExecutor.
+            # When using fork, the worker processes inherit the preloaded in-memory cache.
+            _preload_buildings(config.buildings_path, config.buildings_layer)
+        except Exception as exc:
+            print(f"[Fatal] Failed to preload buildings dataset: {exc}", file=sys.stderr)
+            return 2
+
+    mp_ctx = None
+    if config.buildings_mode == "preload":
+        try:
+            if "fork" in mp.get_all_start_methods():
+                mp_ctx = mp.get_context("fork")
+        except Exception:
+            mp_ctx = None
+
     total = len(files)
-    for i, file_path in enumerate(files):
-        process_file(file_path, i, total, config)
+    executor_kwargs = {"max_workers": config.concurrency}
+    if mp_ctx is not None:
+        executor_kwargs["mp_context"] = mp_ctx
+
+    with ProcessPoolExecutor(**executor_kwargs) as executor:
+        for i, file_path in enumerate(files):
+            process_file(file_path, i, total, config, executor=executor)
 
     print("All files completed.")
     return 0

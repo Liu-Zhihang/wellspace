@@ -144,3 +144,120 @@ curl -I -x socks5h://127.0.0.1:1080 https://cms.hkust-gz.edu.cn
 2) **Docker 拉取卡住**：检查 `/etc/systemd/system/docker.service.d/http-proxy.conf` 中的 IP 是否当前局域网 IP，修改后 `sudo systemctl restart docker`。  
 3) **内网断连**：Session 过期，重新用 VNC (`127.0.0.1:5901`) 登录点击「登录」或重新验证。  
 4) **WSL 连不上 Windows 代理 (Connection Refused)**：Windows IP 变更或防火墙规则失效，更新 `.bashrc` 的 `hostip` 或重检防火墙规则。
+
+---
+
+## 7. 🔥 "Path selection failed" 网络错误排查 (2024-12 实战)
+
+### 7.1 问题现象
+
+VNC 连接正常，能看到 EasyConnect 登录界面，但点击登录后报错：
+
+```
+Path selection failed, possibly because network connection error occurs. Please try again later.
+```
+
+### 7.2 根本原因
+
+这个错误信息具有**误导性**，实际可能是以下原因之一：
+
+| 原因 | 说明 |
+|------|------|
+| **DNS 解析失败** | 容器内无法解析学校域名 |
+| **DNS 污染** | 宿主机代理（如 v2rayA）干扰了容器的 DNS |
+| **网络不通** | 容器无法访问外部网络（防火墙/iptables） |
+| **域名被拦截** | 某些网络环境下域名被 SNI 阻断 |
+
+### 7.3 排查步骤
+
+```bash
+# 1. 检查容器 DNS 配置
+docker exec -it easyconnect cat /etc/resolv.conf
+
+# 2. 在宿主机解析域名（指定公共 DNS）
+nslookup remote.hkust-gz.edu.cn 223.5.5.5
+
+# 3. 检查容器日志
+docker logs easyconnect
+```
+
+### 7.4 解决方案
+
+#### ✅ 方案 A：强制指定 DNS（推荐）
+
+启动容器时添加 `--dns` 参数，绕过宿主机 DNS：
+
+```bash
+docker rm -f easyconnect 2>/dev/null
+
+docker run --device /dev/net/tun --cap-add NET_ADMIN -ti -d \
+    --name easyconnect \
+    -p 1080:1080 \
+    -p 5901:5901 \
+    --dns 223.5.5.5 \
+    --dns 8.8.8.8 \
+    -e EC_VER=7.6.7 \
+    -e PASSWORD=xxxx \
+    hagb/docker-easyconnect:7.6.7
+```
+
+#### ✅ 方案 B：直接使用 IP 地址（终极方案）
+
+如果 DNS 问题无法解决，**绕过域名解析**，直接填 IP：
+
+```bash
+# 先解析出 IP
+nslookup remote.hkust-gz.edu.cn 223.5.5.5
+# 输出: Address: 218.107.35.197
+```
+
+然后在 VNC 的 EasyConnect 界面中，服务器地址填：
+
+```
+218.107.35.197
+```
+
+而不是 `remote.hkust-gz.edu.cn`。
+
+### 7.5 已知有效的学校 VPN IP
+
+| 学校 | 域名 | IP |
+|------|------|-----|
+| HKUST(GZ) | `remote.hkust-gz.edu.cn` | `218.107.35.197` |
+
+> ⚠️ IP 可能会变，如果连接失败，重新用 `nslookup` 解析一次。
+
+### 7.6 完整启动命令模板（集成所有 fix）
+
+```bash
+# 清理旧容器
+docker rm -f easyconnect 2>/dev/null
+
+# 启动（DNS 修正 + TUN 设备 + 网络权限）
+docker run --device /dev/net/tun --cap-add NET_ADMIN -ti -d \
+    --name easyconnect \
+    -p 1080:1080 \
+    -p 5901:5901 \
+    --dns 223.5.5.5 \
+    --dns 8.8.8.8 \
+    -e EC_VER=7.6.7 \
+    -e PASSWORD=your_vnc_password \
+    hagb/docker-easyconnect:7.6.7
+
+# 等待启动
+sleep 3
+
+# 检查状态
+docker ps | grep easyconnect
+docker logs easyconnect | tail -10
+```
+
+然后 VNC 连接 `服务器IP:5901`，在 EasyConnect 里填 **IP 地址** `218.107.35.197` 登录。
+
+### 7.7 Checklist
+
+- [ ] 容器添加了 `--device /dev/net/tun --cap-add NET_ADMIN`
+- [ ] 容器添加了 `--dns 223.5.5.5`
+- [ ] VNC 能正常连接
+- [ ] 服务器地址填的是 **IP** 而不是域名
+- [ ] 宿主机 TUN 模块已加载 (`ls /dev/net/tun`)
