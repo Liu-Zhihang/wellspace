@@ -19,11 +19,17 @@ from shapely.geometry import shape, box, mapping, Point
 from shapely.ops import unary_union
 
 # Optional local buildings override (bypass HTTP)
-ENGINE_BUILDING_LOCAL_GEOJSON = os.getenv("ENGINE_BUILDING_LOCAL_GEOJSON")
+ENGINE_BUILDING_LOCAL_GEOJSON = os.getenv("ENGINE_BUILDING_LOCAL_GEOJSON") or os.getenv(
+    "BUILDING_LOCAL_GEOJSON"
+)
 
 _PYBDSHADOW_API: str | None = None
 # Default canopy raster path (can be overridden by env or request metadata)
-CANOPY_RASTER_PATH = os.getenv('CANOPY_RASTER_PATH', '/home/jinlin/data/HKtree_reprojected4326.tif')
+CANOPY_RASTER_PATH = (
+    os.getenv("CANOPY_RASTER_PATH")
+    or os.getenv("SHADOW_ENGINE_CANOPY_RASTER_PATH")
+    or "/home/jinlin/data/HKtree_reprojected4326.tif"
+)
 # Minimum canopy height (meters) to consider
 CANOPY_HEIGHT_THRESHOLD = float(os.getenv('CANOPY_HEIGHT_THRESHOLD', '1'))
 try:  # pragma: no cover - handled at runtime
@@ -118,12 +124,22 @@ def preprocess_buildings(buildings: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     elif buildings.crs.to_string() != "EPSG:4326":
         buildings = buildings.to_crs("EPSG:4326")
 
-    if "height" not in buildings.columns:
-        buildings = buildings.copy()
-        if "height_m" in buildings.columns:
-            buildings["height"] = buildings["height_m"]
-        else:
-            buildings["height"] = 12.0
+    buildings = buildings.copy()
+
+    if "height" in buildings.columns:
+        buildings["height"] = pd.to_numeric(buildings["height"], errors="coerce").fillna(12.0)
+    else:
+        height_series = None
+        for candidate in ("height_m", "HEIGHT", "height_mean"):
+            if candidate in buildings.columns:
+                height_series = pd.to_numeric(buildings[candidate], errors="coerce")
+                break
+
+        if height_series is None and "levels" in buildings.columns:
+            levels = pd.to_numeric(buildings["levels"], errors="coerce")
+            height_series = levels * 3.5
+
+        buildings["height"] = height_series.fillna(12.0) if height_series is not None else 12.0
 
     if _PYBDSHADOW_MODULE is not None and hasattr(_PYBDSHADOW_MODULE, "bd_preprocess"):
         return _PYBDSHADOW_MODULE.bd_preprocess(buildings, height="height")  # type: ignore[attr-defined]
