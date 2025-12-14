@@ -15,7 +15,7 @@
  *   --buffers 200,100,500 \
  *   --backend http://localhost:3001/api/analysis/shadow \
  *   --weather http://localhost:3001/api/weather/current \
- *   --canopy /home/jinlin/data/HKtree_small_cog.tif
+ *   --canopy /path/to/canopy.tif
  */
 
 import fs from 'fs/promises';
@@ -48,9 +48,11 @@ const config = {
   start: args.start,
   end: args.end,
   buffers: (args.buffers ? args.buffers.split(',') : ['200', '100', '500', '1000']).map((v) => Number(v.trim())).filter(Number.isFinite),
-  backendUrl: (args.backend ?? 'http://localhost:3001/api/analysis/shadow').replace(/\/$/, ''),
-  weatherUrl: (args.weather ?? 'http://localhost:3001/api/weather/current').replace(/\/$/, ''),
-  canopy: args.canopy ?? '/home/jinlin/data/HKtree_small_cog.tif',
+  backendUrl: (args.backend ?? process.env.BACKEND_URL ?? 'http://localhost:3001/api/analysis/shadow').replace(/\/$/, ''),
+  weatherUrl: (args.weather ?? process.env.WEATHER_URL ?? 'http://localhost:3001/api/weather/current').replace(/\/$/, ''),
+  canopy:
+    (args.canopy ?? process.env.CANOPY_RASTER_PATH ?? process.env.SHADOW_ENGINE_CANOPY_RASTER_PATH ?? '').trim() ||
+    null,
 };
 
 if (!config.input || !config.start || !config.end) {
@@ -149,6 +151,9 @@ const fetchShadow = async (bbox, timestampIso) => {
     timestamp: timestampIso,
     timeGranularityMinutes: 1,
     outputs: { shadowPolygons: false, sunlightGrid: true, heatmap: false },
+    metadata: config.canopy
+      ? { includeCanopy: true, canopyRasterPath: config.canopy }
+      : { includeCanopy: false },
   };
   const res = await fetchJson(config.backendUrl, {
     method: 'POST',

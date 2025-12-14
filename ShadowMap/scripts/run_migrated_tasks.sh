@@ -3,22 +3,63 @@
 # 特性: 并发50 + 12G内存/线程 + PM2集群联动 + 自动隔离
 
 # === 配置区 ===
-BUCKET_DIR="/tmp/buckets_part1_migrated"
-QUARANTINE_DIR="/tmp/buckets_part1_migrated/quarantine"
+BUCKET_DIR="${BUCKET_DIR:-}"
+QUARANTINE_DIR="${QUARANTINE_DIR:-}"
 
-# 假设你的 repo 软连接是存在的，如果不存在请改为 /media/liuzhihang/仓库/...
-INPUT_ROOT="/media/liuzhihang/repo/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge"
-OUTPUT_ROOT="/media/liuzhihang/repo/projects/wellspace/GLAN_processed"
+# INPUT_ROOT/OUTPUT_ROOT should be provided via env/profile (see ShadowMap/.shadowmap.env.example).
+INPUT_ROOT="${INPUT_ROOT:-}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
 
 # 日志存当前目录
-LOG_FILE="./migration_problems.log"
+LOG_FILE="${LOG_FILE:-./migration_problems.log}"
 
 # === 内存设置 (关键) ===
 # 你的服务器有 768GB 内存。
 # 并发 50 * 12GB = 600GB，预留 168GB 给系统和后端，非常安全且高效。
 export NODE_OPTIONS="--max-old-space-size=12288"
 
-# 准备工作
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENGINE_WRAPPER="${ENGINE_WRAPPER:-${SCRIPT_DIR}/batch-mobility-shadow.sh}"
+
+# Optional: load a machine profile to avoid hardcoded paths in scripts.
+# Priority:
+# 1) $SHADOWMAP_ENV_FILE (explicit)
+# 2) ShadowMap/.shadowmap.env (local, gitignored)
+if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+    # shellcheck disable=SC1090
+    source "${SHADOWMAP_ENV_FILE}"
+elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.shadowmap.env"
+fi
+
+INPUT_ROOT="${INPUT_ROOT:-}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
+CANOPY_PATH="${CANOPY_PATH:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-${CANOPY_RASTER_PATH:-}}}"
+BACKEND_URL="${BACKEND_URL:-${BACKEND:-http://localhost:3001/api/analysis/shadow}}"
+WEATHER_URL="${WEATHER_URL:-${WEATHER:-http://localhost:3001/api/weather/current}}"
+CONC="${CONC:-50}"
+
+if [ -z "${INPUT_ROOT}" ]; then
+    echo "[Fatal] Missing INPUT_ROOT. Set it in env or source ShadowMap/.shadowmap.env" | tee -a "$LOG_FILE"
+    exit 1
+fi
+if [ -z "${OUTPUT_ROOT}" ]; then
+    echo "[Fatal] Missing OUTPUT_ROOT. Set it in env or source ShadowMap/.shadowmap.env" | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+TASK_ROOT="${SHADOWMAP_TASK_ROOT:-${OUTPUT_ROOT}/_shadowmap_tasks}"
+if [ -z "${BUCKET_DIR}" ]; then
+    BUCKET_DIR="${TASK_ROOT}/buckets_part1_migrated"
+fi
+if [ -z "${QUARANTINE_DIR}" ]; then
+    QUARANTINE_DIR="${BUCKET_DIR}/quarantine"
+fi
+
+# Prepare directories after resolving profile settings.
+mkdir -p "$BUCKET_DIR"
 mkdir -p "$QUARANTINE_DIR"
 touch "$LOG_FILE"
 
@@ -27,7 +68,7 @@ wait_for_backend() {
     local fail_count=0
     while true; do
         # 3秒超时，检查后端
-        if curl -s --max-time 3 "http://localhost:3001/api/weather/current" > /dev/null; then
+        if curl -s --max-time 3 "${WEATHER_URL}" > /dev/null; then
             return 0
         else
             echo "⚠️ [后端拥堵] 等待 2秒..."
@@ -83,15 +124,19 @@ for bf in "${files[@]}"; do
     # 2. 执行计算
     # 使用 $(pwd) 确保找到脚本
     # --concurrency 50: 既然后端有 112 个核，前端并发 50 是很安全的
-    timeout 1800s node "$(pwd)/batch-mobility-shadow.mjs" \
-        --input "$(dirname "$input_csv")" \
-        --output "$target_dir" \
-        --backend "http://localhost:3001/api/analysis/shadow" \
-        --weather "http://localhost:3001/api/weather/current" \
-        --canopy "/media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif" \
-        --concurrency 50 \
-        --buckets-file "$bf" \
-        --target-file "$(basename "$input_csv")"
+    cmd=(timeout 1800s "$ENGINE_WRAPPER" --engine node)
+    cmd+=(--input "$(dirname "$input_csv")")
+    cmd+=(--output "$target_dir")
+    cmd+=(--backend "$BACKEND_URL")
+    cmd+=(--weather "$WEATHER_URL")
+    if [ -n "${CANOPY_PATH}" ]; then
+        cmd+=(--canopy "${CANOPY_PATH}")
+    fi
+    cmd+=(--concurrency "$CONC")
+    cmd+=(--buckets-file "$bf")
+    cmd+=(--target-file "$(basename "$input_csv")")
+
+    "${cmd[@]}"
 
     EXIT_CODE=$?
 

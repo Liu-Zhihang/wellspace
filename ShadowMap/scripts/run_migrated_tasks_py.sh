@@ -10,11 +10,13 @@ export LC_ALL=C.UTF-8
 export NO_PROXY=localhost,127.0.0.1
 unset ALL_PROXY HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 
-BUCKET_DIR="${BUCKET_DIR:-/tmp/buckets_part1}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/media/liuzhihang/repo/projects/wellspace/GLAN_processed}"
-INPUT_ROOT_BASE="${INPUT_ROOT_BASE:-/media/liuzhihang/repo/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge}"
+BUCKET_DIR="${BUCKET_DIR:-}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
+INPUT_ROOT_BASE="${INPUT_ROOT_BASE:-${INPUT_ROOT:-}}"
 
-PY_SCRIPT="${PY_SCRIPT:-"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/batch_mobility_shadow.py"}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENGINE_WRAPPER="${ENGINE_WRAPPER:-${SCRIPT_DIR}/batch-mobility-shadow.sh}"
 
 CONC="${CONC:-8}"
 TIMEOUT="${TIMEOUT:-2400}"
@@ -25,11 +27,46 @@ BUILDINGS_MODE="${BUILDINGS_MODE:-${MOBILITY_BUILDINGS_MODE:-preload}}"
 CANOPY_PATH="${CANOPY_PATH:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-${CANOPY_RASTER_PATH:-}}}"
 ERA5_TEMPLATE_PATH="${ERA5_TEMPLATE_PATH:-${ERA5_FILE_TEMPLATE:-}}"
 
+# Optional: load a machine profile to avoid hardcoded paths in scripts.
+# Priority:
+# 1) $SHADOWMAP_ENV_FILE (explicit)
+# 2) ShadowMap/.shadowmap.env (local, gitignored)
+if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+  # shellcheck disable=SC1090
+  source "${SHADOWMAP_ENV_FILE}"
+elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
+  # shellcheck disable=SC1091
+  source "${REPO_ROOT}/.shadowmap.env"
+fi
+
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
+INPUT_ROOT_BASE="${INPUT_ROOT_BASE:-${INPUT_ROOT:-}}"
+BUILDINGS_PATH="${BUILDINGS_PATH:-${BUILDING_LOCAL_GEOJSON:-}}"
+BUILDINGS_LAYER="${BUILDINGS_LAYER:-${BUILDING_GPKG_LAYER:-}}"
+BUILDINGS_MODE="${BUILDINGS_MODE:-${MOBILITY_BUILDINGS_MODE:-preload}}"
+CANOPY_PATH="${CANOPY_PATH:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-${CANOPY_RASTER_PATH:-}}}"
+ERA5_TEMPLATE_PATH="${ERA5_TEMPLATE_PATH:-${ERA5_FILE_TEMPLATE:-}}"
+
+if [ -z "${OUTPUT_ROOT}" ]; then
+  echo "[Fatal] Missing OUTPUT_ROOT. Set it in env or source ShadowMap/.shadowmap.env" >&2
+  exit 1
+fi
+if [ -z "${INPUT_ROOT_BASE}" ]; then
+  echo "[Fatal] Missing INPUT_ROOT_BASE/INPUT_ROOT. Set it in env or source ShadowMap/.shadowmap.env" >&2
+  exit 1
+fi
+
+TASK_ROOT="${SHADOWMAP_TASK_ROOT:-${OUTPUT_ROOT}/_shadowmap_tasks}"
+if [ -z "${BUCKET_DIR}" ]; then
+  BUCKET_DIR="${TASK_ROOT}/buckets_part1"
+fi
+mkdir -p "$BUCKET_DIR"
+
 echo "=== Server B Python runner ==="
 echo "Bucket dir: ${BUCKET_DIR}"
 echo "Input root: ${INPUT_ROOT_BASE}"
 echo "Output root: ${OUTPUT_ROOT}"
-echo "Script: ${PY_SCRIPT}"
+echo "Engine wrapper: ${ENGINE_WRAPPER}"
 echo "Concurrency: ${CONC} | Timeout: ${TIMEOUT}s"
 echo "Buildings: ${BUILDINGS_PATH:-<unset>}"
 echo "Buildings layer: ${BUILDINGS_LAYER:-<unset>}"
@@ -90,7 +127,7 @@ for bf in "${files[@]}"; do
 
   echo "[${count}/${total}] Processing: ${source_name}"
 
-  cmd=(timeout "${TIMEOUT}s" python3 "${PY_SCRIPT}")
+  cmd=(timeout "${TIMEOUT}s" "${ENGINE_WRAPPER}" --engine python)
   cmd+=(--input "${input_dir}")
   cmd+=(--output "${target_dir}")
   cmd+=(--buildings "${BUILDINGS_PATH}")

@@ -6,6 +6,21 @@ set -euo pipefail
 
 ENGINE="${ENGINE:-python}"
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+
+# Optional: load a machine profile to avoid hardcoded paths in scripts.
+# Priority:
+# 1) $SHADOWMAP_ENV_FILE (explicit)
+# 2) ShadowMap/.shadowmap.env (local, gitignored)
+if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+  # shellcheck disable=SC1090
+  source "${SHADOWMAP_ENV_FILE}"
+elif [ -f "${repo_root}/.shadowmap.env" ]; then
+  # shellcheck disable=SC1091
+  source "${repo_root}/.shadowmap.env"
+fi
+
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -38,8 +53,6 @@ EOF
   esac
 done
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 case "${ENGINE}" in
   python|py)
     exec python3 "${script_dir}/batch_mobility_shadow.py" "${args[@]}"
@@ -52,4 +65,3 @@ case "${ENGINE}" in
     exit 2
     ;;
 esac
-

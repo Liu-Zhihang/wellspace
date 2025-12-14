@@ -16,31 +16,49 @@ export LC_ALL=C.UTF-8
 
 
 
-# 1. 路径全部改成新的 /repo 链接
+# 1. Inputs/outputs (set via env or ShadowMap/.shadowmap.env)
 
-BUCKET_DIR="/tmp/buckets_part2"
+BUCKET_DIR="${BUCKET_DIR:-}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
+INPUT_ROOT_BASE="${INPUT_ROOT_BASE:-${INPUT_ROOT:-}}"
 
-OUTPUT_ROOT="/media/liuzhihang/repo/projects/wellspace/GLAN_processed"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENGINE_WRAPPER="${ENGINE_WRAPPER:-${SCRIPT_DIR}/../scripts/batch-mobility-shadow.sh}"
 
-INPUT_ROOT_BASE="/media/liuzhihang/repo/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge"
+# Optional: load a machine profile (see ShadowMap/.shadowmap.env.example)
+if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+    # shellcheck disable=SC1090
+    source "${SHADOWMAP_ENV_FILE}"
+elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.shadowmap.env"
+fi
 
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
+INPUT_ROOT_BASE="${INPUT_ROOT_BASE:-${INPUT_ROOT:-}}"
+CANOPY="${CANOPY:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-${CANOPY_RASTER_PATH:-}}}"
 
+# 2. Backend URLs (HTTP pipeline only)
+BACKEND="${BACKEND:-${BACKEND_URL:-http://localhost:3001/api/analysis/shadow}}"
+WEATHER="${WEATHER:-${WEATHER_URL:-http://localhost:3001/api/weather/current}}"
+HEALTH_URL="${HEALTH_URL:-http://localhost:3001/api/health}"
+CONC="${CONC:-4}"
 
-# 2. 脚本和数据路径
+if [ -z "${OUTPUT_ROOT}" ]; then
+    echo "[Fatal] Missing OUTPUT_ROOT. Set it in env or source ShadowMap/.shadowmap.env"
+    exit 1
+fi
+if [ -z "${INPUT_ROOT_BASE}" ]; then
+    echo "[Fatal] Missing INPUT_ROOT_BASE/INPUT_ROOT. Set it in env or source ShadowMap/.shadowmap.env"
+    exit 1
+fi
 
-NODE_SCRIPT="/media/liuzhihang/repo/projects/ShadowMap/wellspace/ShadowMap/scripts/batch-mobility-shadow.mjs"
-
-CANOPY="/media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif"
-
-
-
-# 3. 后端配置
-
-BACKEND="http://localhost:3001/api/analysis/shadow"
-
-WEATHER="http://localhost:3001/api/weather/current"
-
-CONC=4
+TASK_ROOT="${SHADOWMAP_TASK_ROOT:-${OUTPUT_ROOT}/_shadowmap_tasks}"
+if [ -z "${BUCKET_DIR}" ]; then
+    BUCKET_DIR="${TASK_ROOT}/buckets_part2"
+fi
+mkdir -p "$BUCKET_DIR"
 
 
 
@@ -52,18 +70,13 @@ CONC=4
 
 echo "[Check] Backend health:"
 
-curl -s http://localhost:3001/api/health | head -c 200 && echo ""
+curl -s "${HEALTH_URL}" | head -c 200 && echo ""
 
 
 
-if [ ! -f "$NODE_SCRIPT" ]; then
-
-    echo "[错误] 找不到脚本: $NODE_SCRIPT"
-
-    echo "请检查第一步的 'repo' 软链接是否创建成功。"
-
+if [ ! -x "$ENGINE_WRAPPER" ]; then
+    echo "[错误] 找不到脚本: $ENGINE_WRAPPER"
     exit 1
-
 fi
 
 
@@ -94,7 +107,7 @@ fi
 
 
 
-echo "=== 开始处理 (共 $total 个任务) 使用路径: /media/liuzhihang/repo ==="
+echo "=== 开始处理 (共 $total 个任务) OUTPUT_ROOT=${OUTPUT_ROOT} ==="
 
 
 
@@ -172,7 +185,19 @@ for bf in "${files[@]}"; do
 
   # =======================================================
 
-  timeout 1200s node "$NODE_SCRIPT" --input "$input_dir" --output "$target_dir" --backend "$BACKEND" --weather "$WEATHER" --canopy "$CANOPY" --concurrency "$CONC" --buckets-file "$bf" --target-file "$source_name"
+  cmd=(timeout 1200s "$ENGINE_WRAPPER" --engine node)
+  cmd+=(--input "$input_dir")
+  cmd+=(--output "$target_dir")
+  cmd+=(--backend "$BACKEND")
+  cmd+=(--weather "$WEATHER")
+  if [ -n "${CANOPY}" ]; then
+      cmd+=(--canopy "$CANOPY")
+  fi
+  cmd+=(--concurrency "$CONC")
+  cmd+=(--buckets-file "$bf")
+  cmd+=(--target-file "$source_name")
+
+  "${cmd[@]}"
 
 
 

@@ -52,7 +52,7 @@ const RESOLVED_AXIS_ORDER: AxisOrder =
 const FALLBACK_AXIS_ORDER: AxisOrder = RESOLVED_AXIS_ORDER === 'latlon' ? 'lonlat' : 'latlon';
 
 const BUILDING_WFS_CONFIG = {
-  baseUrl: process.env['BUILDING_WFS_BASE_URL'] ?? 'http://10.13.12.164:8080/geoserver/shadowmap/wfs',
+  baseUrl: (process.env['BUILDING_WFS_BASE_URL'] ?? '').trim(),
   typeName: process.env['BUILDING_WFS_TYPE_NAME'] ?? 'shadowmap:buildings',
   version: BUILDING_WFS_VERSION,
   outputFormat: process.env['BUILDING_WFS_OUTPUT_FORMAT'] ?? 'application/json',
@@ -118,6 +118,10 @@ function buildRequestUrl(
   axisOrder: AxisOrder,
   tileIds: string[]
 ): string {
+  if (!BUILDING_WFS_CONFIG.baseUrl) {
+    throw new Error('BUILDING_WFS_BASE_URL is not configured.');
+  }
+
   const params: Record<string, string> = {
     service: 'WFS',
     version: BUILDING_WFS_CONFIG.version,

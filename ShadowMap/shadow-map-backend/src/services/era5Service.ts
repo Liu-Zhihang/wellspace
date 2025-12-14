@@ -3,9 +3,9 @@ import fs from 'fs';
 import { spawn } from 'child_process';
 
 const ERA5_DEFAULT_PATH =
-  process.env['ERA5_FILE_PATH'] || '/home/jinlin/data/era5/era5_202111_hk.nc';
+  (process.env['ERA5_FILE_PATH'] ?? '').trim();
 const ERA5_FILE_TEMPLATE =
-  process.env['ERA5_FILE_TEMPLATE'] || '/home/jinlin/data/era5/era5_%Y%m_hk.nc'; // 支持 %Y %m
+  (process.env['ERA5_FILE_TEMPLATE'] ?? '').trim(); // supports %Y %m
 // 优先环境变量；否则尝试 backend 根的 ../scripts/era5_extract.py；再回退 dist/scripts
 const ERA5_SCRIPT_CANDIDATES = [
   process.env['ERA5_PYTHON_SCRIPT'],
@@ -78,11 +78,18 @@ export class Era5Service {
   private resolveFilePath(time: Date): string {
     const y = time.getUTCFullYear().toString();
     const m = String(time.getUTCMonth() + 1).padStart(2, '0');
-    const templated = ERA5_FILE_TEMPLATE.replace('%Y', y).replace('%m', m);
-    if (fs.existsSync(templated)) {
-      return templated;
+    if (ERA5_FILE_TEMPLATE) {
+      const templated = ERA5_FILE_TEMPLATE.replace('%Y', y).replace('%m', m);
+      if (templated && fs.existsSync(templated)) {
+        return templated;
+      }
     }
-    return ERA5_DEFAULT_PATH;
+
+    if (ERA5_DEFAULT_PATH && fs.existsSync(ERA5_DEFAULT_PATH)) {
+      return ERA5_DEFAULT_PATH;
+    }
+
+    throw new Error('ERA5 is not configured. Set ERA5_FILE_TEMPLATE or ERA5_FILE_PATH.');
   }
 
   private resolveScriptPath(): string | null {

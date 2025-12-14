@@ -14,7 +14,7 @@ const DEM_DATA_DIR = path.join(__dirname, '../../data/dem');
 const TERRARIUM_BASE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
 
 // GeoServer配置
-const GEOSERVER_BASE_URL = process.env['GEOSERVER_BASE_URL'] || 'http://10.13.12.164:8080/geoserver/shadowmap';
+const GEOSERVER_BASE_URL = (process.env['GEOSERVER_BASE_URL'] ?? '').trim();
 const GEOSERVER_LAYER = process.env['GEOSERVER_DEM_LAYER'] || 'shadowmap:dem_munich';
 const GEOSERVER_BBOX = {
     minLng: 11.4,
@@ -436,6 +436,10 @@ async function saveDEMTile(z: number, x: number, y: number, buffer: Buffer): Pro
  * 当前配置：仅使用GeoServer数据源（测试模式）
  */
 export async function getDEMTile(z: number, x: number, y: number): Promise<Buffer> {
+    if (!GEOSERVER_BASE_URL) {
+        throw new Error('GEOSERVER_BASE_URL is not configured.');
+    }
+
     // 验证瓦片坐标有效性
     const n = Math.pow(2, z);
     if (x < 0 || x >= n || y < 0 || y >= n) {

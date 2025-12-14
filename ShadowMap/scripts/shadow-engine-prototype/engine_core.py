@@ -28,7 +28,7 @@ _PYBDSHADOW_API: str | None = None
 CANOPY_RASTER_PATH = (
     os.getenv("CANOPY_RASTER_PATH")
     or os.getenv("SHADOW_ENGINE_CANOPY_RASTER_PATH")
-    or "/home/jinlin/data/HKtree_reprojected4326.tif"
+    or ""
 )
 # Minimum canopy height (meters) to consider
 CANOPY_HEIGHT_THRESHOLD = float(os.getenv('CANOPY_HEIGHT_THRESHOLD', '1'))

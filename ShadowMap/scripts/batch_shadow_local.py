@@ -10,7 +10,7 @@
 用法示例：
 python batch_shadow_local.py \
   --tasks /path/to/tasks.csv \
-  --buildings /media/liuzhihang/仓库/projects/wellspace/buildings/hk_buildings_clip.geojson \
+  --buildings /path/to/buildings/hk_buildings_clip.geojson \
   --timezone Asia/Hong_Kong \
   --output /tmp/shadow_results.csv \
   --workers 4

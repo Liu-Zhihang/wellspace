@@ -2,16 +2,46 @@
 
 # ================= 配置区 =================
 # 远程工作站 A 的配置
-REMOTE_HOST="campus"                 # ssh config 中的名字
-REMOTE_USER="jinlin"
-REMOTE_BUCKET_DIR="/tmp/buckets_part1"
-REMOTE_INPUT_ROOT="/home/jinlin/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge"
+REMOTE_HOST="${REMOTE_HOST:-campus}"                 # ssh config 中的名字
+REMOTE_USER="${REMOTE_USER:-jinlin}"
+REMOTE_BUCKET_DIR="${REMOTE_BUCKET_DIR:-/tmp/buckets_part1}"
+REMOTE_INPUT_ROOT="${REMOTE_INPUT_ROOT:-}"
 
 # 本地服务器 B 的配置
-LOCAL_BUCKET_DIR="/tmp/buckets_part1_migrated"
-# 注意：这里改为你 B 机器上的实际仓库路径
-LOCAL_INPUT_ROOT="/media/liuzhihang/repo/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge"
+# Prefer BUCKET_DIR/SHADOWMAP_TASK_ROOT; fall back to a persistent per-user directory.
+DEFAULT_TASK_ROOT="${SHADOWMAP_TASK_ROOT:-${HOME}/.local/share/shadowmap/tasks}"
+LOCAL_BUCKET_DIR="${LOCAL_BUCKET_DIR:-${BUCKET_DIR:-${DEFAULT_TASK_ROOT}/buckets_part1_migrated}}"
+# Prefer INPUT_ROOT as the local GLAN root.
+LOCAL_INPUT_ROOT="${LOCAL_INPUT_ROOT:-${INPUT_ROOT:-}}"
 # ===========================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Optional: load a machine profile to avoid hardcoded paths in scripts.
+# Priority:
+# 1) $SHADOWMAP_ENV_FILE (explicit)
+# 2) ShadowMap/.shadowmap.env (local, gitignored)
+if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+    # shellcheck disable=SC1090
+    source "${SHADOWMAP_ENV_FILE}"
+elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.shadowmap.env"
+fi
+
+DEFAULT_TASK_ROOT="${SHADOWMAP_TASK_ROOT:-${HOME}/.local/share/shadowmap/tasks}"
+LOCAL_BUCKET_DIR="${LOCAL_BUCKET_DIR:-${BUCKET_DIR:-${DEFAULT_TASK_ROOT}/buckets_part1_migrated}}"
+LOCAL_INPUT_ROOT="${LOCAL_INPUT_ROOT:-${INPUT_ROOT:-}}"
+
+if [ -z "${REMOTE_INPUT_ROOT}" ]; then
+    echo "[Fatal] Missing REMOTE_INPUT_ROOT (workstation A GLAN root)."
+    exit 1
+fi
+if [ -z "${LOCAL_INPUT_ROOT}" ]; then
+    echo "[Fatal] Missing LOCAL_INPUT_ROOT/INPUT_ROOT (server B GLAN root)."
+    exit 1
+fi
 
 # 检查目录是否存在
 mkdir -p "$LOCAL_BUCKET_DIR"

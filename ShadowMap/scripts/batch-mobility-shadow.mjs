@@ -1,26 +1,23 @@
 #!/usr/bin/env node
 
 /**
- * 批量调用 /api/analysis/shadow 计算 GLAN 轨迹的日照/阴影，并输出带字段的 CSV。
+ * Batch mobility sunlight/shadow exporter (HTTP pipeline).
  *
- * 默认假设目录结构：
- *   输入：../GLAN/PHASE1/spatial_temporal_merge （与 ShadowMap 同级，可用 --input 覆盖）
- *   输出：../GLAN_processed
- * 可通过 CLI 参数覆盖。
+ * This script buckets trajectory samples by UTC minute, calls `/api/analysis/shadow`,
+ * merges weather (`/api/weather/current`), and writes `*-sunlight.csv`.
  *
- * 参数：
- *   --input       输入根目录（递归处理 .csv）           默认 ../GLAN/spatial_temporal_merge
- *   --output      输出根目录（镜像子路径，文件加 -sunlight.csv） 默认 ../GLAN_processed
- *   --backend     后端 shadow API 地址                   默认 http://localhost:3001/api/analysis/shadow
- *   --canopy      canopy 栅格路径                       默认 /media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif
- *   --concurrency 并发桶数                             默认 4
- *   --force       是否覆盖已存在的输出文件             默认 false（存在则跳过）
+ * Required:
+ *   --input  (or set $INPUT_ROOT)
+ *   --output (or set $OUTPUT_ROOT)
+ *
+ * Optional:
+ *   --backend, --weather, --canopy, --concurrency, --force, --buckets-file, --target-file
  */
 
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const parseArgs = () => {
   const args = process.argv.slice(2);
   const result = {};
@@ -40,21 +37,38 @@ const parseArgs = () => {
 };
 
 const args = parseArgs();
-// 默认路径使用英文 repo，避免中文目录被 URL 编码
-const DEFAULT_INPUT_ROOT = '/media/liuzhihang/repo/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge';
-const DEFAULT_OUTPUT_ROOT = '/media/liuzhihang/repo/projects/wellspace/GLAN_processed';
-const DEFAULT_CANOPY = '/media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+void __dirname; // keep for potential debugging usage
 
 const config = {
-  inputRoot: path.resolve(args['input'] ?? process.env.INPUT_ROOT ?? DEFAULT_INPUT_ROOT),
-  outputRoot: path.resolve(args['output'] ?? process.env.OUTPUT_ROOT ?? DEFAULT_OUTPUT_ROOT),
+  inputRoot: String(args['input'] ?? process.env.INPUT_ROOT ?? '').trim(),
+  outputRoot: String(args['output'] ?? process.env.OUTPUT_ROOT ?? '').trim(),
   backendUrl: (args['backend'] ?? process.env.BACKEND_URL ?? 'http://localhost:3001/api/analysis/shadow').replace(/\/$/, ''),
   weatherUrl: (args['weather'] ?? process.env.WEATHER_URL ?? 'http://localhost:3001/api/weather/current').replace(/\/$/, ''),
-  canopyRasterPath: args['canopy'] ?? process.env.CANOPY_RASTER_PATH ?? DEFAULT_CANOPY,
+  canopyRasterPath: String(
+    args['canopy'] ?? process.env.CANOPY_RASTER_PATH ?? process.env.SHADOW_ENGINE_CANOPY_RASTER_PATH ?? '',
+  ).trim(),
   concurrency: Number.parseInt(args['concurrency'] ?? process.env.CONC ?? '4', 10),
   force: args['force'] === 'true' || args['force'] === true,
+  printConfig: args['print-config'] === 'true' || args['print-config'] === true || process.env.MOBILITY_PRINT_CONFIG === 'true',
   bucketsFile: args['buckets-file'] ?? args['bucketsFile'],
   targetFile: args['target-file'] ?? args['targetFile'],
+};
+
+const normalizeConfig = () => {
+  if (!config.inputRoot) {
+    throw new Error('Missing --input (or set $INPUT_ROOT)');
+  }
+  if (!config.outputRoot) {
+    throw new Error('Missing --output (or set $OUTPUT_ROOT)');
+  }
+  config.inputRoot = path.resolve(config.inputRoot);
+  config.outputRoot = path.resolve(config.outputRoot);
+  if (config.canopyRasterPath) {
+    config.canopyRasterPath = path.resolve(config.canopyRasterPath);
+  }
 };
 
 const headersToAppend = [
@@ -127,7 +141,7 @@ const readBucketsFromFile = async (filePath) => {
         .map((l) => l.trim())
         .filter((l) => l.length > 0),
     );
-    return set;
+    return set.size > 0 ? set : null;
   } catch (err) {
     console.warn(`[Buckets] failed to read ${filePath}: ${err.message}`);
     return null;
@@ -253,10 +267,9 @@ const fetchShadow = async (payload) => {
     timestamp: payload.timestamp,
     timeGranularityMinutes: 1,
     outputs: { shadowPolygons: true, sunlightGrid: true, heatmap: false },
-    metadata: {
-      includeCanopy: true,
-      canopyRasterPath: config.canopyRasterPath,
-    },
+    metadata: config.canopyRasterPath
+      ? { includeCanopy: true, canopyRasterPath: config.canopyRasterPath }
+      : { includeCanopy: false },
   };
 
   const res = await fetch(config.backendUrl, {
@@ -526,7 +539,10 @@ const processFile = async (filePath, idx, total) => {
 
 const main = async () => {
   console.log('Batch mobility shadow');
-  console.log(JSON.stringify(config, null, 2));
+  normalizeConfig();
+  if (config.printConfig) {
+    console.log(JSON.stringify(config, null, 2));
+  }
 
   let files = await listCsvFiles(config.inputRoot);
   if (config.targetFile) {

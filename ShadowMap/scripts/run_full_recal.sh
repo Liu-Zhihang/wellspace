@@ -4,31 +4,71 @@
 
 # === 配置区 ===
 # 任务清单目录 (刚才 scp 回来的地方)
-BUCKET_DIR="${BUCKET_DIR:-/tmp/buckets_part1_migrated}"
+BUCKET_DIR="${BUCKET_DIR:-}"
 
 # 结果移走/备份目录 (防止重算失败把旧的覆盖了，先移走旧的)
-BACKUP_DIR="${BACKUP_DIR:-/media/liuzhihang/repo/projects/wellspace/GLAN_processed_backup}"
+BACKUP_DIR="${BACKUP_DIR:-}"
 
 # 输入/输出
-INPUT_ROOT="${INPUT_ROOT:-/media/liuzhihang/repo/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/media/liuzhihang/repo/projects/wellspace/GLAN_processed}"
+INPUT_ROOT="${INPUT_ROOT:-}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
 LOG_FILE="${LOG_FILE:-./full_recalc.log}"
 
 # ⚡️ 性能配置 (根据你 112 核调整) ⚡️
 # By default, run the pure Python engine (local compute) with a higher worker count.
 CONCURRENCY="${CONCURRENCY:-64}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-2400}"
-PROGRESS_INTERVAL_S="${PROGRESS_INTERVAL_S:-10}"
-PROGRESS_STYLE="${PROGRESS_STYLE:-single}" # log|single
-BUILDINGS_PATH="${BUILDINGS_PATH:-${BUILDING_LOCAL_GEOJSON:-/media/liuzhihang/repo/projects/wellspace/buildings/hong_kong_cleaned.gpkg}}"
+PROGRESS_INTERVAL_S="${PROGRESS_INTERVAL_S:-}"
+PROGRESS_STYLE="${PROGRESS_STYLE:-}" # log|single
+BUILDINGS_PATH="${BUILDINGS_PATH:-${BUILDING_LOCAL_GEOJSON:-}}"
 BUILDINGS_LAYER="${BUILDINGS_LAYER:-${BUILDING_GPKG_LAYER:-}}"
-CANOPY_PATH="${CANOPY_PATH:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-/media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif}}"
+CANOPY_PATH="${CANOPY_PATH:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-${CANOPY_RASTER_PATH:-}}}"
 ERA5_TEMPLATE_PATH="${ERA5_TEMPLATE_PATH:-${ERA5_FILE_TEMPLATE:-}}"
-BUILDINGS_MODE="${BUILDINGS_MODE:-preload}"
+BUILDINGS_MODE="${BUILDINGS_MODE:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENGINE_WRAPPER="${ENGINE_WRAPPER:-${SCRIPT_DIR}/batch-mobility-shadow.sh}"
 
+# Optional: load a machine profile to avoid hardcoded paths in scripts.
+# Priority:
+# 1) $SHADOWMAP_ENV_FILE (explicit)
+# 2) ShadowMap/.shadowmap.env (local, gitignored)
+if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+    # shellcheck disable=SC1090
+    source "${SHADOWMAP_ENV_FILE}"
+elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.shadowmap.env"
+fi
+
+# Re-evaluate derived defaults after sourcing the profile.
+BUILDINGS_PATH="${BUILDINGS_PATH:-${BUILDING_LOCAL_GEOJSON:-}}"
+BUILDINGS_LAYER="${BUILDINGS_LAYER:-${BUILDING_GPKG_LAYER:-}}"
+CANOPY_PATH="${CANOPY_PATH:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-${CANOPY_RASTER_PATH:-}}}"
+ERA5_TEMPLATE_PATH="${ERA5_TEMPLATE_PATH:-${ERA5_FILE_TEMPLATE:-}}"
+BUILDINGS_MODE="${BUILDINGS_MODE:-${MOBILITY_BUILDINGS_MODE:-preload}}"
+PROGRESS_INTERVAL_S="${PROGRESS_INTERVAL_S:-${MOBILITY_PROGRESS_INTERVAL:-10}}"
+PROGRESS_STYLE="${PROGRESS_STYLE:-${MOBILITY_PROGRESS_STYLE:-single}}"
+
+if [ -z "${INPUT_ROOT}" ]; then
+    echo "[Fatal] Missing INPUT_ROOT. Set it in env or source ShadowMap/.shadowmap.env" | tee -a "$LOG_FILE"
+    exit 1
+fi
+if [ -z "${OUTPUT_ROOT}" ]; then
+    echo "[Fatal] Missing OUTPUT_ROOT. Set it in env or source ShadowMap/.shadowmap.env" | tee -a "$LOG_FILE"
+    exit 1
+fi
+if [ -z "${BACKUP_DIR}" ]; then
+    BACKUP_DIR="${OUTPUT_ROOT}_backup"
+fi
+
+TASK_ROOT="${SHADOWMAP_TASK_ROOT:-${OUTPUT_ROOT}/_shadowmap_tasks}"
+if [ -z "${BUCKET_DIR}" ]; then
+    BUCKET_DIR="${TASK_ROOT}/buckets_part1_migrated"
+fi
+
+mkdir -p "$BUCKET_DIR"
 mkdir -p "$BACKUP_DIR"
 touch "$LOG_FILE"
 

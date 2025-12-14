@@ -33,7 +33,7 @@
    - Validate canopy dataset on the workstation; define API contract between Express backend and the FastAPI engine.
    - Keep `.env` pointing to the workstation IP/port; document tmux session layout and restart steps.
    - Plan frontend overlays/analytics that consume canopy responses.
-   - ✅ 已用 curl 调用 `http://10.13.12.164:9000/shadow`（backend_url 指向 `http://10.13.12.164:3500`，metadata 带 `/home/jinlin/data/HKtree_reprojected4326.tif`）返回有效 JSON，确认树冠栅格被引擎加载。
+   - ✅ 已用 curl 调用 `http://<workstation-ip>:9000/shadow`（backend_url 指向 `http://<workstation-ip>:3500`，metadata 带 `/path/to/HKtree_reprojected4326.tif`）返回有效 JSON，确认树冠栅格被引擎加载。
 3. After TS/analysis completion, run a bundle report to confirm no missing imports and size regressions.
 4. Shadow-engine migration plan
    - Stage A – Research & Prototype
@@ -72,10 +72,10 @@
 - Backend services now run on the workstation (tmux sessions): one for the Express backend, one for the FastAPI engine that supports canopy/shadow workflows.
 - `.env` files contain the workstation IP/port for backend + engine connectivity; keep secrets local and do not commit populated env files.
 - Tree canopy dataset has been transferred to the workstation; integration is tracked under `REQ-CANOPY-01`.
-- 已通过 curl 调用验证 FastAPI 引擎可读取 `/home/jinlin/data/HKtree_reprojected4326.tif`（10.13.12.164:9000/shadow，backend_url=10.13.12.164:3500）。
+- 已通过 curl 调用验证 FastAPI 引擎可读取 `/path/to/HKtree_reprojected4326.tif`（<workstation-ip>:9000/shadow，backend_url=<workstation-ip>:3500）。
 - FastAPI 引擎添加了 `include_canopy` 开关（缺省不加载树冠），携带 metadata `{"canopyRasterPath": "...", "includeCanopy": true}` 可启用树冠；`DEBUG_CANOPY_LOG=1` 时日志会输出建筑/树冠合并数量。实测同一 bbox（114.159,22.277,114.175,22.288）在含树冠与仅建筑下 `avgShadowPercent` 有差异（48.75% vs 46.38%），确认树冠已参与计算。
 - 日照计算改为多时间片网格累积（可配置 `samples.grid/timeSteps/stepMinutes`），不再使用占位采样。当前实测同一 bbox 的日照小时也有差异（7.73h vs 7.83h），如需更精细可提高 grid 或 timeSteps。
-- 前端网络：`VITE_BACKEND_BASE_URL` 指向 `http://10.13.12.164:3001`；WFS/天气等全部走统一 `API_BASE_URL`。访问需确保浏览器代理规则允许该 IP（校园 VPN SOCKS5 127.0.0.1:1080 或直连）；工作站防火墙已放行 3001。
+- 前端网络：`VITE_BACKEND_BASE_URL` 指向 `http://<workstation-ip>:3001`；WFS/天气等全部走统一 `API_BASE_URL`。访问需确保浏览器代理规则允许该 IP（校园 VPN SOCKS5 127.0.0.1:1080 或直连）；工作站防火墙已放行 3001。
 - 移动性日照/阴影：前端 mobility 计算已附带 `includeCanopy/canopyRasterPath` metadata，但后端 `/analysis/shadow` 路由尚未解析/转发 `includeCanopy`，引擎侧默认不含树冠；如需轨迹级实时阴影/日照，需要在后端放行 metadata 并按需传轨迹 geometry，而不只是 bbox 采样。
 
 ## Risks / Blockers

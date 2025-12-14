@@ -183,7 +183,7 @@ def read_buckets_from_file(file_path: Optional[str]) -> Optional[set[str]]:
         if not line:
             continue
         items.add(normalize_bucket_key(line))
-    return items
+    return items or None
 
 
 def read_targets_from_file(file_path: str, input_root: Path) -> List[Path]:

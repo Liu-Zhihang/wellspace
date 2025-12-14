@@ -48,6 +48,9 @@ temp/
 !.env.example
 !.env.sample
 
+# ShadowMap machine profiles (local only)
+ShadowMap/.shadowmap.env
+
 # 中文文档和临时脚本（本地开发文档，不上传）
 # 忽略所有包含中文字符的 Markdown 和 PDF 文件
 **/*数据*.md
