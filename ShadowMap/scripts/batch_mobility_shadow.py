@@ -212,6 +212,13 @@ def read_targets_from_file(file_path: str, input_root: Path) -> List[Path]:
     except Exception as exc:
         raise RuntimeError(f"targets_read_failed: {file_path}: {exc}") from exc
 
+    skip_missing_targets = parse_bool(os.getenv("MOBILITY_SKIP_MISSING_TARGETS", "false"), default=False)
+    input_root_abs = Path(os.path.abspath(str(input_root)))
+    try:
+        input_root_resolved = input_root.resolve()
+    except Exception:
+        input_root_resolved = input_root_abs
+
     targets: List[Path] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -219,18 +226,35 @@ def read_targets_from_file(file_path: str, input_root: Path) -> List[Path]:
             continue
         candidate = Path(line)
         if not candidate.is_absolute():
-            candidate = input_root / candidate
-        try:
-            resolved = candidate.resolve()
-        except Exception:
-            resolved = candidate
-        if resolved.suffix.lower() != ".csv":
+            candidate = input_root_abs / candidate
+
+        candidate_abs = Path(os.path.abspath(str(candidate)))
+        if candidate_abs.suffix.lower() != ".csv":
             continue
+
+        # Prefer the non-resolved absolute path when it is already under input_root,
+        # so symlinked directories do not break the relative output mapping.
         try:
-            resolved.relative_to(input_root)
+            candidate_abs.relative_to(input_root_abs)
+            targets.append(candidate_abs)
+            continue
+        except Exception:
+            pass
+
+        try:
+            candidate_resolved = candidate.resolve()
+        except Exception:
+            candidate_resolved = candidate_abs
+
+        try:
+            candidate_resolved.relative_to(input_root_resolved)
         except Exception as exc:
-            raise RuntimeError(f"target_outside_input_root: {resolved}") from exc
-        targets.append(resolved)
+            raise RuntimeError(
+                "target_outside_input_root: "
+                f"candidate={candidate_abs} resolved={candidate_resolved} "
+                f"input_root={input_root_abs} input_root_resolved={input_root_resolved}"
+            ) from exc
+        targets.append(candidate_resolved)
 
     unique: List[Path] = []
     seen: set[Path] = set()
@@ -241,7 +265,11 @@ def read_targets_from_file(file_path: str, input_root: Path) -> List[Path]:
         unique.append(item)
     missing = [str(p) for p in unique if not p.exists()]
     if missing:
-        raise RuntimeError(f"targets_missing: {len(missing)} (first={missing[0]})")
+        if skip_missing_targets:
+            print(f"[Targets] skip missing files: {len(missing)} (first={missing[0]})", file=sys.stderr)
+            unique = [p for p in unique if p.exists()]
+        else:
+            raise RuntimeError(f"targets_missing: {len(missing)} (first={missing[0]})")
     return unique
 
 

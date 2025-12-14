@@ -154,6 +154,9 @@ if [ ! -s "$tmp_targets" ]; then
   exit 2
 fi
 
+MOBILITY_SKIP_MISSING_TARGETS="${MOBILITY_SKIP_MISSING_TARGETS:-true}"
+export MOBILITY_SKIP_MISSING_TARGETS
+
 cmd=("${engine_wrapper_cmd[@]}" --engine python)
 cmd+=(--input "$INPUT_ROOT")
 cmd+=(--output "$OUTPUT_ROOT")
