@@ -27,7 +27,9 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENGINE_WRAPPER="${ENGINE_WRAPPER:-${SCRIPT_DIR}/../scripts/batch-mobility-shadow.sh}"
 
 # Optional: load a machine profile (see ShadowMap/.shadowmap.env.example)
-if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+if [ "${SHADOWMAP_ENV_FILE:-}" = "/dev/null" ]; then
+    : # explicitly skip loading any profile
+elif [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
     # shellcheck disable=SC1090
     source "${SHADOWMAP_ENV_FILE}"
 elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
@@ -74,9 +76,14 @@ curl -s "${HEALTH_URL}" | head -c 200 && echo ""
 
 
 
-if [ ! -x "$ENGINE_WRAPPER" ]; then
+if [ ! -f "$ENGINE_WRAPPER" ]; then
     echo "[错误] 找不到脚本: $ENGINE_WRAPPER"
     exit 1
+fi
+
+engine_wrapper_cmd=("${ENGINE_WRAPPER}")
+if [ ! -x "${ENGINE_WRAPPER}" ]; then
+    engine_wrapper_cmd=(bash "${ENGINE_WRAPPER}")
 fi
 
 
@@ -185,7 +192,7 @@ for bf in "${files[@]}"; do
 
   # =======================================================
 
-  cmd=(timeout 1200s "$ENGINE_WRAPPER" --engine node)
+  cmd=(timeout 1200s "${engine_wrapper_cmd[@]}" --engine node)
   cmd+=(--input "$input_dir")
   cmd+=(--output "$target_dir")
   cmd+=(--backend "$BACKEND")

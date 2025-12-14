@@ -34,7 +34,9 @@ ENGINE_WRAPPER="${ENGINE_WRAPPER:-${SCRIPT_DIR}/batch-mobility-shadow.sh}"
 # Priority:
 # 1) $SHADOWMAP_ENV_FILE (explicit)
 # 2) ShadowMap/.shadowmap.env (local, gitignored)
-if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+if [ "${SHADOWMAP_ENV_FILE:-}" = "/dev/null" ]; then
+    : # explicitly skip loading any profile
+elif [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
     # shellcheck disable=SC1090
     source "${SHADOWMAP_ENV_FILE}"
 elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
@@ -76,9 +78,15 @@ if [ ! -f "$BUILDINGS_PATH" ]; then
     echo "[Fatal] Buildings file not found: $BUILDINGS_PATH" | tee -a "$LOG_FILE"
     exit 1
 fi
-if [ ! -x "$ENGINE_WRAPPER" ]; then
-    echo "[Fatal] Engine wrapper not executable: $ENGINE_WRAPPER" | tee -a "$LOG_FILE"
+if [ ! -f "$ENGINE_WRAPPER" ]; then
+    echo "[Fatal] Engine wrapper not found: $ENGINE_WRAPPER" | tee -a "$LOG_FILE"
     exit 1
+fi
+
+engine_wrapper_cmd=("$ENGINE_WRAPPER")
+if [ ! -x "$ENGINE_WRAPPER" ]; then
+    # Some mounts (e.g. /media with noexec) drop executable bits. Running via bash is more robust.
+    engine_wrapper_cmd=(bash "$ENGINE_WRAPPER")
 fi
 
 # 读取任务列表
@@ -130,7 +138,7 @@ for bf in "${files[@]}"; do
 
     # 4. Execute pure Python pipeline (no backend required)
     # Note: no --buckets-file => process the whole CSV.
-    cmd=(timeout "${TIMEOUT_SECONDS}s" "$ENGINE_WRAPPER" --engine python)
+    cmd=(timeout "${TIMEOUT_SECONDS}s" "${engine_wrapper_cmd[@]}" --engine python)
     cmd+=(--input "$(dirname "$input_csv")")
     cmd+=(--output "$target_dir")
     cmd+=(--buildings "$BUILDINGS_PATH")

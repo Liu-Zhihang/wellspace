@@ -26,7 +26,9 @@ ENGINE_WRAPPER="${ENGINE_WRAPPER:-${SCRIPT_DIR}/batch-mobility-shadow.sh}"
 # Priority:
 # 1) $SHADOWMAP_ENV_FILE (explicit)
 # 2) ShadowMap/.shadowmap.env (local, gitignored)
-if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+if [ "${SHADOWMAP_ENV_FILE:-}" = "/dev/null" ]; then
+    : # explicitly skip loading any profile
+elif [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
     # shellcheck disable=SC1090
     source "${SHADOWMAP_ENV_FILE}"
 elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
@@ -62,6 +64,11 @@ fi
 mkdir -p "$BUCKET_DIR"
 mkdir -p "$QUARANTINE_DIR"
 touch "$LOG_FILE"
+
+engine_wrapper_cmd=("${ENGINE_WRAPPER}")
+if [ ! -x "${ENGINE_WRAPPER}" ]; then
+    engine_wrapper_cmd=(bash "${ENGINE_WRAPPER}")
+fi
 
 # === 函数: 检查后端健康 (并发极高时，健康检查很重要) ===
 wait_for_backend() {
@@ -124,7 +131,7 @@ for bf in "${files[@]}"; do
     # 2. 执行计算
     # 使用 $(pwd) 确保找到脚本
     # --concurrency 50: 既然后端有 112 个核，前端并发 50 是很安全的
-    cmd=(timeout 1800s "$ENGINE_WRAPPER" --engine node)
+    cmd=(timeout 1800s "${engine_wrapper_cmd[@]}" --engine node)
     cmd+=(--input "$(dirname "$input_csv")")
     cmd+=(--output "$target_dir")
     cmd+=(--backend "$BACKEND_URL")

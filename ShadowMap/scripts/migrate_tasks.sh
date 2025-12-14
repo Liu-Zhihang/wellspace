@@ -23,7 +23,9 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Priority:
 # 1) $SHADOWMAP_ENV_FILE (explicit)
 # 2) ShadowMap/.shadowmap.env (local, gitignored)
-if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+if [ "${SHADOWMAP_ENV_FILE:-}" = "/dev/null" ]; then
+    : # explicitly skip loading any profile
+elif [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
     # shellcheck disable=SC1090
     source "${SHADOWMAP_ENV_FILE}"
 elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then

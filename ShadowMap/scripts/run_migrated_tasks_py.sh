@@ -31,7 +31,9 @@ ERA5_TEMPLATE_PATH="${ERA5_TEMPLATE_PATH:-${ERA5_FILE_TEMPLATE:-}}"
 # Priority:
 # 1) $SHADOWMAP_ENV_FILE (explicit)
 # 2) ShadowMap/.shadowmap.env (local, gitignored)
-if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+if [ "${SHADOWMAP_ENV_FILE:-}" = "/dev/null" ]; then
+  : # explicitly skip loading any profile
+elif [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
   # shellcheck disable=SC1090
   source "${SHADOWMAP_ENV_FILE}"
 elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
@@ -84,6 +86,11 @@ if [ ! -f "${BUILDINGS_PATH}" ]; then
   exit 1
 fi
 
+engine_wrapper_cmd=("${ENGINE_WRAPPER}")
+if [ ! -x "${ENGINE_WRAPPER}" ]; then
+  engine_wrapper_cmd=(bash "${ENGINE_WRAPPER}")
+fi
+
 shopt -s nullglob
 files=("${BUCKET_DIR}"/*_retry.txt)
 shopt -u nullglob
@@ -127,7 +134,7 @@ for bf in "${files[@]}"; do
 
   echo "[${count}/${total}] Processing: ${source_name}"
 
-  cmd=(timeout "${TIMEOUT}s" "${ENGINE_WRAPPER}" --engine python)
+  cmd=(timeout "${TIMEOUT}s" "${engine_wrapper_cmd[@]}" --engine python)
   cmd+=(--input "${input_dir}")
   cmd+=(--output "${target_dir}")
   cmd+=(--buildings "${BUILDINGS_PATH}")

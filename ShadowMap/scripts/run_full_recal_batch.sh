@@ -37,7 +37,9 @@ ENGINE_WRAPPER="${ENGINE_WRAPPER:-${SCRIPT_DIR}/batch-mobility-shadow.sh}"
 # Priority:
 # 1) $SHADOWMAP_ENV_FILE (explicit)
 # 2) ShadowMap/.shadowmap.env (local, gitignored)
-if [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
+if [ "${SHADOWMAP_ENV_FILE:-}" = "/dev/null" ]; then
+  : # explicitly skip loading any profile
+elif [ -n "${SHADOWMAP_ENV_FILE:-}" ] && [ -f "${SHADOWMAP_ENV_FILE}" ]; then
   # shellcheck disable=SC1090
   source "${SHADOWMAP_ENV_FILE}"
 elif [ -f "${REPO_ROOT}/.shadowmap.env" ]; then
@@ -79,9 +81,15 @@ if [ ! -f "$BUILDINGS_PATH" ]; then
   echo "[Fatal] Buildings file not found: $BUILDINGS_PATH" | tee -a "$LOG_FILE"
   exit 1
 fi
-if [ ! -x "$ENGINE_WRAPPER" ]; then
-  echo "[Fatal] Engine wrapper not executable: $ENGINE_WRAPPER" | tee -a "$LOG_FILE"
+if [ ! -f "$ENGINE_WRAPPER" ]; then
+  echo "[Fatal] Engine wrapper not found: $ENGINE_WRAPPER" | tee -a "$LOG_FILE"
   exit 1
+fi
+
+engine_wrapper_cmd=("$ENGINE_WRAPPER")
+if [ ! -x "$ENGINE_WRAPPER" ]; then
+  # Some mounts (e.g. /media with noexec) drop executable bits. Running via bash is more robust.
+  engine_wrapper_cmd=(bash "$ENGINE_WRAPPER")
 fi
 
 tmp_targets="$(mktemp -t mobility_targets.XXXXXX.txt)"
@@ -146,7 +154,7 @@ if [ ! -s "$tmp_targets" ]; then
   exit 2
 fi
 
-cmd=("$ENGINE_WRAPPER" --engine python)
+cmd=("${engine_wrapper_cmd[@]}" --engine python)
 cmd+=(--input "$INPUT_ROOT")
 cmd+=(--output "$OUTPUT_ROOT")
 cmd+=(--buildings "$BUILDINGS_PATH")
