@@ -156,7 +156,13 @@ def parse_timestamp(value: str) -> dt.datetime:
     return dt.datetime.fromisoformat(value)
 
 
-def generate_shadows(buildings: gpd.GeoDataFrame, timestamp: str, timezone: str) -> gpd.GeoDataFrame:
+def generate_shadows(
+    buildings: gpd.GeoDataFrame,
+    timestamp: str,
+    timezone: str,
+    *,
+    buildings_preprocessed: bool = False,
+) -> gpd.GeoDataFrame:
     if sunlight_shadow is None or _PYBDSHADOW_API is None:
         raise RuntimeError(
             "pybdshadow is not installed. Install dependencies listed in requirements.txt"
@@ -169,7 +175,8 @@ def generate_shadows(buildings: gpd.GeoDataFrame, timestamp: str, timezone: str)
     else:
         aware_dt = naive_dt.astimezone(tzinfo)
 
-    buildings = preprocess_buildings(buildings)
+    if not buildings_preprocessed:
+        buildings = preprocess_buildings(buildings)
 
     if _PYBDSHADOW_API == "submodule":
         return sunlight_shadow(  # type: ignore[misc]
@@ -309,7 +316,7 @@ def compute_sunlight_profile(
     for step in range(time_steps):
         ts = base_dt + dt.timedelta(minutes=step * step_minutes)
         try:
-            shadows_gdf = generate_shadows(preprocessed, ts.isoformat(), timezone)
+            shadows_gdf = generate_shadows(preprocessed, ts.isoformat(), timezone, buildings_preprocessed=True)
         except Exception as exc:
             # If sun below horizon or pybdshadow fails, treat as no shadow (full sun) for this step
             if debug_canopy := os.getenv("DEBUG_CANOPY_LOG", "").lower() in ("1", "true", "yes"):

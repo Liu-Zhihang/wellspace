@@ -77,8 +77,10 @@ fi
 echo "=== 1.正在从工作站 A (campus) 获取任务列表... ==="
 
 # 远程获取任务列表 (这里不需要 -n，因为不在 while 循环里)
-tmp_all="$(mktemp -t shadowmap_remote_tasks.XXXXXX.txt)"
-tmp_half="$(mktemp -t shadowmap_tasks_to_migrate.XXXXXX.txt)"
+TMP_DIR="${TMP_DIR:-${DEFAULT_TASK_ROOT}/tmp}"
+mkdir -p "$TMP_DIR"
+tmp_all="$(mktemp "${TMP_DIR}/shadowmap_remote_tasks.XXXXXX.txt")"
+tmp_half="$(mktemp "${TMP_DIR}/shadowmap_tasks_to_migrate.XXXXXX.txt")"
 cleanup_tmp() {
     rm -f "$tmp_all" "$tmp_half" || true
 }

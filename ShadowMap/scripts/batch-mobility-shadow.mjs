@@ -11,7 +11,7 @@
  *   --output (or set $OUTPUT_ROOT)
  *
  * Optional:
- *   --backend, --weather, --canopy, --concurrency, --force, --buckets-file, --target-file
+ *   --backend, --weather, --canopy, --include-canopy, --concurrency, --force, --buckets-file, --target-file
  */
 
 import fs from 'fs/promises';
@@ -38,6 +38,18 @@ const parseArgs = () => {
 
 const args = parseArgs();
 
+const parseBool = (value, defaultValue = false) => {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'on'].includes(v)) return true;
+    if (['0', 'false', 'no', 'n', 'off'].includes(v)) return false;
+  }
+  return defaultValue;
+};
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 void __dirname; // keep for potential debugging usage
@@ -50,6 +62,7 @@ const config = {
   canopyRasterPath: String(
     args['canopy'] ?? process.env.CANOPY_RASTER_PATH ?? process.env.SHADOW_ENGINE_CANOPY_RASTER_PATH ?? '',
   ).trim(),
+  includeCanopy: parseBool(args['include-canopy'] ?? args['includeCanopy'] ?? process.env.MOBILITY_INCLUDE_CANOPY, true),
   concurrency: Number.parseInt(args['concurrency'] ?? process.env.CONC ?? '4', 10),
   force: args['force'] === 'true' || args['force'] === true,
   printConfig: args['print-config'] === 'true' || args['print-config'] === true || process.env.MOBILITY_PRINT_CONFIG === 'true',
@@ -267,7 +280,7 @@ const fetchShadow = async (payload) => {
     timestamp: payload.timestamp,
     timeGranularityMinutes: 1,
     outputs: { shadowPolygons: true, sunlightGrid: true, heatmap: false },
-    metadata: config.canopyRasterPath
+    metadata: config.includeCanopy && config.canopyRasterPath
       ? { includeCanopy: true, canopyRasterPath: config.canopyRasterPath }
       : { includeCanopy: false },
   };

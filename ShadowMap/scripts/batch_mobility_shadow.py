@@ -393,6 +393,8 @@ class WorkerConfig:
     buildings_path: str
     buildings_layer: Optional[str]
     buildings_mode: str
+    buildings_point_buffer_m: float
+    buildings_point_buffer_threshold_m: float
     canopy_raster_path: Optional[str]
     include_canopy: bool
     timezone: str
@@ -645,6 +647,53 @@ def _load_buildings_preloaded(
     return subset
 
 
+def _bounds_diagonal_m(bounds: Mapping[str, float]) -> float:
+    mean_lat = (float(bounds["north"]) + float(bounds["south"])) / 2.0
+    lat_m = (float(bounds["north"]) - float(bounds["south"])) * 111_000.0
+    lon_m = (float(bounds["east"]) - float(bounds["west"])) * 111_000.0 * math.cos(math.radians(mean_lat))
+    return float(math.hypot(lat_m, lon_m))
+
+
+def _load_buildings_preloaded_points(points: Sequence[BucketPoint], worker: WorkerConfig):
+    import numpy as np
+
+    buffer_m = float(worker.buildings_point_buffer_m)
+    if buffer_m <= 0 or not points:
+        key = (worker.buildings_path, worker.buildings_layer)
+        if key not in _BUILDINGS_PRELOAD_CACHE:
+            _preload_buildings(worker.buildings_path, worker.buildings_layer)
+        return _BUILDINGS_PRELOAD_CACHE[key]["gdf"].iloc[0:0]
+
+    key = (worker.buildings_path, worker.buildings_layer)
+    if key not in _BUILDINGS_PRELOAD_CACHE:
+        _preload_buildings(worker.buildings_path, worker.buildings_layer)
+    cache = _BUILDINGS_PRELOAD_CACHE[key]
+    gdf = cache["gdf"]
+
+    minx = cache["minx"]
+    miny = cache["miny"]
+    maxx = cache["maxx"]
+    maxy = cache["maxy"]
+
+    deg_lat = buffer_m / 111_000.0
+    mask_total = None
+    for p in points:
+        cos_lat = max(math.cos(math.radians(float(p.lat))), 1e-6)
+        deg_lon = buffer_m / (111_000.0 * cos_lat)
+        west = float(p.lon) - deg_lon
+        east = float(p.lon) + deg_lon
+        south = float(p.lat) - deg_lat
+        north = float(p.lat) + deg_lat
+        mask = (minx <= east) & (maxx >= west) & (miny <= north) & (maxy >= south)
+        mask_total = mask if mask_total is None else (mask_total | mask)
+
+    idx = np.nonzero(mask_total)[0] if mask_total is not None else np.array([], dtype=np.int64)
+    subset = gdf.iloc[idx]
+    if worker.max_features > 0 and len(subset) > worker.max_features:
+        subset = subset.iloc[: worker.max_features]
+    return subset
+
+
 def _get_buildings(bounds: Dict[str, float], worker: WorkerConfig):
     if worker.buildings_mode == "preload":
         return _load_buildings_preloaded(bounds, worker.buildings_path, worker.max_features, worker.buildings_layer)
@@ -713,12 +762,19 @@ def _process_bucket(job: BucketJob) -> BucketResult:
 
         import pandas as pd
         from shapely.geometry import Point
-        from shapely.ops import unary_union
-        from shapely.prepared import prep
+        from shapely.strtree import STRtree
 
-        from engine_core import canopy_to_gdf, calculate_shadow_coverage, generate_shadows
+        from engine_core import canopy_to_gdf, generate_shadows
 
-        buildings = _get_buildings(job.bbox, job.worker)
+        use_point_buffer = (
+            job.worker.buildings_mode == "preload"
+            and float(job.worker.buildings_point_buffer_m) > 0.0
+            and (
+                float(job.worker.buildings_point_buffer_threshold_m) <= 0.0
+                or _bounds_diagonal_m(job.bbox) >= float(job.worker.buildings_point_buffer_threshold_m)
+            )
+        )
+        buildings = _load_buildings_preloaded_points(job.points, job.worker) if use_point_buffer else _get_buildings(job.bbox, job.worker)
         if buildings.empty:
             raise RuntimeError("No building features returned for the specified bounds/geometry")
 
@@ -726,24 +782,56 @@ def _process_bucket(job: BucketJob) -> BucketResult:
             canopy_path = job.worker.canopy_raster_path
             if os.path.exists(canopy_path):
                 canopy_ds = _open_canopy_dataset(canopy_path)
-                canopy_gdf = canopy_to_gdf(canopy_ds, job.bbox)
+                canopy_gdf = None
+                if use_point_buffer:
+                    buffer_m = float(job.worker.buildings_point_buffer_m)
+                    if buffer_m > 0:
+                        parts: List[Any] = []
+                        seen: set[Tuple[float, float]] = set()
+                        deg_lat = buffer_m / 111_000.0
+                        for bp in job.points:
+                            key = (round(float(bp.lat), 3), round(float(bp.lon), 3))
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            cos_lat = max(math.cos(math.radians(float(bp.lat))), 1e-6)
+                            deg_lon = buffer_m / (111_000.0 * cos_lat)
+                            bbox = {
+                                "west": float(bp.lon) - deg_lon,
+                                "east": float(bp.lon) + deg_lon,
+                                "south": float(bp.lat) - deg_lat,
+                                "north": float(bp.lat) + deg_lat,
+                            }
+                            part = canopy_to_gdf(canopy_ds, bbox)
+                            if part is not None and not part.empty:
+                                parts.append(part)
+                        if parts:
+                            canopy_gdf = pd.concat(parts, ignore_index=True)
+                else:
+                    canopy_gdf = canopy_to_gdf(canopy_ds, job.bbox)
                 if canopy_gdf is not None and not canopy_gdf.empty:
                     buildings = pd.concat([buildings, canopy_gdf], ignore_index=True)
             else:
                 warnings.append(f"[Canopy] raster not found: {canopy_path}")
 
         shadows = generate_shadows(buildings, job.bucket_key, job.worker.timezone)
-        coverage = calculate_shadow_coverage(job.bbox, shadows)
-        fallback_shadow_percent = clamp(float(coverage.get("coverage_percent") or 0.0), 0.0, 100.0)
 
-        union_geom = unary_union(shadows.geometry) if not shadows.empty else None
-        prepared = prep(union_geom) if union_geom is not None and not union_geom.is_empty else None
+        geoms = [g for g in shadows.geometry if g is not None and not g.is_empty] if not shadows.empty else []
+        tree = STRtree(geoms) if geoms else None
 
         updates: List[RowUpdate] = []
         for point in job.points:
             pt = Point(point.lon, point.lat)
-            in_shadow = prepared.covers(pt) if prepared is not None else False
-            shadow_percent = (100.0 if in_shadow else 0.0) if not shadows.empty else fallback_shadow_percent
+            in_shadow = False
+            if tree is not None:
+                candidates = tree.query(pt)
+                for cand in candidates:
+                    geom = cand if hasattr(cand, "covers") else geoms[int(cand)]
+                    if geom.covers(pt):
+                        in_shadow = True
+                        break
+
+            shadow_percent = 100.0 if (geoms and in_shadow) else 0.0
             sunlit = 0 if in_shadow else 1
             sunlit_effective = (
                 float(sunlit) if sunlight_factor_value is None else float(sunlit) * float(sunlight_factor_value)
@@ -944,6 +1032,8 @@ class Config:
     buildings_path: str
     buildings_layer: Optional[str]
     buildings_mode: str
+    buildings_point_buffer_m: float
+    buildings_point_buffer_threshold_m: float
     canopy_raster_path: Optional[str]
     include_canopy: bool
     era5_file_template: Optional[str]
@@ -1000,6 +1090,24 @@ def parse_args(argv: Sequence[str]) -> Config:
         help="Building query strategy: bbox (read window) or preload (load once in memory).",
     )
     parser.add_argument(
+        "--buildings-point-buffer-m",
+        dest="buildings_point_buffer_m",
+        default=os.getenv("MOBILITY_BUILDINGS_POINT_BUFFER_M", "0"),
+        help=(
+            "Optional: in preload mode, select buildings by union of per-point buffers (meters). "
+            "Useful when a 1-minute bucket has points scattered across the city."
+        ),
+    )
+    parser.add_argument(
+        "--buildings-point-buffer-threshold-m",
+        dest="buildings_point_buffer_threshold_m",
+        default=os.getenv("MOBILITY_BUILDINGS_POINT_BUFFER_THRESHOLD_M", "0"),
+        help=(
+            "Optional: only enable point-buffer selection when the bucket bbox diagonal >= this threshold (meters). "
+            "0 disables threshold (always apply when buffer > 0)."
+        ),
+    )
+    parser.add_argument(
         "--canopy",
         dest="canopy_raster_path",
         default=os.getenv("CANOPY_RASTER_PATH")
@@ -1007,7 +1115,14 @@ def parse_args(argv: Sequence[str]) -> Config:
         or default_canopy,
         help="Canopy raster path (GeoTIFF).",
     )
-    parser.add_argument("--include-canopy", dest="include_canopy", nargs="?", const="true", default="true")
+    parser.add_argument(
+        "--include-canopy",
+        dest="include_canopy",
+        nargs="?",
+        const="true",
+        default=os.getenv("MOBILITY_INCLUDE_CANOPY", "true"),
+        help="Enable canopy raster contribution (true/false). Can be set via $MOBILITY_INCLUDE_CANOPY.",
+    )
     parser.add_argument(
         "--era5-template",
         dest="era5_file_template",
@@ -1085,6 +1200,8 @@ def parse_args(argv: Sequence[str]) -> Config:
         buildings_path=str(args.buildings_path),
         buildings_layer=str(args.buildings_layer).strip() or None,
         buildings_mode=str(args.buildings_mode),
+        buildings_point_buffer_m=parse_float(args.buildings_point_buffer_m, 0.0),
+        buildings_point_buffer_threshold_m=parse_float(args.buildings_point_buffer_threshold_m, 0.0),
         canopy_raster_path=canopy_path,
         include_canopy=parse_bool(args.include_canopy, default=True),
         era5_file_template=str(args.era5_file_template).strip() or None,
@@ -1152,6 +1269,8 @@ def process_file(
         buildings_path=config.buildings_path,
         buildings_layer=config.buildings_layer,
         buildings_mode=config.buildings_mode,
+        buildings_point_buffer_m=float(config.buildings_point_buffer_m),
+        buildings_point_buffer_threshold_m=float(config.buildings_point_buffer_threshold_m),
         canopy_raster_path=config.canopy_raster_path,
         include_canopy=config.include_canopy,
         timezone=config.timezone,

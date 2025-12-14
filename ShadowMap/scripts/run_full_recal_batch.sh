@@ -92,8 +92,10 @@ if [ ! -x "$ENGINE_WRAPPER" ]; then
   engine_wrapper_cmd=(bash "$ENGINE_WRAPPER")
 fi
 
-tmp_targets="$(mktemp -t mobility_targets.XXXXXX.txt)"
-tmp_manifest="$(mktemp -t mobility_manifest.XXXXXX.tsv)"
+TMP_DIR="${TMP_DIR:-${TASK_ROOT}/tmp}"
+mkdir -p "$TMP_DIR"
+tmp_targets="$(mktemp "${TMP_DIR}/mobility_targets.XXXXXX.txt")"
+tmp_manifest="$(mktemp "${TMP_DIR}/mobility_manifest.XXXXXX.tsv")"
 cleanup() {
   rm -f "$tmp_targets" "$tmp_manifest" || true
 }
