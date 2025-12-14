@@ -4,7 +4,8 @@
 # 远程工作站 A 的配置
 REMOTE_HOST="${REMOTE_HOST:-campus}"                 # ssh config 中的名字
 REMOTE_USER="${REMOTE_USER:-jinlin}"
-REMOTE_BUCKET_DIR="${REMOTE_BUCKET_DIR:-/tmp/buckets_part1}"
+REMOTE_BUCKET_DIR="${REMOTE_BUCKET_DIR:-}"
+REMOTE_OUTPUT_ROOT="${REMOTE_OUTPUT_ROOT:-}"
 REMOTE_INPUT_ROOT="${REMOTE_INPUT_ROOT:-}"
 
 # 本地服务器 B 的配置
@@ -47,12 +48,43 @@ fi
 mkdir -p "$LOCAL_BUCKET_DIR"
 mkdir -p "$LOCAL_INPUT_ROOT"
 
+if [ -z "${REMOTE_BUCKET_DIR}" ]; then
+    # Prefer a persistent task dir on the remote host; fall back to /tmp for backward compatibility.
+    remote_candidates=()
+    if [ -n "${REMOTE_OUTPUT_ROOT}" ]; then
+        remote_candidates+=("${REMOTE_OUTPUT_ROOT}/_shadowmap_tasks/buckets_part1")
+        remote_candidates+=("${REMOTE_OUTPUT_ROOT}/_shadowmap_tasks/buckets_part1_migrated")
+    fi
+    remote_candidates+=("~/.local/share/shadowmap/tasks/buckets_part1")
+    remote_candidates+=("/tmp/buckets_part1")
+
+    for cand in "${remote_candidates[@]}"; do
+        if ssh "${REMOTE_HOST}" "ls ${cand}/*_retry.txt >/dev/null 2>&1"; then
+            REMOTE_BUCKET_DIR="${cand}"
+            break
+        fi
+    done
+fi
+
+if [ -z "${REMOTE_BUCKET_DIR}" ]; then
+    echo "[Fatal] Missing REMOTE_BUCKET_DIR and no retry dir auto-detected on remote host."
+    echo "        Set REMOTE_BUCKET_DIR explicitly, or set REMOTE_OUTPUT_ROOT to enable detection."
+    exit 1
+fi
+
 echo "=== 1.正在从工作站 A (campus) 获取任务列表... ==="
 
 # 远程获取任务列表 (这里不需要 -n，因为不在 while 循环里)
-ssh $REMOTE_HOST "ls $REMOTE_BUCKET_DIR/*_retry.txt" 2>/dev/null > /tmp/remote_all_tasks.txt
+tmp_all="$(mktemp -t shadowmap_remote_tasks.XXXXXX.txt)"
+tmp_half="$(mktemp -t shadowmap_tasks_to_migrate.XXXXXX.txt)"
+cleanup_tmp() {
+    rm -f "$tmp_all" "$tmp_half" || true
+}
+trap cleanup_tmp EXIT
 
-total_lines=$(wc -l < /tmp/remote_all_tasks.txt)
+ssh $REMOTE_HOST "ls $REMOTE_BUCKET_DIR/*_retry.txt" 2>/dev/null > "$tmp_all"
+
+total_lines=$(wc -l < "$tmp_all")
 if [ "$total_lines" -eq 0 ]; then
     echo "工作站 A 上没有剩余任务了！"
     exit 0
@@ -63,7 +95,7 @@ half_lines=$((total_lines / 2))
 # 如果只有一个任务，至少取1个
 if [ "$half_lines" -eq 0 ]; then half_lines=1; fi
 
-head -n "$half_lines" /tmp/remote_all_tasks.txt > /tmp/tasks_to_migrate.txt
+head -n "$half_lines" "$tmp_all" > "$tmp_half"
 
 echo "工作站 A 共有 $total_lines 个任务，准备抢过来 $half_lines 个..."
 
@@ -111,7 +143,7 @@ while read remote_bucket_path; do
         echo "  [错误] 无法在 A 上找到源文件 ${pure_stem}.csv，跳过。"
     fi
 
-done < /tmp/tasks_to_migrate.txt
+done < "$tmp_half"
 
 echo "=== 迁移完成！ ==="
 echo "成功迁移任务数: $success_count"

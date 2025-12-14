@@ -58,7 +58,7 @@ fi
 
 TASK_ROOT="${SHADOWMAP_TASK_ROOT:-${OUTPUT_ROOT}/_shadowmap_tasks}"
 if [ -z "${BUCKET_DIR}" ]; then
-  BUCKET_DIR="${TASK_ROOT}/buckets_part1"
+  BUCKET_DIR="${TASK_ROOT}/buckets_part1_migrated"
 fi
 mkdir -p "$BUCKET_DIR"
 

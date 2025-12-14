@@ -30,12 +30,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 SCRIPT_DIR = Path(__file__).resolve().parent
 ENGINE_PATH = SCRIPT_DIR / "shadow-engine-prototype"
 
-warnings.filterwarnings(
-    "ignore",
-    message=r".*\\+init=<authority>:<code> syntax is deprecated.*",
-    category=FutureWarning,
-)
-
 
 HEADERS_TO_APPEND: List[str] = [
     "sunlit",
@@ -71,6 +65,31 @@ def parse_bool(value: object, default: bool = False) -> bool:
         if lowered in {"0", "false", "no", "n", "off"}:
             return False
     return default
+
+
+def configure_runtime() -> None:
+    # Performance: avoid BLAS oversubscription when using multiprocessing.
+    for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(key, "1")
+
+    suppress = parse_bool(os.getenv("MOBILITY_SUPPRESS_NOISY_WARNINGS", "true"), default=True)
+    if not suppress:
+        return
+
+    # Reduce log spam from common geospatial dependencies.
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*No explicit representation of timezones available for np\\.datetime64.*",
+        category=UserWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*syntax is deprecated\\..*authority:code.*",
+        category=FutureWarning,
+    )
+
+
+configure_runtime()
 
 
 def parse_float(value: object, default: float) -> float:
@@ -996,7 +1015,10 @@ def parse_args(argv: Sequence[str]) -> Config:
     parser.add_argument(
         "--progress-style",
         dest="progress_style",
-        default=os.getenv("MOBILITY_PROGRESS_STYLE", "log"),
+        default=(
+            os.getenv("MOBILITY_PROGRESS_STYLE")
+            or ("single" if sys.stdout.isatty() else "log")
+        ),
         choices=("log", "single"),
         help="Progress output style: log (new lines) or single (overwrite line).",
     )
