@@ -18,6 +18,8 @@ LOG_FILE="${LOG_FILE:-./full_recalc.log}"
 # By default, run the pure Python engine (local compute) with a higher worker count.
 CONCURRENCY="${CONCURRENCY:-64}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-2400}"
+PROGRESS_INTERVAL_S="${PROGRESS_INTERVAL_S:-10}"
+PROGRESS_STYLE="${PROGRESS_STYLE:-single}" # log|single
 BUILDINGS_PATH="${BUILDINGS_PATH:-${BUILDING_LOCAL_GEOJSON:-/media/liuzhihang/repo/projects/wellspace/buildings/hong_kong_cleaned.gpkg}}"
 BUILDINGS_LAYER="${BUILDINGS_LAYER:-${BUILDING_GPKG_LAYER:-}}"
 CANOPY_PATH="${CANOPY_PATH:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-/media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif}}"
@@ -103,10 +105,12 @@ for bf in "${files[@]}"; do
         cmd+=(--era5-template "$ERA5_TEMPLATE_PATH")
     fi
     cmd+=(--concurrency "$CONCURRENCY")
+    cmd+=(--progress-interval "$PROGRESS_INTERVAL_S")
+    cmd+=(--progress-style "$PROGRESS_STYLE")
     cmd+=(--force)
     cmd+=(--target-file "$(basename "$input_csv")")
 
-    "${cmd[@]}"
+    "${cmd[@]}" 2>>"$LOG_FILE"
 
     EXIT_CODE=$?
 

@@ -20,6 +20,7 @@ import math
 import os
 import sys
 import time
+import warnings
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ENGINE_PATH = SCRIPT_DIR / "shadow-engine-prototype"
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*\\+init=<authority>:<code> syntax is deprecated.*",
+    category=FutureWarning,
+)
 
 
 HEADERS_TO_APPEND: List[str] = [
@@ -64,6 +71,25 @@ def parse_bool(value: object, default: bool = False) -> bool:
         if lowered in {"0", "false", "no", "n", "off"}:
             return False
     return default
+
+
+def parse_float(value: object, default: float) -> float:
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if raw == "":
+            return default
+        try:
+            return float(raw)
+        except Exception:
+            return default
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except Exception:
+        return default
 
 
 def js_number(value: object) -> float:
@@ -160,6 +186,46 @@ def read_buckets_from_file(file_path: Optional[str]) -> Optional[set[str]]:
     return items
 
 
+def read_targets_from_file(file_path: str, input_root: Path) -> List[Path]:
+    path = Path(file_path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as exc:
+        raise RuntimeError(f"targets_read_failed: {file_path}: {exc}") from exc
+
+    targets: List[Path] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        candidate = Path(line)
+        if not candidate.is_absolute():
+            candidate = input_root / candidate
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved.suffix.lower() != ".csv":
+            continue
+        try:
+            resolved.relative_to(input_root)
+        except Exception as exc:
+            raise RuntimeError(f"target_outside_input_root: {resolved}") from exc
+        targets.append(resolved)
+
+    unique: List[Path] = []
+    seen: set[Path] = set()
+    for item in targets:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    missing = [str(p) for p in unique if not p.exists()]
+    if missing:
+        raise RuntimeError(f"targets_missing: {len(missing)} (first={missing[0]})")
+    return unique
+
+
 def read_csv_table(file_path: Path) -> Tuple[List[str], List[Dict[str, str]]]:
     with file_path.open("r", encoding="utf-8", newline="") as fh:
         reader = csv.reader(fh)
@@ -206,7 +272,16 @@ def write_csv_naive(out_file: Path, headers: Sequence[str], rows: Sequence[Dict[
     lines = [",".join(headers)]
     for row in rows:
         lines.append(",".join(format_cell(row.get(h, "")) for h in headers))
-    out_file.write_text("\n".join(lines), encoding="utf-8")
+    tmp_path = out_file.with_name(f"{out_file.name}.tmp.{os.getpid()}")
+    try:
+        tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.replace(tmp_path, out_file)
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
 
 
 def pick_lon_lat(row: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
@@ -361,6 +436,7 @@ def _fetch_weather_era5(lat: float, lon: float, timestamp_iso: str, template: Op
     import numpy as np
 
     target = datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00")).astimezone(timezone.utc)
+    target_naive = target.replace(tzinfo=None)
     file_path = _resolve_era5_path(template, fallback, target)
 
     cached = _ERA5_DATASET_CACHE.get(file_path)
@@ -388,7 +464,7 @@ def _fetch_weather_era5(lat: float, lon: float, timestamp_iso: str, template: Op
         lon_norm = (lon_norm + 360) % 360
 
     diffs = np.abs(
-        np.array([(np.datetime64(target) - t).astype("timedelta64[s]").astype(int) for t in times])
+        np.array([(np.datetime64(target_naive) - t).astype("timedelta64[s]").astype(int) for t in times])
     )
     idx = int(np.argmin(diffs))
     if idx == 0:
@@ -530,11 +606,12 @@ def _get_buildings(bounds: Dict[str, float], worker: WorkerConfig):
 
 def _process_bucket(job: BucketJob) -> BucketResult:
     warnings: List[str] = []
-    bucket_end = add_minutes_iso(job.bucket_key, 1)
+    bucket_end = job.bucket_key
 
     cloud_cover_value: Optional[float] = None
     solar_irradiance_value: Optional[float] = None
     sunlight_factor_value: Optional[float] = None
+    night_irradiance_threshold = float(os.getenv("MOBILITY_NIGHT_IRRADIANCE_THRESHOLD", "1e-6"))
 
     center_lat = (job.bbox["north"] + job.bbox["south"]) / 2.0
     center_lon = (job.bbox["east"] + job.bbox["west"]) / 2.0
@@ -558,6 +635,30 @@ def _process_bucket(job: BucketJob) -> BucketResult:
     cloud_cover_out: Any = cloud_cover_value if cloud_cover_value is not None else ""
     sunlight_factor_out: Any = sunlight_factor_value if sunlight_factor_value is not None else ""
     solar_irradiance_out: Any = solar_irradiance_value if solar_irradiance_value is not None else ""
+
+    if solar_irradiance_value is not None and solar_irradiance_value <= night_irradiance_threshold:
+        updates: List[RowUpdate] = []
+        for point in job.points:
+            updates.append(
+                RowUpdate(
+                    index=point.index,
+                    values={
+                        "sunlit": 0,
+                        "shadowPercent": 0,
+                        "bucketStart": job.bucket_key,
+                        "bucketEnd": job.bucket_key,
+                        "source": "night",
+                        "errorDetail": "",
+                        "cloudCover": cloud_cover_out,
+                        "sunlightFactor": sunlight_factor_out,
+                        "sunlitEffective": "",
+                        "shadowPercentEffective": "",
+                        "solarIrradianceWm2": solar_irradiance_out,
+                        "irradianceEffective": "",
+                    },
+                )
+            )
+        return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
 
     try:
         if str(ENGINE_PATH) not in sys.path:
@@ -803,17 +904,19 @@ class Config:
     timezone: str
     max_features: int
     concurrency: int
+    progress_interval_s: float
+    progress_style: str
+    print_config: bool
     force: bool
     buckets_file: Optional[str]
+    targets_file: Optional[str]
     target_file: Optional[str]
 
 
 def parse_args(argv: Sequence[str]) -> Config:
-    default_input = os.getenv(
-        "INPUT_ROOT", "/media/liuzhihang/repo/projects/wellspace/GLAN/PHASE1/spatial_temporal_merge"
-    )
-    default_output = os.getenv("OUTPUT_ROOT", "/media/liuzhihang/repo/projects/wellspace/GLAN_processed")
-    default_canopy = "/media/liuzhihang/repo/projects/wellspace/Tree/HKtree_small.tif"
+    default_input = os.getenv("INPUT_ROOT")
+    default_output = os.getenv("OUTPUT_ROOT")
+    default_canopy = ""
 
     parser = argparse.ArgumentParser(description="Batch mobility shadow (pure Python)")
     parser.add_argument("--input", dest="input_root", default=default_input)
@@ -884,16 +987,43 @@ def parse_args(argv: Sequence[str]) -> Config:
     default_conc = os.getenv("CONC") or str(min(os.cpu_count() or 4, 64))
     parser.add_argument("--concurrency", dest="concurrency", default=default_conc)
     parser.add_argument("--workers", dest="workers", default=None)
+    parser.add_argument(
+        "--progress-interval",
+        dest="progress_interval_s",
+        default=os.getenv("MOBILITY_PROGRESS_INTERVAL", "10"),
+        help="Progress log interval in seconds (0 disables).",
+    )
+    parser.add_argument(
+        "--progress-style",
+        dest="progress_style",
+        default=os.getenv("MOBILITY_PROGRESS_STYLE", "log"),
+        choices=("log", "single"),
+        help="Progress output style: log (new lines) or single (overwrite line).",
+    )
+    parser.add_argument(
+        "--print-config",
+        dest="print_config",
+        nargs="?",
+        const="true",
+        default=os.getenv("MOBILITY_PRINT_CONFIG", "false"),
+        help="Print config JSON at startup.",
+    )
     parser.add_argument("--force", dest="force", nargs="?", const="true", default="false")
     parser.add_argument("--buckets-file", "--bucketsFile", dest="buckets_file", default=None)
+    parser.add_argument("--targets-file", dest="targets_file", default=None)
     parser.add_argument("--target-file", "--targetFile", dest="target_file", default=None)
 
     args = parser.parse_args(list(argv))
+    if not args.input_root:
+        parser.error("Missing --input (or set $INPUT_ROOT)")
+    if not args.output_root:
+        parser.error("Missing --output (or set $OUTPUT_ROOT)")
     concurrency_raw = args.workers if args.workers is not None else args.concurrency
     try:
         concurrency = int(concurrency_raw)
     except Exception:
         concurrency = 4
+    progress_interval_s = max(0.0, parse_float(args.progress_interval_s, 10.0))
     canopy_path = str(args.canopy_raster_path).strip() if args.canopy_raster_path else None
     canopy_path = canopy_path or None
 
@@ -912,8 +1042,12 @@ def parse_args(argv: Sequence[str]) -> Config:
         timezone=str(args.timezone),
         max_features=int(args.max_features),
         concurrency=max(1, concurrency),
+        progress_interval_s=progress_interval_s,
+        progress_style=str(args.progress_style),
+        print_config=parse_bool(args.print_config, default=False),
         force=parse_bool(args.force, default=False),
         buckets_file=str(args.buckets_file) if args.buckets_file else None,
+        targets_file=str(args.targets_file) if args.targets_file else None,
         target_file=str(args.target_file) if args.target_file else None,
     )
 
@@ -997,11 +1131,47 @@ def process_file(
         f"{' (filtered)' if filter_buckets else ''}"
     )
 
+    total_buckets = len(jobs)
+    total_points = sum(len(job.points) for job in jobs)
+    completed_buckets = 0
+    completed_points = 0
+    last_progress = started_at
+    progress_interval_s = max(0.0, float(config.progress_interval_s))
+    progress_style = str(config.progress_style or "log")
+
     for result in run_bucket_jobs(jobs, config.concurrency, executor=executor):
+        completed_buckets += 1
+        completed_points += len(result.row_updates)
         for warn in result.warnings:
             print(warn, file=sys.stderr)
         for update in result.row_updates:
             rows[update.index].update(update.values)
+        now = time.time()
+        should_report = (
+            progress_interval_s > 0
+            and (now - last_progress >= progress_interval_s or completed_buckets >= total_buckets)
+            and total_buckets > 0
+        )
+        if should_report:
+            elapsed_s = max(0.001, now - started_at)
+            rate = completed_buckets / elapsed_s
+            remaining = max(0, total_buckets - completed_buckets)
+            eta_s = int(round(remaining / rate)) if rate > 0 else -1
+            pct = (completed_buckets / total_buckets) * 100.0
+            line = (
+                f"[Progress][{idx + 1}/{total}] {relative}"
+                f" buckets={completed_buckets}/{total_buckets} ({pct:.1f}%)"
+                f" points={completed_points}/{total_points}"
+                f" elapsed={int(round(elapsed_s))}s eta={eta_s}s"
+            )
+            if progress_style == "single":
+                print(f"\r{line}", end="", flush=True)
+            else:
+                print(line, flush=True)
+            last_progress = now
+
+    if progress_style == "single" and total_buckets > 0:
+        print("", flush=True)
 
     for row in rows:
         if row.get("sunlit", "") not in ("", None):
@@ -1040,10 +1210,21 @@ def process_file(
 def main(argv: Sequence[str]) -> int:
     config = parse_args(argv)
     print("Batch mobility shadow")
-    print(json.dumps(asdict(config), indent=2))
+    if config.print_config:
+        print(json.dumps(asdict(config), indent=2))
 
     input_root = Path(config.input_root)
-    files = list_csv_files(input_root)
+    if config.targets_file:
+        if config.target_file:
+            print("[Fatal] Use either --target-file or --targets-file (not both).", file=sys.stderr)
+            return 2
+        try:
+            files = read_targets_from_file(config.targets_file, input_root)
+        except Exception as exc:
+            print(f"[Fatal] Failed to read targets file: {exc}", file=sys.stderr)
+            return 2
+    else:
+        files = list_csv_files(input_root)
     if config.target_file:
         files = [f for f in files if f.name == config.target_file]
         if not files:
@@ -1094,11 +1275,22 @@ def main(argv: Sequence[str]) -> int:
     if mp_ctx is not None:
         executor_kwargs["mp_context"] = mp_ctx
 
+    failures: List[str] = []
     with ProcessPoolExecutor(**executor_kwargs) as executor:
         for i, file_path in enumerate(files):
-            process_file(file_path, i, total, config, executor=executor)
+            try:
+                process_file(file_path, i, total, config, executor=executor)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                rel = os.path.relpath(file_path, config.input_root)
+                print(f"[File crash][{i + 1}/{total}] {rel}: {str(exc)[:200]}", file=sys.stderr)
+                failures.append(str(file_path))
 
     print("All files completed.")
+    if failures:
+        print(f"[Summary] Failed files: {len(failures)}", file=sys.stderr)
+        return 1
     return 0
 
 

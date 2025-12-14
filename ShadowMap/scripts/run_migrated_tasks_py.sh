@@ -20,6 +20,8 @@ CONC="${CONC:-8}"
 TIMEOUT="${TIMEOUT:-2400}"
 
 BUILDINGS_PATH="${BUILDINGS_PATH:-${BUILDING_LOCAL_GEOJSON:-}}"
+BUILDINGS_LAYER="${BUILDINGS_LAYER:-${BUILDING_GPKG_LAYER:-}}"
+BUILDINGS_MODE="${BUILDINGS_MODE:-${MOBILITY_BUILDINGS_MODE:-preload}}"
 CANOPY_PATH="${CANOPY_PATH:-${SHADOW_ENGINE_CANOPY_RASTER_PATH:-${CANOPY_RASTER_PATH:-}}}"
 ERA5_TEMPLATE_PATH="${ERA5_TEMPLATE_PATH:-${ERA5_FILE_TEMPLATE:-}}"
 
@@ -30,6 +32,8 @@ echo "Output root: ${OUTPUT_ROOT}"
 echo "Script: ${PY_SCRIPT}"
 echo "Concurrency: ${CONC} | Timeout: ${TIMEOUT}s"
 echo "Buildings: ${BUILDINGS_PATH:-<unset>}"
+echo "Buildings layer: ${BUILDINGS_LAYER:-<unset>}"
+echo "Buildings mode: ${BUILDINGS_MODE}"
 echo "Canopy: ${CANOPY_PATH:-<unset>}"
 echo "ERA5 template: ${ERA5_TEMPLATE_PATH:-<unset>}"
 
@@ -90,6 +94,10 @@ for bf in "${files[@]}"; do
   cmd+=(--input "${input_dir}")
   cmd+=(--output "${target_dir}")
   cmd+=(--buildings "${BUILDINGS_PATH}")
+  if [ -n "${BUILDINGS_LAYER}" ]; then
+    cmd+=(--buildings-layer "${BUILDINGS_LAYER}")
+  fi
+  cmd+=(--buildings-mode "${BUILDINGS_MODE}")
   if [ -n "${CANOPY_PATH}" ]; then
     cmd+=(--canopy "${CANOPY_PATH}")
   fi
@@ -100,9 +108,13 @@ for bf in "${files[@]}"; do
   cmd+=(--buckets-file "${bf}")
   cmd+=(--target-file "${source_name}")
 
-  "${cmd[@]}"
-
-  rc=$?
+  # NOTE: the script uses `set -e`, so capture exit codes through an if/else
+  # block to avoid aborting the entire batch on the first failure/timeout.
+  if "${cmd[@]}"; then
+    rc=0
+  else
+    rc=$?
+  fi
   if [ ${rc} -eq 0 ]; then
     echo "  [OK] remove ${bf}"
     rm "${bf}"
