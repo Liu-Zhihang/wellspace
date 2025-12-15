@@ -1,4 +1,45 @@
-# Development Plan (Sprint 2025-10-19 ~ 2025-10-26)
+# Development Plan
+
+Last updated: 2025-12-15
+
+本文件用于跟踪「当前可交付目标」与「关键工作流」；历史 sprint 记录保留在文末的 Archive 章节。
+
+## Current Focus (2025-12)
+
+### A) Demo pipeline stability
+
+- GeoServer/PostGIS/WFS 数据源稳定可用，后端 `/api/wfs-buildings/*` 与前端联通。
+- 关键自检：
+  - GeoServer：`GET /geoserver/wfs?request=GetCapabilities`
+  - Backend：`GET /api/health`、`GET /api/wfs-buildings/test`
+  - Frontend：`VITE_BACKEND_BASE_URL` 指向可用后端
+
+### B) Offline mobility sunlight/shadow batch compute (Python-first)
+
+- 目标：绕开 `node -> HTTP -> backend` 计算链路，直接用 Python 批量计算以充分利用多核与大内存。
+- 入口脚本：`ShadowMap/scripts/run_full_recal_batch.sh`（单次 Python 调用 + 单进程池，按分钟 bucket 并行，避免嵌套进程）。
+- 配置统一：通过 `ShadowMap/.shadowmap.env`（模板：`ShadowMap/.shadowmap.env.example`）消除两台机器路径差异。
+- 可选提速开关：`MOBILITY_INCLUDE_CANOPY=false`（建筑-only；树冠是主要瓶颈，必要时优先关掉以保证吞吐）。
+
+### C) Data expansion (e.g. North America tiles)
+
+- PostGIS `buildings` 表要求：`geom` + `height` + `tile_id`（其余字段可选）。
+- 批量导入与 GeoServer 刷新流程见：`ShadowMap/Chinese documents/ops/瓦片数据导入与统一流程.md`。
+- 后端 tile catalog 需要覆盖导入范围（`ShadowMap/shadow-map-backend/config/buildingTiles.json` 或 `.env` 的 `BUILDING_WFS_TILE_CATALOG_PATH`）。
+
+### D) Docs & ops
+
+- 文档入口：`DOCS_INDEX.md`
+- 数据与环境：`DATASETS.md`（两台机器统一）
+- 安全：文档/脚本里不得出现真实密码或 token（仅写变量名/占位符）。
+
+---
+
+## Archive
+
+（以下为 2025-10 的历史 sprint 记录，保留用于回溯。）
+
+### Sprint 2025-10-19 ~ 2025-10-26
 
 ## Sprint Goals
 

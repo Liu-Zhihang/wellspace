@@ -2,6 +2,8 @@
 
 ShadowMap visualises urban building shadows and sunlight exposure. The repository contains both the React frontend (multiple Mapbox-based modes) and the TypeScript backend services.
 
+See `DOCS_INDEX.md` first if you are new to this repository (data layout, batch compute, GeoServer/WFS runbooks).
+
 ## Feature Highlights
 
 - **Mapbox-first experience** – Clean 3D layout built on ShadeMap + Mapbox GL.
@@ -14,12 +16,12 @@ ShadowMap visualises urban building shadows and sunlight exposure. The repositor
 ## Repository Layout
 
 ```
-ShadowMap/
-├── shadow-map-frontend/react-shadow-app  # React + TypeScript client
-├── shadow-map-backend                    # Express + TypeScript backend
-├── prototypes                            # Standalone experimental pages
-├── scripts                               # Data utilities
-└── Chinese documents                     # Reference notes (CN)
+ShadowMap/                                 # workspace root (app + scripts)
+├── shadow-map-frontend/react-shadow-app   # React + TypeScript client
+├── shadow-map-backend                     # Express + TypeScript backend
+├── scripts                                # batch compute & utilities
+├── docs                                   # mobility sunlight/shadow docs
+└── Chinese documents                      # operational notes (CN)
 ```
 
 See `CODEBASE_STRUCTURE.md` for detailed directory information.
@@ -29,7 +31,7 @@ See `CODEBASE_STRUCTURE.md` for detailed directory information.
 ### Frontend
 
 ```bash
-cd shadow-map-frontend/react-shadow-app
+cd ShadowMap/shadow-map-frontend/react-shadow-app
 pnpm install
 pnpm run dev        # development
 pnpm run build      # production build
@@ -40,7 +42,8 @@ The Clean 3D mode is now the sole experience; legacy Mapbox/WFS/Leaflet toggles 
 ### Backend
 
 ```bash
-cd shadow-map-backend
+cd ShadowMap/shadow-map-backend
+cp .env.example .env
 npm install
 npm run dev         # development (nodemon)
 npm run build && npm start   # production
@@ -48,12 +51,21 @@ npm run build && npm start   # production
 
 Copy `.env.example` to `.env` and provide WFS credentials before starting the API.
 
+### Offline / Batch (pure Python)
+
+For cross-machine path consistency, copy `ShadowMap/.shadowmap.env.example` to `ShadowMap/.shadowmap.env` (gitignored) and set your local dataset paths.
+
+Run the batched recompute runner (single Python invocation, bucket-level concurrency):
+
+```bash
+CONCURRENCY=32 bash ShadowMap/scripts/run_full_recal_batch.sh
+```
+
 ## Current Focus
 
-1. Fix the remaining TypeScript errors in the frontend and restore a clean build.
-2. Maintain the Clean-only viewport and continue polishing the consolidated UI.
-3. Design and implement the new geometry-upload analysis module (`REQ-ANALYSIS-01`).
-4. Keep structure/plan/docs up to date to make collaboration predictable.
+1. Keep the demo pipeline stable: GeoServer/PostGIS/WFS + backend + frontend.
+2. Scale offline mobility sunlight/shadow batch compute (Python-first; canopy optional).
+3. Keep docs/data/runbooks in sync as datasets and machines evolve.
 
 See `DEVELOPMENT_PLAN.md` for the sprint plan and task status.
 

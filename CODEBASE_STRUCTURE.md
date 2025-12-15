@@ -1,6 +1,6 @@
 # Codebase Structure
 
-Last updated: 2025-10-19  
+Last updated: 2025-12-15  
 Maintainer: ShadowMap dev team
 
 ---
@@ -9,11 +9,13 @@ Maintainer: ShadowMap dev team
 
 | Path | Purpose |
 | --- | --- |
-| `shadow-map-frontend/react-shadow-app/` | React + TypeScript client (Clean Mapbox viewport) |
-| `shadow-map-backend/` | Express + TypeScript API (WFS proxy, DEM, weather) |
-| `prototypes/` | Stand-alone HTML/JS experiments (kept for reference only) |
-| `scripts/` | Maintenance and data preparation scripts |
-| `Chinese documents/` | Reference notes (中文) |
+| `ShadowMap/` | Workspace root (frontend/backend/scripts/docs) |
+| `ShadowMap/shadow-map-frontend/react-shadow-app/` | React + TypeScript client (Clean Mapbox viewport) |
+| `ShadowMap/shadow-map-backend/` | Express + TypeScript API (WFS proxy, DEM, weather) |
+| `ShadowMap/scripts/` | Batch compute + utilities (Python-first, Node optional) |
+| `ShadowMap/docs/` | Mobility sunlight/shadow docs |
+| `ShadowMap/Chinese documents/` | Ops runbooks (CN) |
+| `scripts/` | Repo maintenance scripts (archiving, prototype cleanup) |
 
 ---
 
@@ -44,7 +46,7 @@ Key entry points:
 - `services/shadowAnalysisService.ts` – deduplicated client for `POST /api/analysis/shadow`, normalises bbox/time buckets, and reuses AbortSignals.
 - `services/baseMapManager.ts` – catalogues MapLibre/Mapbox styles (vector + raster fallback) and builds style specs used when Zustand switches the active basemap.
 - `store/shadowMapStore.ts` – tracks `shadowServiceStatus`, cached results, and error state to power UI + overlay updates.
-- `scripts/shadow-engine-prototype/service_cli.py` – Python worker that runs `pybdshadow` and streams `shadows/sunlight/heatmap` JSON back to the Node backend when `SHADOW_ENGINE_SCRIPT_PATH` is configured.
+- `ShadowMap/scripts/shadow-engine-prototype/service_cli.py` – Python worker that runs `pybdshadow` and streams `shadows/sunlight/heatmap` JSON back to the Node backend when `SHADOW_ENGINE_SCRIPT_PATH` is configured.
 
 > Upcoming (`REQ-ANALYSIS-01`): extend the upload workflow so GeoJSON polygons feed the analysis hooks and panel, with exportable summaries.
 
@@ -69,11 +71,21 @@ Key endpoints:
 - `routes/health.ts` – service health probe.
 - `routes/analysis.ts` – abstracts the real-time shadow engine via `POST /api/analysis/shadow`, applying bbox+time-bucket caching, timeout/error policy, and deployment metadata by calling `services/shadowAnalysisService.ts`.
 - `services/shadowAnalysisService.ts` – centralises cache/in-flight coordination, optional external engine calls, and the current pybdshadow simulator fallback (see `SHADOW_ENGINE_*` env vars in `src/config`).
-- `scripts/shadow-engine-prototype/engine_core.py` – shared Python utilities (building fetch, GeoDataFrame prep, pybdshadow invocation) used by both the CLI worker and the original benchmarking script.
+- `ShadowMap/scripts/shadow-engine-prototype/engine_core.py` – shared Python utilities (building fetch, GeoDataFrame prep, pybdshadow invocation) used by both the CLI worker and the original benchmarking script.
 
 Build/run: `npm run dev` (nodemon), `npm run build && npm start` for prod.
 
 ---
+
+## Batch Compute (Mobility sunlight/shadow)
+
+Primary entry points live under `ShadowMap/scripts/`:
+
+- `batch-mobility-shadow.sh` – engine wrapper (`--engine python|node`, default Python).
+- `batch_mobility_shadow.py` – Python batch compute core (bucket-level concurrency; supports canopy toggle).
+- `run_full_recal_batch.sh` – batched recompute runner (single Python invocation; retry files treated as a file list).
+- `rebuild_mobility_tasks.py` – scan missing outputs and (re)create retry files.
+- `ShadowMap/.shadowmap.env.example` – machine profile template to unify paths across machines.
 
 ## Shared Conventions
 

@@ -1,3 +1,5 @@
+> 状态：归档（第三方项目 `mapbox-gl-shadow-simulator` 的 README 摘录）。如需最新信息请以官方仓库为准。
+
 mapbox-gl-shadow-simulator
 Shadow simulator for Mapbox GL JS and MapLibre GL JS. Visualize sunlight and shadow on a map for any date and time of year.
 
