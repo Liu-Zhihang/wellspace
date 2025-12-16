@@ -82,6 +82,7 @@ ShadowMap/Example/
 ShadowMap/Example/**/*.tif
 ShadowMap/Example/**/*.zip
 ShadowMap/shadow-map-frontend/react-shadow-app/public/Example/
+ShadowMap/shadow-map-frontend/react-shadow-app/public/video/
 ShadowMap/shadow-map-frontend/react-shadow-app/public/**/*.tif
 ShadowMap/shadow-map-frontend/react-shadow-app/public/**/*.zip
 

@@ -26,6 +26,14 @@ interface ViewportActions {
   initShadowSimulator?: ViewportAction;
   clearBuildings?: () => void;
   fitToBounds?: (bounds: BoundingBox, options?: { padding?: number; maxZoom?: number }) => void;
+  setViewPreset?: (preset: '2d' | '3d') => void;
+  flyTo?: (options: {
+    center: [number, number];
+    zoom?: number;
+    pitch?: number;
+    bearing?: number;
+    duration?: number;
+  }) => void;
 }
 
 export interface MobilityTracePoint {
@@ -44,6 +52,20 @@ interface ShadowMapState {
   setMobilityPlaybackTime: (date: Date | null) => void;
   isMobilityPlaying: boolean;
   setMobilityPlaying: (playing: boolean) => void;
+  mobilityFlowStyle: 'trips' | 'path';
+  setMobilityFlowStyle: (style: 'trips' | 'path') => void;
+  mobilityColorBySunlight: boolean;
+  setMobilityColorBySunlight: (enabled: boolean) => void;
+  mobilityInferIndoor: boolean;
+  setMobilityInferIndoor: (enabled: boolean) => void;
+  mobilityDashIndoor: boolean;
+  setMobilityDashIndoor: (enabled: boolean) => void;
+  mobilityPathWidthScale: number;
+  setMobilityPathWidthScale: (scale: number) => void;
+  figureModeEnabled: boolean;
+  setFigureModeEnabled: (enabled: boolean) => void;
+  figureHudVisible: boolean;
+  setFigureHudVisible: (visible: boolean) => void;
   
   // Map settings
   mapSettings: MapSettings;
@@ -181,6 +203,20 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   },
   isMobilityPlaying: false,
   setMobilityPlaying: (playing: boolean) => set({ isMobilityPlaying: playing }),
+  mobilityFlowStyle: 'trips',
+  setMobilityFlowStyle: (style: 'trips' | 'path') => set({ mobilityFlowStyle: style }),
+  mobilityColorBySunlight: true,
+  setMobilityColorBySunlight: (enabled: boolean) => set({ mobilityColorBySunlight: enabled }),
+  mobilityInferIndoor: false,
+  setMobilityInferIndoor: (enabled: boolean) => set({ mobilityInferIndoor: enabled }),
+  mobilityDashIndoor: true,
+  setMobilityDashIndoor: (enabled: boolean) => set({ mobilityDashIndoor: enabled }),
+  mobilityPathWidthScale: 1,
+  setMobilityPathWidthScale: (scale: number) => set({ mobilityPathWidthScale: scale }),
+  figureModeEnabled: false,
+  setFigureModeEnabled: (enabled: boolean) => set((state) => ({ figureModeEnabled: enabled, figureHudVisible: enabled ? true : state.figureHudVisible })),
+  figureHudVisible: true,
+  setFigureHudVisible: (visible: boolean) => set({ figureHudVisible: visible }),
   
   mapSettings: {
     // Legacy settings (for compatibility)
@@ -458,19 +494,18 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     }));
 
     try {
-      let lastProgress: MobilitySunlightProgress | null = null;
+      let progressTotal: number | null = null;
       const samples = await computeMobilitySunlightForRows(rows, {
         includeCanopy: state.includeCanopy,
         onProgress: (progress) => {
-          lastProgress = progress;
+          progressTotal = progress.total;
           set(current => ({
             mobilitySunlightProgress: { ...current.mobilitySunlightProgress, [datasetId]: progress },
           }));
         },
       });
-      const finalProgress: MobilitySunlightProgress = lastProgress
-        ? { completed: lastProgress.total, total: lastProgress.total }
-        : { completed: samples.length, total: samples.length || 1 };
+      const total = typeof progressTotal === 'number' ? progressTotal : (samples.length || 1);
+      const finalProgress: MobilitySunlightProgress = { completed: total, total };
       set(current => ({
         mobilitySunlight: { ...current.mobilitySunlight, [datasetId]: samples },
         mobilitySunlightProgress: { ...current.mobilitySunlightProgress, [datasetId]: finalProgress },

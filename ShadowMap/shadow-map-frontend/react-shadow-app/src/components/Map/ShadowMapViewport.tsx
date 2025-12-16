@@ -13,7 +13,6 @@ import { GeometryAnalysisOverlay } from '../Analysis/GeometryAnalysisOverlay';
 import type { GeometryAnalysisSample } from '../../types/index.ts';
 import { getBaseMapStyle, getBaseMapById } from '../../services/baseMapManager';
 import { useMobilityPlayback } from '../../hooks/useMobilityPlayback';
-import { useMobilityDemoBootstrap } from '../../hooks/useMobilityDemoBootstrap';
 import { useDeckMobilityFlow } from '../../hooks/useDeckMobilityFlow';
 
 const MIN_SHADOW_DARKNESS_FACTOR = 0.45;
@@ -256,6 +255,7 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const {
     currentDate,
     mapSettings,
+    figureModeEnabled,
     shadowSettings: shadowSettingsState,
     currentWeather,
     setCurrentWeather,
@@ -293,9 +293,12 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
 
   const autoLoadBuildingsRef = useRef(autoLoadBuildings);
   const selectedBaseMapId = baseMapId ?? mapSettings.baseMapId ?? 'mapbox-streets';
-  const buildingStyle = useMemo(() => computeBuildingStyle(selectedBaseMapId), [selectedBaseMapId]);
+  const buildingStyle = useMemo(() => {
+    const base = computeBuildingStyle(selectedBaseMapId);
+    if (!figureModeEnabled) return base;
+    return { fill: '#334155', opacity: Math.min(base.opacity, 0.34) };
+  }, [selectedBaseMapId, figureModeEnabled]);
   const baseMapStyle = useMemo(() => getBaseMapStyle(selectedBaseMapId), [selectedBaseMapId]);
-  useMobilityDemoBootstrap();
   useMobilityPlayback();
   useDeckMobilityFlow();
 
@@ -562,13 +565,18 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         try {
           const bounds = new mapboxgl.LngLatBounds([minLng, minLat], [maxLng, maxLat]);
           // Avoid repeated fit
-          if (lastFitGeometryRef.current !== selectedGeometryId) {
-            map.fitBounds(bounds, { padding: 80, maxZoom: Math.max(map.getZoom(), 17) });
-            lastFitGeometryRef.current = selectedGeometryId;
+              if (lastFitGeometryRef.current !== selectedGeometryId) {
+            map.fitBounds(bounds, {
+              padding: 80,
+              maxZoom: Math.max(map.getZoom(), 17),
+              pitch: map.getPitch(),
+              bearing: map.getBearing(),
+            });
+                lastFitGeometryRef.current = selectedGeometryId;
+              }
+          } catch (error) {
+            console.warn('Failed to fit bounds for geometry', error);
           }
-        } catch (error) {
-          console.warn('Failed to fit bounds for geometry', error);
-        }
       }
     }
     bringLayerToFront(SHADOW_RESULT_LAYER_ID);
@@ -1762,8 +1770,9 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
       initShadowSimulator,
       clearBuildings,
       fitToBounds: (bounds, options) => {
-        if (!mapRef.current) return;
-        mapRef.current.fitBounds(
+        const map = mapRef.current;
+        if (!map) return;
+        map.fitBounds(
           [
             [bounds.west, bounds.south],
             [bounds.east, bounds.north],
@@ -1771,8 +1780,30 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
           {
             padding: options?.padding ?? 80,
             maxZoom: options?.maxZoom ?? 16.5,
+            pitch: map.getPitch(),
+            bearing: map.getBearing(),
           },
         );
+      },
+      setViewPreset: (preset) => {
+        const map = mapRef.current;
+        if (!map) return;
+        if (preset === '2d') {
+          map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
+          return;
+        }
+        map.easeTo({ pitch: 60, bearing: -18, duration: 900 });
+      },
+      flyTo: (options) => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.easeTo({
+          center: options.center,
+          zoom: options.zoom ?? map.getZoom(),
+          pitch: options.pitch ?? map.getPitch(),
+          bearing: options.bearing ?? map.getBearing(),
+          duration: options.duration ?? 900,
+        });
       },
     });
 
@@ -1782,6 +1813,8 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
         initShadowSimulator: undefined,
         clearBuildings: undefined,
         fitToBounds: undefined,
+        setViewPreset: undefined,
+        flyTo: undefined,
       });
     };
   }, [setViewportActions, loadBuildings, initShadowSimulator, clearBuildings]);
@@ -1797,14 +1830,21 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
     const initialCenter: [number, number] = (mapCenter ?? [114.1694, 22.3193]) as [number, number];
     const initialZoom = mapZoom ?? 16;
 
+    const urlParams = new URLSearchParams(window.location.search);
+    const figureModeRequested = (urlParams.get('figure') ?? urlParams.get('fig')) === '1';
+    const preserveDrawingBuffer = urlParams.get('preserve') === '1' || urlParams.get('export') === '1';
+    const antialias = figureModeRequested || urlParams.get('antialias') === '1';
+
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
       style: baseMapStyle,
       center: initialCenter,
       zoom: initialZoom,
-      pitch: 45,
-      bearing: 0,
+      pitch: 60,
+      bearing: -18,
       attributionControl: false,
+      preserveDrawingBuffer,
+      antialias,
     });
 
     mapRef.current = map;

@@ -71,6 +71,19 @@ export const LeftIconToolbar: React.FC = () => {
     exportMobilitySunlight,
     includeCanopy,
     setIncludeCanopy,
+    mobilityFlowStyle,
+    setMobilityFlowStyle,
+    mobilityColorBySunlight,
+    setMobilityColorBySunlight,
+    mobilityInferIndoor,
+    setMobilityInferIndoor,
+    mobilityDashIndoor,
+    setMobilityDashIndoor,
+    mobilityPathWidthScale,
+    setMobilityPathWidthScale,
+    figureModeEnabled,
+    setFigureModeEnabled,
+    setFigureHudVisible,
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
@@ -588,6 +601,67 @@ export const LeftIconToolbar: React.FC = () => {
               <Switch size="small" checked={includeCanopy} onChange={(checked) => setIncludeCanopy(checked)} />
             </div>
           </div>
+          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <span>Trajectory style</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">
+                {mobilityFlowStyle === 'path' ? 'Static path' : 'Animated trail'}
+              </span>
+              <Switch
+                size="small"
+                checked={mobilityFlowStyle === 'path'}
+                onChange={(checked) => setMobilityFlowStyle(checked ? 'path' : 'trips')}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <span>Path color</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">{mobilityColorBySunlight ? 'Sun/Shadow' : 'Dataset'}</span>
+              <Switch
+                size="small"
+                checked={mobilityColorBySunlight}
+                onChange={(checked) => setMobilityColorBySunlight(checked)}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <span>Indoor detection</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">{mobilityInferIndoor ? 'On' : 'Off'}</span>
+              <Switch
+                size="small"
+                checked={mobilityInferIndoor}
+                onChange={(checked) => setMobilityInferIndoor(checked)}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <span>Dashed indoor</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">{mobilityDashIndoor ? 'On' : 'Off'}</span>
+              <Switch
+                size="small"
+                checked={mobilityDashIndoor}
+                disabled={!mobilityInferIndoor}
+                onChange={(checked) => setMobilityDashIndoor(checked)}
+              />
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>Line weight</span>
+              <span>{mobilityPathWidthScale.toFixed(1)}x</span>
+            </div>
+            <Slider
+              min={0.5}
+              max={2}
+              step={0.1}
+              value={mobilityPathWidthScale}
+              onChange={(value) => setMobilityPathWidthScale(value as number)}
+              tooltip={{ open: false }}
+            />
+          </div>
           {mobilityDatasets.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">
               No mobility datasets yet. Use the Upload button to add CSV traces.
@@ -878,6 +952,37 @@ export const LeftIconToolbar: React.FC = () => {
     if (panelId === 'style') {
       return (
         <div className="w-full space-y-3 p-4 text-slate-700">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-slate-900">Figure mode</span>
+              <Switch size="small" checked={figureModeEnabled} onChange={(checked) => setFigureModeEnabled(checked)} />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="small" onClick={applyFigurePreset}>
+                Best preset (HK Central)
+              </Button>
+              {figureModeEnabled && (
+                <Button size="small" onClick={() => setFigureHudVisible(false)}>
+                  Hide toolbar (H)
+                </Button>
+              )}
+            </div>
+            <span className="text-[11px] text-gray-400">
+              Best time: 2025-12-16 16:30 HKT (08:30Z). Suggested files: Example/Mobility/hk-central-mini-*.*
+            </span>
+          </div>
+          <div className="space-y-2">
+            <span className="text-sm font-semibold text-slate-900">Camera</span>
+            <div className="flex items-center gap-2">
+              <Button size="small" onClick={() => invokeViewPreset('3d')}>
+                3D view
+              </Button>
+              <Button size="small" onClick={() => invokeViewPreset('2d')}>
+                2D view
+              </Button>
+            </div>
+            <span className="text-[11px] text-gray-400">Fit/zoom actions keep current pitch & bearing.</span>
+          </div>
           <span className="text-sm font-semibold text-slate-900">Base map</span>
           {baseMapPresets.map((preset) => (
             <Button
@@ -1075,6 +1180,38 @@ export const LeftIconToolbar: React.FC = () => {
       const message = error instanceof Error ? error.message : String(error);
       addStatusMessage?.(`Action failed: ${message}`, 'error');
     }
+  };
+
+  const invokeViewPreset = (preset: '2d' | '3d') => {
+    if (!viewportActions.setViewPreset) {
+      addStatusMessage?.('Map viewport is not ready to update camera yet.', 'warning');
+      return;
+    }
+    viewportActions.setViewPreset(preset);
+  };
+
+  const applyFigurePreset = () => {
+    const time = new Date('2025-12-16T08:30:00Z'); // 16:30 HKT
+    const center: [number, number] = [114.1588, 22.2814]; // Central / Admiralty
+
+    setFigureModeEnabled(true);
+    setCurrentDate(time);
+    updateMapSettings({ baseMapId: 'carto-light' });
+
+    if (!viewportActions.flyTo) {
+      addStatusMessage?.('Map viewport is not ready to apply preset camera yet.', 'warning');
+      return;
+    }
+
+    viewportActions.flyTo({
+      center,
+      zoom: 16.8,
+      pitch: 60,
+      bearing: -18,
+      duration: 1000,
+    });
+
+    addStatusMessage?.('Figure preset applied: HK Central @ 16:30 (long shadows).', 'info');
   };
 
   const toolbarItems: Array<{

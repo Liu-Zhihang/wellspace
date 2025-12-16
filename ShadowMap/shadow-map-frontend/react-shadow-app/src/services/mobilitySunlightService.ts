@@ -182,7 +182,7 @@ export const computeMobilitySunlightForRows = async (
       }
     }
 
-    const applyCloud = (sunlitValue: number, shadowPercentValue: number) => {
+    const applyCloud = (sunlitValue: number) => {
       const factor = Math.min(Math.max(sunlightFactor ?? 1, 0), 1);
       const sunlitEffective = sunlitValue * factor;
       const shadowPercentEffective = Math.min(100, Math.max(0, 100 - sunlitEffective * 100));
@@ -206,7 +206,7 @@ export const computeMobilitySunlightForRows = async (
       logDebug('[MobilitySunlight][bucket][nighttime-precheck]', { bucketStart, bbox: bounds });
       console.warn('[Mobility Sunlight] Nighttime bucket (pre-check) for', bucketStart, '- marking as no sunlight');
       bucketRows.forEach((row) => {
-        const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0, 100);
+        const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0);
         samples.push({
           ...row,
           sunlit: 0,
@@ -232,7 +232,7 @@ export const computeMobilitySunlightForRows = async (
       logDebug('[MobilitySunlight][bucket][degenerate]', { bucketStart, bbox: bounds });
       console.warn('[Mobility Sunlight] Degenerate bounds for', bucketStart, bounds, '- marking as error');
       bucketRows.forEach((row) => {
-        const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0, 0);
+        const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0);
         samples.push({
           ...row,
           sunlit: 0,
@@ -294,7 +294,7 @@ export const computeMobilitySunlightForRows = async (
       if (!noBuildings && !isNight) {
         console.warn('[Mobility Sunlight] Engine error for', bucketStart, message);
         bucketRows.forEach((row) => {
-          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0, 0);
+          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0);
           samples.push({
             ...row,
             sunlit: 0,
@@ -317,7 +317,7 @@ export const computeMobilitySunlightForRows = async (
       if (noBuildings) {
         console.warn('[Mobility Sunlight] No buildings for bbox at', bucketStart, '- marking as sunlit');
         bucketRows.forEach((row) => {
-          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(1, 0);
+          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(1);
           samples.push({
             ...row,
             sunlit: 1,
@@ -336,7 +336,7 @@ export const computeMobilitySunlightForRows = async (
       } else if (isNight) {
         console.warn('[Mobility Sunlight] Nighttime for', bucketStart, '- marking as no sunlight');
         bucketRows.forEach((row) => {
-          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0, 100);
+          const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(0);
           samples.push({
             ...row,
             sunlit: 0,
@@ -365,10 +365,7 @@ export const computeMobilitySunlightForRows = async (
     bucketRows.forEach((row) => {
       const inShadow = polygons.some((polygon) => pointInPolygon(row.coordinates, polygon));
       const shadowPercent = polygons.length ? (inShadow ? 100 : 0) : fallbackShadowPercent;
-      const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(
-        inShadow ? 0 : 1,
-        shadowPercent,
-      );
+      const { sunlitEffective, shadowPercentEffective, irradianceEffective } = applyCloud(inShadow ? 0 : 1);
       samples.push({
         ...row,
         sunlit: inShadow ? 0 : 1,

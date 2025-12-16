@@ -119,6 +119,7 @@ export type MapSettings = {
   autoOptimize?: boolean;
   dataLayers: { [K in DataLayerType]: DataLayer };
   activeDataLayer: DataLayerType;
+  baseMapId?: string;
 };
 
 export type TerrainSource = {
