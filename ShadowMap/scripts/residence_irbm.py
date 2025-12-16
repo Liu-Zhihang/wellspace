@@ -49,8 +49,13 @@ def configure_runtime() -> None:
     )
     warnings.filterwarnings(
         "ignore",
-        message=r".*syntax is deprecated\\..*authority:code.*",
+        message=r".*\\+init=<authority>:<code>.*",
         category=FutureWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*CRS not set for some of the concatenation inputs\\..*",
+        category=UserWarning,
     )
 
 
@@ -373,6 +378,12 @@ def _compute_one_file(file_path: str, file_id: str, cfg: IrbmConfig) -> List[Dic
                 if canopy_gdf is not None and not canopy_gdf.empty:
                     import pandas as pd
 
+                    try:
+                        if getattr(canopy_gdf, "crs", None) is None and getattr(buildings, "crs", None) is not None:
+                            canopy_gdf = canopy_gdf.set_crs(buildings.crs, allow_override=True)
+                    except Exception:
+                        pass
+
                     buildings = pd.concat([buildings, canopy_gdf], ignore_index=True)
 
         if buildings.empty:
@@ -567,6 +578,7 @@ def main() -> int:
     parser.add_argument("--home-max-gap-s", default=os.getenv("IRBM_HOME_MAX_GAP_S", "300"))
     parser.add_argument("--include-home-coords", default=os.getenv("IRBM_INCLUDE_HOME_COORDS", "false"))
     parser.add_argument("--include-home-meta", default=os.getenv("IRBM_INCLUDE_HOME_META", "false"))
+    parser.add_argument("--print-config", default=os.getenv("IRBM_PRINT_CONFIG", "true"))
     args = parser.parse_args()
 
     input_root = str(args.input_root).strip()
@@ -643,6 +655,7 @@ def main() -> int:
         concurrency = 32
 
     resume = parse_bool(args.resume, default=True)
+    print_config = parse_bool(args.print_config, default=True)
 
     input_root_path = Path(cfg.input_root)
     output_path = Path(cfg.output)
@@ -663,27 +676,28 @@ def main() -> int:
         _preload_buildings(cfg.buildings_path, cfg.buildings_layer)
 
     started = time.time()
-    print("Residence IRBM (pure Python)")
-    print(
-        {
-            "input_root": cfg.input_root,
-            "output": str(output_path),
-            "targets": len(targets),
-            "buffers_m": cfg.buffers_m,
-            "timezone": cfg.timezone,
-            "solar_day": cfg.solar_day,
-            "hours_local": cfg.hours_local if not cfg.solar_day else "0..23 (night skipped)",
-            "concurrency": concurrency,
-            "buildings": cfg.buildings_path,
-            "buildings_layer": cfg.buildings_layer,
-            "buildings_mode": cfg.buildings_mode,
-            "include_canopy": cfg.include_canopy,
-            "canopy": cfg.canopy_raster_path,
-            "era5_template": cfg.era5_file_template,
-            "resume": resume,
-            "existing_keys": len(existing),
-        }
-    )
+    if print_config:
+        print("Residence IRBM (pure Python)")
+        print(
+            {
+                "input_root": cfg.input_root,
+                "output": str(output_path),
+                "targets": len(targets),
+                "buffers_m": cfg.buffers_m,
+                "timezone": cfg.timezone,
+                "solar_day": cfg.solar_day,
+                "hours_local": cfg.hours_local if not cfg.solar_day else "0..23 (night skipped)",
+                "concurrency": concurrency,
+                "buildings": cfg.buildings_path,
+                "buildings_layer": cfg.buildings_layer,
+                "buildings_mode": cfg.buildings_mode,
+                "include_canopy": cfg.include_canopy,
+                "canopy": cfg.canopy_raster_path,
+                "era5_template": cfg.era5_file_template,
+                "resume": resume,
+                "existing_keys": len(existing),
+            }
+        )
 
     headers = [
         "ID",

@@ -371,41 +371,82 @@ def load_canopy_raster() -> Optional[rasterio.io.DatasetReader]:
 
 
 def canopy_to_gdf(raster: rasterio.io.DatasetReader, bbox: Mapping[str, float]) -> gpd.GeoDataFrame:
-    # Windowed read of canopy raster to the bbox
-    transform = raster.transform
+    # Windowed read of canopy raster to the bbox.
+    # Guardrails: cap the read size to avoid allocating huge arrays when a bucket bbox is very large
+    # (e.g. points scattered across the city in the same minute).
     window = raster.window(bbox["west"], bbox["south"], bbox["east"], bbox["north"])
     if window.width <= 0 or window.height <= 0:
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
-    data = raster.read(1, window=window, boundless=True, fill_value=0)
-    # Mask values below threshold
+    try:
+        import math
+        from affine import Affine
+        from rasterio.enums import Resampling
+    except Exception:
+        math = None  # type: ignore[assignment]
+
+    width = int(math.ceil(float(window.width))) if math else int(float(window.width))
+    height = int(math.ceil(float(window.height))) if math else int(float(window.height))
+    if width <= 0 or height <= 0:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    max_pixels_raw = os.getenv("CANOPY_MAX_PIXELS", "1000000")
+    try:
+        max_pixels = int(float(max_pixels_raw))
+    except Exception:
+        max_pixels = 1_000_000
+
+    out_width = width
+    out_height = height
+    window_transform = raster.window_transform(window)
+
+    if max_pixels > 0 and width * height > max_pixels and not math:
+        # Cannot downsample safely without Affine/Resampling helpers; skip canopy for this bbox.
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    if math and max_pixels > 0 and width * height > max_pixels:
+        scale = math.sqrt((width * height) / float(max_pixels))
+        out_width = max(1, int(math.ceil(width / scale)))
+        out_height = max(1, int(math.ceil(height / scale)))
+        window_transform = window_transform * Affine.scale(width / float(out_width), height / float(out_height))
+
+    if out_width != width or out_height != height:
+        try:
+            data = raster.read(
+                1,
+                window=window,
+                out_shape=(out_height, out_width),
+                resampling=Resampling.nearest,
+                boundless=True,
+                fill_value=0,
+            )
+        except Exception:
+            # Avoid a potentially huge fallback read; skip canopy for this bbox instead.
+            return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    else:
+        data = raster.read(1, window=window, boundless=True, fill_value=0)
+
     mask = data >= CANOPY_HEIGHT_THRESHOLD
     if not np.any(mask):
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
-    # Polygonize the canopy mask
-    shapes_and_values: List[Tuple[dict, float]] = list(
-        rio_shapes(
-            data.astype(np.uint8),
-            mask=mask,
-            transform=raster.window_transform(window),
-        )
-    )
-
-    if not shapes_and_values:
-        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
-
-    records = []
-    geoms = []
-    for geom, val in shapes_and_values:
+    records: List[Dict[str, Any]] = []
+    geoms: List[Any] = []
+    for geom, val in rio_shapes(mask.astype(np.uint8), mask=mask, transform=window_transform):
         if not geom:
             continue
         geoms.append(shape(geom))
         records.append({"height": float(val)})
 
-    gdf = gpd.GeoDataFrame(records, geometry=geoms, crs=raster.crs)
+    if not geoms:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    canopy_crs = raster.crs or "EPSG:4326"
+    gdf = gpd.GeoDataFrame(records, geometry=geoms, crs=canopy_crs)
     if gdf.crs and gdf.crs.to_string() != "EPSG:4326":
         gdf = gdf.to_crs("EPSG:4326")
+    elif gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326", allow_override=True)
     return gdf
 
 

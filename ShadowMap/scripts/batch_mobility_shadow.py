@@ -22,6 +22,7 @@ import sys
 import time
 import warnings
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -810,6 +811,11 @@ def _process_bucket(job: BucketJob) -> BucketResult:
                 else:
                     canopy_gdf = canopy_to_gdf(canopy_ds, job.bbox)
                 if canopy_gdf is not None and not canopy_gdf.empty:
+                    try:
+                        if getattr(canopy_gdf, "crs", None) is None and getattr(buildings, "crs", None) is not None:
+                            canopy_gdf = canopy_gdf.set_crs(buildings.crs, allow_override=True)
+                    except Exception:
+                        pass
                     buildings = pd.concat([buildings, canopy_gdf], ignore_index=True)
             else:
                 warnings.append(f"[Canopy] raster not found: {canopy_path}")
@@ -1445,16 +1451,58 @@ def main(argv: Sequence[str]) -> int:
         executor_kwargs["mp_context"] = mp_ctx
 
     failures: List[str] = []
-    with ProcessPoolExecutor(**executor_kwargs) as executor:
+    max_restarts_per_file = max(0, int(float(os.getenv("MOBILITY_POOL_RESTARTS_PER_FILE", "1"))))
+    backoff_workers = parse_bool(os.getenv("MOBILITY_POOL_RESTART_BACKOFF", "true"), default=True)
+
+    current_workers = max(1, int(executor_kwargs.get("max_workers") or 1))
+
+    def start_executor(workers: int) -> ProcessPoolExecutor:
+        kwargs = dict(executor_kwargs)
+        kwargs["max_workers"] = max(1, int(workers))
+        return ProcessPoolExecutor(**kwargs)
+
+    executor = start_executor(current_workers)
+    try:
         for i, file_path in enumerate(files):
-            try:
-                process_file(file_path, i, total, config, executor=executor)
-            except KeyboardInterrupt:
-                raise
-            except Exception as exc:
-                rel = os.path.relpath(file_path, config.input_root)
-                print(f"[File crash][{i + 1}/{total}] {rel}: {str(exc)[:200]}", file=sys.stderr)
-                failures.append(str(file_path))
+            rel = os.path.relpath(file_path, config.input_root)
+            restarts = 0
+            while True:
+                try:
+                    process_file(file_path, i, total, config, executor=executor)
+                    break
+                except BrokenProcessPool as exc:
+                    restarts += 1
+                    print(
+                        f"[Pool crash][{i + 1}/{total}] {rel}: {str(exc)[:200]}",
+                        file=sys.stderr,
+                    )
+                    try:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                    except Exception:
+                        pass
+
+                    if restarts > max_restarts_per_file:
+                        print(f"[File crash][{i + 1}/{total}] {rel}: broken_process_pool", file=sys.stderr)
+                        failures.append(str(file_path))
+                        executor = start_executor(current_workers)
+                        break
+
+                    if backoff_workers and current_workers > 1:
+                        current_workers = max(1, current_workers // 2)
+                        print(f"[Pool] restarting with workers={current_workers}", file=sys.stderr)
+                    executor = start_executor(current_workers)
+                    continue
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:
+                    print(f"[File crash][{i + 1}/{total}] {rel}: {str(exc)[:200]}", file=sys.stderr)
+                    failures.append(str(file_path))
+                    break
+    finally:
+        try:
+            executor.shutdown(cancel_futures=True)
+        except Exception:
+            pass
 
     print("All files completed.")
     if failures:
