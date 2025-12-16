@@ -2,6 +2,14 @@
 
 ShadowMap visualises urban building shadows and sunlight exposure. The repository contains both the React frontend (multiple Mapbox-based modes) and the TypeScript backend services.
 
+
+https://github.com/user-attachments/assets/864c45d2-4c59-45b9-b59b-e1494e12634b
+
+
+
+https://github.com/user-attachments/assets/5e362351-2c8d-4ef0-996f-ba365698c986
+
+
 ## Feature Highlights
 
 - **Mapbox-first experience** – default Clean 3D layout with optional WFS / legacy toggles while consolidation is in progress.
@@ -9,6 +17,8 @@ ShadowMap visualises urban building shadows and sunlight exposure. The repositor
 - **Multiple data sources** – WFS, cached datasets, DEM elevation tiles with fallbacks.
 - **Weather-aware shading** – GFS-derived cloud attenuation with local caching.
 - **Performance helpers** – multi-level cache, smart shadow scheduler, debounced updates.
+- 
+<img width="1536" height="952" alt="frame" src="https://github.com/user-attachments/assets/9ff7f2a4-378b-44eb-a695-176f576d2158" />
 
 ## Repository Layout
 
