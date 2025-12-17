@@ -296,7 +296,14 @@ export const ShadowMapViewport: React.FC<ShadowMapViewportProps> = ({ className 
   const buildingStyle = useMemo(() => {
     const base = computeBuildingStyle(selectedBaseMapId);
     if (!figureModeEnabled) return base;
-    return { fill: '#334155', opacity: Math.min(base.opacity, 0.34) };
+    const category = getBaseMapById(selectedBaseMapId)?.category ?? inferBaseMapCategory(selectedBaseMapId);
+    if (category === 'satellite') {
+      return { fill: '#f8fafc', opacity: Math.min(base.opacity, 0.38) };
+    }
+    if (category === 'dark') {
+      return { fill: '#e2e8f0', opacity: Math.min(base.opacity, 0.45) };
+    }
+    return { fill: '#0f172a', opacity: Math.min(base.opacity, 0.22) };
   }, [selectedBaseMapId, figureModeEnabled]);
   const baseMapStyle = useMemo(() => getBaseMapStyle(selectedBaseMapId), [selectedBaseMapId]);
   useMobilityPlayback();

@@ -301,7 +301,7 @@ export const useDeckMobilityFlow = () => {
 
   useEffect(() => {
     const ensureOverlay = () => {
-      const map = (window as any)?.__shadowMapInstance as mapboxgl.Map | undefined;
+      const map = (window as unknown as { __shadowMapInstance?: mapboxgl.Map }).__shadowMapInstance;
       if (!map || overlayRef.current) return;
 
       const attachOverlay = () => {
@@ -329,7 +329,7 @@ export const useDeckMobilityFlow = () => {
 
     return () => {
       window.removeEventListener('shadow-map-ready', ensureOverlay);
-      const map = (window as any)?.__shadowMapInstance as mapboxgl.Map | undefined;
+      const map = (window as unknown as { __shadowMapInstance?: mapboxgl.Map }).__shadowMapInstance;
       if (overlayRef.current && map) {
         map.removeControl(overlayRef.current);
         overlayRef.current = null;
@@ -338,7 +338,7 @@ export const useDeckMobilityFlow = () => {
   }, []);
 
   useEffect(() => {
-    const map = (window as any)?.__shadowMapInstance as mapboxgl.Map | undefined;
+    const map = (window as unknown as { __shadowMapInstance?: mapboxgl.Map }).__shadowMapInstance;
     const overlay = overlayRef.current;
     if (!map || !overlay) {
       return;
@@ -428,7 +428,7 @@ export const useDeckMobilityFlow = () => {
 
       const widthScale = mobilityPathWidthScale ?? 1;
       const isRenderablePathDatum = (datum: TripDatum | RenderablePathDatum): datum is RenderablePathDatum =>
-        typeof (datum as any).width === 'number';
+        typeof (datum as RenderablePathDatum).width === 'number';
 
       const buildRenderablePathData = (): TripDatum[] | RenderablePathDatum[] => {
         if (!segmentBlueprint?.segments?.length || segmentBlueprint.datasetId !== flowState.datasetId) {
@@ -519,6 +519,27 @@ export const useDeckMobilityFlow = () => {
 
       const renderData = buildRenderablePathData();
 
+      const glowLayer = new PathLayer({
+        id: `deck-mobility-path-glow-${flowState.datasetId}`,
+        data: renderData,
+        getPath: (d: TripDatum | RenderablePathDatum) => d.path,
+        getColor: (d: TripDatum | RenderablePathDatum) => {
+          const base = isRenderablePathDatum(d) ? d.color : deriveTripColor(d as TripDatum);
+          const alpha = Math.round(Math.max(70, Math.min(170, base[3] * 0.42)));
+          return [base[0], base[1], base[2], alpha];
+        },
+        getWidth: (d: TripDatum | RenderablePathDatum) =>
+          (isRenderablePathDatum(d) ? d.width : derivePathWidth(d as TripDatum)) + PATH_OUTER_HALO_EXTRA + 14,
+        widthUnits: 'pixels',
+        opacity: 0.35,
+        widthMinPixels: PATH_WIDTH_MIN * widthScale + PATH_OUTER_HALO_EXTRA + 14,
+        widthMaxPixels: PATH_WIDTH_MAX * widthScale + PATH_OUTER_HALO_EXTRA + 14,
+        jointRounded: true,
+        capRounded: true,
+        pickable: false,
+        parameters: { depthTest: false },
+      });
+
       const outerHaloLayer = new PathLayer({
         id: `deck-mobility-path-halo-outer-${flowState.datasetId}`,
         data: renderData,
@@ -592,7 +613,7 @@ export const useDeckMobilityFlow = () => {
         parameters: { depthTest: false },
       });
 
-      overlay.setProps({ layers: [outerHaloLayer, innerHaloLayer, mainPathLayer, markersLayer] });
+      overlay.setProps({ layers: [glowLayer, outerHaloLayer, innerHaloLayer, mainPathLayer, markersLayer] });
     };
 
     if (!map.isStyleLoaded()) {
@@ -619,7 +640,7 @@ export const useDeckMobilityFlow = () => {
   ]);
 
   useEffect(() => {
-    const map = (window as any)?.__shadowMapInstance as mapboxgl.Map | undefined;
+    const map = (window as unknown as { __shadowMapInstance?: mapboxgl.Map }).__shadowMapInstance;
     if (!map || !flowState?.bounds) {
       return;
     }
@@ -634,8 +655,8 @@ export const useDeckMobilityFlow = () => {
           [east, north],
         ],
         {
-          padding: 160,
-          maxZoom: 15.5,
+          padding: 110,
+          maxZoom: 18,
           duration: 1200,
           pitch: map.getPitch(),
           bearing: map.getBearing(),

@@ -2,6 +2,11 @@
 
 ShadowMap visualises urban building shadows and sunlight exposure. The repository contains both the React frontend (multiple Mapbox-based modes) and the TypeScript backend services.
 
+## Demo Videos
+
+- Demo 1: [`video_1.mp4`](ShadowMap/shadow-map-frontend/react-shadow-app/public/video/video_1.mp4)
+- Demo 2: [`video_2.mp4`](ShadowMap/shadow-map-frontend/react-shadow-app/public/video/video_2.mp4)
+
 See `DOCS_INDEX.md` first if you are new to this repository (data layout, batch compute, GeoServer/WFS runbooks).
 
 ## Feature Highlights

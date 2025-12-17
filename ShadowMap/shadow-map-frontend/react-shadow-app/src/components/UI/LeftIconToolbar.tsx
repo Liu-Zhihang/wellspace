@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Popover, Slider, Switch, Tooltip, Divider, Progress } from 'antd'
 import {
   ClockIcon,
@@ -18,8 +18,28 @@ import type { MobilityDataset } from '../../types/index.ts'
 import type { Feature, Geometry } from 'geojson'
 import { BASE_MAPS } from '../../services/baseMapManager'
 import { parseMobilityCsv } from '../../utils/mobilityCsv'
+import { fetchDirectionsRoute, type MapboxDirectionsProfile } from '../../services/mapboxDirectionsService'
+import { buildMobilityTraceFromRoute } from '../../utils/routeTrace'
 
 type PanelId = 'time' | 'shadow' | 'style' | 'upload' | 'buildings' | 'analysis' | 'mobility' | null;
+
+type ShadowMapClickEvent = {
+  lngLat?: {
+    lng: number
+    lat: number
+  }
+}
+
+type ShadowMapInstance = {
+  on: (event: 'click', handler: (event: ShadowMapClickEvent) => void) => void
+  off: (event: 'click', handler: (event: ShadowMapClickEvent) => void) => void
+  getCanvas?: () => HTMLCanvasElement
+  getCenter?: () => { lng: number; lat: number }
+}
+
+const getShadowMapInstance = () => {
+  return (window as unknown as Window & { __shadowMapInstance?: ShadowMapInstance }).__shadowMapInstance ?? null
+}
 
 const presetHours = [
   { hour: 6, label: 'Sunrise' },
@@ -87,6 +107,16 @@ export const LeftIconToolbar: React.FC = () => {
   } = useShadowMapStore();
 
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
+  const [routeProfile, setRouteProfile] = useState<MapboxDirectionsProfile>('walking')
+  const [routeStepSeconds, setRouteStepSeconds] = useState<number>(10)
+  const [routeTraceId, setRouteTraceId] = useState<string>('road_001')
+  const [routeStartLng, setRouteStartLng] = useState<string>('114.1588')
+  const [routeStartLat, setRouteStartLat] = useState<string>('22.2814')
+  const [routeEndLng, setRouteEndLng] = useState<string>('114.1858')
+  const [routeEndLat, setRouteEndLat] = useState<string>('22.2801')
+  const [routePickingTarget, setRoutePickingTarget] = useState<'start' | 'end' | null>(null)
+  const [routeGenerating, setRouteGenerating] = useState(false)
+  const [routeError, setRouteError] = useState<string | null>(null)
   const selectedBaseMap = mapSettings.baseMapId ?? 'mapbox-streets';
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mobilityFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -113,6 +143,60 @@ export const LeftIconToolbar: React.FC = () => {
 
   const toggleAnimation = () => setIsAnimating(!isAnimating);
   const handleMobilityUploadClick = () => mobilityFileInputRef.current?.click();
+
+  useEffect(() => {
+    if (!routePickingTarget) return
+
+    const map = getShadowMapInstance()
+    if (!map) {
+      addStatusMessage?.('Map is not ready for picking coordinates yet.', 'warning')
+      setRoutePickingTarget(null)
+      return
+    }
+
+    const canvas = map.getCanvas?.()
+    const previousCursor = canvas?.style?.cursor
+    if (canvas?.style) {
+      canvas.style.cursor = 'crosshair'
+    }
+
+    const handleClick = (event: ShadowMapClickEvent) => {
+      const lngLat = event?.lngLat
+      const lng = Number(lngLat?.lng)
+      const lat = Number(lngLat?.lat)
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        addStatusMessage?.('Failed to pick coordinate from map click.', 'warning')
+        return
+      }
+
+      const lngText = lng.toFixed(6)
+      const latText = lat.toFixed(6)
+      if (routePickingTarget === 'start') {
+        setRouteStartLng(lngText)
+        setRouteStartLat(latText)
+        addStatusMessage?.(`Start set: ${lngText}, ${latText}`, 'info')
+      } else {
+        setRouteEndLng(lngText)
+        setRouteEndLat(latText)
+        addStatusMessage?.(`End set: ${lngText}, ${latText}`, 'info')
+      }
+      setRoutePickingTarget(null)
+    }
+
+    map.on('click', handleClick)
+    addStatusMessage?.(`Click on map to set ${routePickingTarget}.`, 'info')
+
+    return () => {
+      try {
+        map.off('click', handleClick)
+      } catch {
+        // ignore cleanup issues
+      }
+      if (canvas?.style) {
+        canvas.style.cursor = previousCursor ?? ''
+      }
+    }
+  }, [addStatusMessage, routePickingTarget])
 
   const ensurePlaybackTimeWithinDataset = (dataset: MobilityDataset) => {
     const start = dataset.timeRange.start.getTime();
@@ -151,7 +235,8 @@ export const LeftIconToolbar: React.FC = () => {
       addStatusMessage?.('Map viewport is not ready to zoom.', 'warning');
       return;
     }
-    viewportActions.fitToBounds(dataset.bounds, { padding: 120, maxZoom: 15.5 });
+    // Allow tighter framing for small traces; users can always zoom out manually.
+    viewportActions.fitToBounds(dataset.bounds, { padding: 80, maxZoom: 18 });
   };
 
   const handleBaseMapChange = (mapId: string) => {
@@ -190,6 +275,143 @@ export const LeftIconToolbar: React.FC = () => {
     const palette = ['#38bdf8', '#f97316', '#22c55e', '#e879f9', '#facc15'];
     return palette[index % palette.length];
   };
+
+  const routePresets: Array<{
+    id: string
+    label: string
+    start: { lng: number; lat: number }
+    end: { lng: number; lat: number }
+  }> = [
+    {
+      id: 'hk-central-to-causeway',
+      label: 'HK Island: Central → Causeway Bay',
+      start: { lng: 114.1588, lat: 22.2814 },
+      end: { lng: 114.1858, lat: 22.2801 },
+    },
+    {
+      id: 'hk-central-to-wanchai',
+      label: 'HK Island: Central → Wan Chai',
+      start: { lng: 114.1588, lat: 22.2814 },
+      end: { lng: 114.1728, lat: 22.2787 },
+    },
+    {
+      id: 'hk-mongkok',
+      label: 'Kowloon: Mong Kok (dense)',
+      start: { lng: 114.1696, lat: 22.3173 },
+      end: { lng: 114.1738, lat: 22.3114 },
+    },
+  ]
+
+  const applyRoutePreset = (presetId: string) => {
+    const preset = routePresets.find((item) => item.id === presetId)
+    if (!preset) return
+    setRouteStartLng(preset.start.lng.toFixed(6))
+    setRouteStartLat(preset.start.lat.toFixed(6))
+    setRouteEndLng(preset.end.lng.toFixed(6))
+    setRouteEndLat(preset.end.lat.toFixed(6))
+    addStatusMessage?.(`Route preset loaded: ${preset.label}`, 'info')
+  }
+
+  const setRouteEndpointFromCenter = (target: 'start' | 'end') => {
+    const map = getShadowMapInstance()
+    const center = map?.getCenter?.()
+    const lng = Number(center?.lng)
+    const lat = Number(center?.lat)
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      addStatusMessage?.('Map center is unavailable.', 'warning')
+      return
+    }
+    const lngText = lng.toFixed(6)
+    const latText = lat.toFixed(6)
+    if (target === 'start') {
+      setRouteStartLng(lngText)
+      setRouteStartLat(latText)
+    } else {
+      setRouteEndLng(lngText)
+      setRouteEndLat(latText)
+    }
+    addStatusMessage?.(`${target === 'start' ? 'Start' : 'End'} set from map center.`, 'info')
+  }
+
+  const parseCoord = (lngText: string, latText: string) => {
+    const lng = Number.parseFloat(lngText)
+    const lat = Number.parseFloat(latText)
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return null
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return null
+    }
+    return { lng, lat }
+  }
+
+  const generateRoadTrace = async () => {
+    setRouteError(null)
+    const start = parseCoord(routeStartLng, routeStartLat)
+    const end = parseCoord(routeEndLng, routeEndLat)
+    if (!start || !end) {
+      setRouteError('Invalid start/end coordinates.')
+      addStatusMessage?.('Invalid start/end coordinates for road trace.', 'warning')
+      return
+    }
+
+    const traceId = routeTraceId.trim()
+    if (!traceId) {
+      setRouteError('Trace id is required.')
+      addStatusMessage?.('Trace id is required.', 'warning')
+      return
+    }
+
+    const stepSeconds = Math.max(2, Math.floor(routeStepSeconds))
+    setRouteGenerating(true)
+    try {
+      const route = await fetchDirectionsRoute({
+        profile: routeProfile,
+        start,
+        end,
+      })
+
+      const trace = buildMobilityTraceFromRoute({
+        traceId,
+        startTime: currentDate,
+        stepSeconds,
+        coordinates: route.coordinates,
+        durationSeconds: route.durationSeconds,
+      })
+
+      const datasetId = generateMobilityDatasetId()
+      const datasetName = `road-${routeProfile}-${traceId}.csv`
+      const dataset: MobilityDataset = {
+        id: datasetId,
+        name: datasetName,
+        color: pickMobilityColor(mobilityDatasets.length),
+        createdAt: new Date(),
+        sourceFile: datasetName,
+        pointCount: trace.rows.length,
+        traceIds: trace.traceIds,
+        bounds: trace.bounds,
+        timeRange: trace.timeRange,
+        visible: true,
+        errors: [],
+      }
+
+      addMobilityDataset(dataset, trace.rows)
+      setActiveMobilityDataset(dataset.id)
+      setMobilityPlaybackTime(dataset.timeRange.start)
+      setMobilityPlaying(false)
+      zoomToMobilityDataset(dataset.id)
+      addStatusMessage?.(
+        `Road trace ready: ${trace.rows.length} points (${Math.round(route.distanceMeters)}m, ${Math.round(route.durationSeconds)}s).`,
+        'info',
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setRouteError(message)
+      addStatusMessage?.(`Road trace generation failed: ${message}`, 'error')
+    } finally {
+      setRouteGenerating(false)
+    }
+  }
 
   const isPolygonGeometry = (geometry: any): geometry is Geometry => {
     if (!geometry || typeof geometry !== 'object') return false;
@@ -662,6 +884,167 @@ export const LeftIconToolbar: React.FC = () => {
               tooltip={{ open: false }}
             />
           </div>
+          <Divider plain className="text-[11px] text-slate-400">Road trace (Directions)</Divider>
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">
+            <p className="text-[11px] text-slate-500">
+              Generate a realistic trace that follows the road network (Mapbox Directions API).
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {routePresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] text-slate-600 hover:border-slate-300"
+                  onClick={() => applyRoutePreset(preset.id)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-slate-500">Profile</span>
+              {(['walking', 'driving', 'cycling'] as const).map((profile) => (
+                <button
+                  key={profile}
+                  type="button"
+                  className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
+                    routeProfile === profile
+                      ? 'border-blue-200 bg-blue-50 text-blue-700'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                  }`}
+                  onClick={() => setRouteProfile(profile)}
+                >
+                  {profile}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>Sampling step</span>
+                <span>{Math.round(routeStepSeconds)}s</span>
+              </div>
+              <Slider
+                min={2}
+                max={30}
+                step={1}
+                value={routeStepSeconds}
+                onChange={(value) => setRouteStepSeconds(value as number)}
+                tooltip={{ open: false }}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-700">Start</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                        routePickingTarget === 'start'
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                      onClick={() => setRoutePickingTarget(routePickingTarget === 'start' ? null : 'start')}
+                    >
+                      Pick
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 hover:border-slate-300"
+                      onClick={() => setRouteEndpointFromCenter('start')}
+                    >
+                      Center
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    value={routeStartLng}
+                    onChange={(event) => setRouteStartLng(event.target.value)}
+                    placeholder="lng"
+                    className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  />
+                  <input
+                    value={routeStartLat}
+                    onChange={(event) => setRouteStartLat(event.target.value)}
+                    placeholder="lat"
+                    className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-700">End</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                        routePickingTarget === 'end'
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                      onClick={() => setRoutePickingTarget(routePickingTarget === 'end' ? null : 'end')}
+                    >
+                      Pick
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 hover:border-slate-300"
+                      onClick={() => setRouteEndpointFromCenter('end')}
+                    >
+                      Center
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    value={routeEndLng}
+                    onChange={(event) => setRouteEndLng(event.target.value)}
+                    placeholder="lng"
+                    className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  />
+                  <input
+                    value={routeEndLat}
+                    onChange={(event) => setRouteEndLat(event.target.value)}
+                    placeholder="lat"
+                    className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Trace id</span>
+                  </div>
+                  <input
+                    value={routeTraceId}
+                    onChange={(event) => setRouteTraceId(event.target.value)}
+                    className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  />
+                </div>
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={routeGenerating}
+                  disabled={routeGenerating}
+                  onClick={generateRoadTrace}
+                  className="h-8 rounded-lg"
+                >
+                  Generate
+                </Button>
+              </div>
+              {routeError && (
+                <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] text-rose-600">{routeError}</p>
+              )}
+            </div>
+          </div>
           {mobilityDatasets.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">
               No mobility datasets yet. Use the Upload button to add CSV traces.
@@ -961,6 +1344,9 @@ export const LeftIconToolbar: React.FC = () => {
               <Button size="small" onClick={applyFigurePreset}>
                 Best preset (HK Central)
               </Button>
+              <Button size="small" onClick={applyFigurePresetSatellite}>
+                Satellite preset
+              </Button>
               {figureModeEnabled && (
                 <Button size="small" onClick={() => setFigureHudVisible(false)}>
                   Hide toolbar (H)
@@ -1196,7 +1582,17 @@ export const LeftIconToolbar: React.FC = () => {
 
     setFigureModeEnabled(true);
     setCurrentDate(time);
-    updateMapSettings({ baseMapId: 'carto-light' });
+    setMobilityFlowStyle('path');
+    setMobilityColorBySunlight(true);
+    setMobilityInferIndoor(true);
+    setMobilityDashIndoor(true);
+    setMobilityPathWidthScale(1.6);
+    updateMapSettings({
+      baseMapId: 'carto-light',
+      shadowOpacity: 0.55,
+      shadowColor: '#0b1220',
+      showSunExposure: false,
+    });
 
     if (!viewportActions.flyTo) {
       addStatusMessage?.('Map viewport is not ready to apply preset camera yet.', 'warning');
@@ -1205,13 +1601,47 @@ export const LeftIconToolbar: React.FC = () => {
 
     viewportActions.flyTo({
       center,
-      zoom: 16.8,
+      zoom: 17.35,
       pitch: 60,
       bearing: -18,
       duration: 1000,
     });
 
     addStatusMessage?.('Figure preset applied: HK Central @ 16:30 (long shadows).', 'info');
+  };
+
+  const applyFigurePresetSatellite = () => {
+    const time = new Date('2025-12-16T08:30:00Z'); // 16:30 HKT
+    const center: [number, number] = [114.1588, 22.2814]; // Central / Admiralty
+
+    setFigureModeEnabled(true);
+    setCurrentDate(time);
+    setMobilityFlowStyle('path');
+    setMobilityColorBySunlight(true);
+    setMobilityInferIndoor(true);
+    setMobilityDashIndoor(true);
+    setMobilityPathWidthScale(1.6);
+    updateMapSettings({
+      baseMapId: 'mapbox-satellite',
+      shadowOpacity: 0.5,
+      shadowColor: '#0b1220',
+      showSunExposure: false,
+    });
+
+    if (!viewportActions.flyTo) {
+      addStatusMessage?.('Map viewport is not ready to apply preset camera yet.', 'warning');
+      return;
+    }
+
+    viewportActions.flyTo({
+      center,
+      zoom: 17.35,
+      pitch: 60,
+      bearing: -18,
+      duration: 1000,
+    });
+
+    addStatusMessage?.('Figure preset applied: HK Central (satellite) @ 16:30.', 'info');
   };
 
   const toolbarItems: Array<{
