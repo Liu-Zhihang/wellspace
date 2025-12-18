@@ -70,7 +70,13 @@ def parse_bool(value: object, default: bool = False) -> bool:
 
 def configure_runtime() -> None:
     # Performance: avoid BLAS oversubscription when using multiprocessing.
-    for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    for key in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "GDAL_NUM_THREADS",
+    ):
         os.environ.setdefault(key, "1")
 
     suppress = parse_bool(os.getenv("MOBILITY_SUPPRESS_NOISY_WARNINGS", "true"), default=True)
@@ -301,12 +307,12 @@ def seed_existing_output(
         return None, None
 
 
-def write_csv_naive(out_file: Path, headers: Sequence[str], rows: Sequence[Dict[str, Any]]) -> None:
+def write_csv(out_file: Path, headers: Sequence[str], rows: Sequence[Dict[str, Any]]) -> None:
     def format_cell(value: Any) -> str:
         if value is None:
             return ""
         if isinstance(value, str):
-            return value
+            return value.replace("\r", " ").replace("\n", " ")
         if isinstance(value, bool):
             return "true" if value else "false"
         if isinstance(value, int):
@@ -317,12 +323,13 @@ def write_csv_naive(out_file: Path, headers: Sequence[str], rows: Sequence[Dict[
             return str(value)
         return str(value)
 
-    lines = [",".join(headers)]
-    for row in rows:
-        lines.append(",".join(format_cell(row.get(h, "")) for h in headers))
     tmp_path = out_file.with_name(f"{out_file.name}.tmp.{os.getpid()}")
     try:
-        tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with tmp_path.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(list(headers))
+            for row in rows:
+                writer.writerow([format_cell(row.get(h, "")) for h in headers])
         os.replace(tmp_path, out_file)
     finally:
         try:
@@ -1368,7 +1375,7 @@ def process_file(
     out_dir.mkdir(parents=True, exist_ok=True)
     final_headers = list(headers) + list(HEADERS_TO_APPEND)
     compute_duration_fields(headers, rows)
-    write_csv_naive(out_file, final_headers, rows)
+    write_csv(out_file, final_headers, rows)
 
     try:
         rel_out = str(out_file.relative_to(Path(config.output_root)))

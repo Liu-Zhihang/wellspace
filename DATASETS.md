@@ -96,6 +96,31 @@ rsync -av --prune-empty-dirs \
   "$NEW_OUT"/ "$FINAL_OUT"/
 ```
 
+## 6.1) 输出质量检查与修复（CSV 结构对齐）
+
+> 历史输出中曾出现“CSV 未正确 quoting 导致逗号/换行把列打散”的情况，进而影响统计图（例如夜间出现非零日照）。
+
+### 快速检查（推荐先跑）
+
+```bash
+FINAL_OUT="$HOME/DATASET/GLAN_processed"
+python3 ShadowMap/scripts/validate_sunlight_csv.py --root "$FINAL_OUT" --max-rows-per-file 5000 \
+  --write-bad-list "$FINAL_OUT/_shadowmap_tasks/bad_sunlight_files.txt"
+```
+
+> `--max-rows-per-file 0` 会全量扫描（更慢但更严格）。
+
+### 修复（只修坏文件；带备份）
+
+```bash
+FINAL_OUT="$HOME/DATASET/GLAN_processed"
+python3 ShadowMap/scripts/repair_sunlight_csv.py --root "$FINAL_OUT" \
+  --bad-list "$FINAL_OUT/_shadowmap_tasks/bad_sunlight_files.txt" \
+  --write
+```
+
+修复后原文件会被移动到：`$FINAL_OUT/_repair_backup_YYYY-mm-dd_HHMMSS/`。
+
 ## 7) 后端/前端与 GeoServer 的关系（快速对齐）
 
 - GeoServer/WFS：由后端 `.env` 里的 `BUILDING_WFS_BASE_URL` / `BUILDING_WFS_TYPE_NAME` 指向。

@@ -730,8 +730,9 @@ def main() -> int:
     write_header = not output_path.exists() or output_path.stat().st_size == 0
     out_f = output_path.open("a", encoding="utf-8", newline="")
     try:
+        writer = csv.writer(out_f, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
         if write_header:
-            out_f.write(",".join(headers) + "\n")
+            writer.writerow(headers)
             out_f.flush()
 
         mp_ctx = None
@@ -778,8 +779,7 @@ def main() -> int:
                         skipped += 1
                         continue
                     existing.add(key)
-                    line = ",".join(_format_cell(row.get(h, "")) for h in headers)
-                    out_f.write(line + "\n")
+                    writer.writerow([_format_cell(row.get(h, "")) for h in headers])
                     wrote_any = True
 
                 if wrote_any:

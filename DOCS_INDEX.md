@@ -21,6 +21,8 @@
 - 计算引擎（Python）：`ShadowMap/scripts/batch_mobility_shadow.py`
 - 引擎包装器（默认 Python，可选 Node/HTTP）：`ShadowMap/scripts/batch-mobility-shadow.sh`
 - 缺失输出/任务重建工具：`ShadowMap/scripts/rebuild_mobility_tasks.py`
+- 输出 CSV 结构校验：`ShadowMap/scripts/validate_sunlight_csv.py`
+- 输出 CSV 修复工具（历史坏文件对齐）：`ShadowMap/scripts/repair_sunlight_csv.py`
 
 ## 3.1) 居住地暴露（IRBM）
 

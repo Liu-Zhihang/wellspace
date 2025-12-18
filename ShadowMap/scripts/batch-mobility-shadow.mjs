@@ -537,9 +537,21 @@ const processFile = async (filePath, idx, total) => {
       Number.isFinite(irradianceEffective) ? Math.max(0, irradianceEffective) * durationSeconds : '';
   }
 
-  const lines = [finalHeaders.join(',')];
+  const escapeCsv = (value) => {
+    if (value === null || value === undefined) return '';
+    let text = String(value);
+    // Keep outputs one-record-per-line even when error messages contain newlines.
+    text = text.replace(/\r?\n/g, ' ');
+    const needsQuotes = text.includes(',') || text.includes('"') || text.includes('\n') || text.includes('\r');
+    if (text.includes('"')) {
+      text = text.replace(/"/g, '""');
+    }
+    return needsQuotes ? `"${text}"` : text;
+  };
+
+  const lines = [finalHeaders.map(escapeCsv).join(',')];
   rows.forEach((row) => {
-    const line = finalHeaders.map((h) => row[h] ?? '').join(',');
+    const line = finalHeaders.map((h) => escapeCsv(row[h] ?? '')).join(',');
     lines.push(line);
   });
   await fs.writeFile(outFile, lines.join('\n'), 'utf-8');
