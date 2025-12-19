@@ -18,7 +18,9 @@ $$L_i = \text{first\_valid}(\text{fnl}, \text{gps}, \text{gpx}, \text{air})$$
 
 为优化计算效率并对齐气象数据，我们将连续的时间戳离散化为分钟级的时间桶（Bucket）。对于任意轨迹点 $p_i(t_i)$，其所属的时间桶键 $T_{bucket}$ 定义为：
 
-$$T_{bucket} = \lfloor t_i / 60 \rfloor \times 60 \quad (\text{ISO 8601 format})$$
+$$T_{bucket} = \lfloor t_i / 60 \rfloor \times 60 \quad (\text{epoch seconds})$$
+
+并将其格式化为 UTC 的 ISO 字符串（例如 `2025-12-14T08:30:00.000Z`）作为 `bucketStart`（离线链路默认 `bucketEnd = bucketStart`；历史实现也可能使用 `bucketStart+1min`，两者下游应兼容）。
 
 此步骤的**输入**为原始时间戳 `timestamp`，**输出**为 `bucketStart` 和 `bucketEnd`。
 
@@ -133,6 +135,6 @@ $$\Delta \tau_i = \text{clamp}(t_{i+1} - t_i, 1, 300)$$
 
 为了保证大规模计算的鲁棒性，系统包含以下状态标记逻辑：
 
-- **夜间过滤**：当太阳高度角低于地平线时，API返回 HTTP 400，标记 `source` 为 "Outside daylight"，所有日照指标置0。
-- **数据缺失**：若请求区域无建筑物数据返回，API返回 HTTP 500，标记 `source` 为 "No building features"，触发降级处理。
-- **状态追踪**：所有计算结果通过 `source` 和 `errorDetail` 字段记录元数据，支持针对特定错误码（如网络超时）的增量重算。
+- **夜间快速路径**：当 ERA5 推导的 `solarIrradianceWm2` 低于阈值（`MOBILITY_NIGHT_IRRADIANCE_THRESHOLD`）时，标记 `source="night"` 并跳过几何阴影计算；所有暴露量按 0 或空值写出（下游按 0 处理）。
+- **数据缺失/异常**：若指定范围内无建筑物要素或阴影引擎失败，标记 `source="fallback_error"`，并将错误信息写入 `errorDetail`（截断）。
+- **状态追踪**：所有计算结果通过 `source` 与 `errorDetail` 字段记录元数据，便于过滤异常并对失败样本做增量重算（例如按分钟 bucket 选择性重算）。

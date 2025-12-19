@@ -42,9 +42,9 @@
 - 缓冲区：`IRBM_{buffer}m_{metric}`（如 `IRBM_200m_sunlight_min`，`IRBM_1000m_irradiance_kJ`）。
 
 ## 9. 异常处理与标记
-- 夜间：HTTP 400（Outside daylight），可忽略重算。  
-- 无建筑：HTTP 500（No building features），视为缺失。  
-- 其他 5xx/网络：HTTP 5xx，`source/errorDetail` 记录，支持 buckets 增量重跑。  
+- 夜间：当 `solarIrradianceWm2` 低于阈值时，可标记 `source="night"` 并跳过几何阴影计算（该小时暴露量按 0 或直接不计入汇总）。  
+- 无建筑：若 bbox 内无建筑要素，标记 `source="fallback_error"` 并记录 `errorDetail`，视为缺失。  
+- 其他异常：统一标记 `source="fallback_error"`，通过 `errorDetail` 追踪原因，必要时对指定日期/小时做增量重算。  
 - 输出字段与 schema 对齐：`sunlit/shadowPercent`、`bucketStart/bucketEnd`、`source/errorDetail`、`cloudCover/sunlightFactor`、`solarIrradianceWm2/irradianceEffective`、`durationSeconds/sunlightSeconds/shadowSeconds/irradianceJ`。
 
 ## 10. 输出结构（示例）

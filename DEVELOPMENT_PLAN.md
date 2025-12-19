@@ -1,6 +1,6 @@
 # Development Plan
 
-Last updated: 2025-12-15
+Last updated: 2025-12-19
 
 本文件用于跟踪「当前可交付目标」与「关键工作流」；历史 sprint 记录保留在文末的 Archive 章节。
 
@@ -19,7 +19,19 @@ Last updated: 2025-12-15
 - 目标：绕开 `node -> HTTP -> backend` 计算链路，直接用 Python 批量计算以充分利用多核与大内存。
 - 入口脚本：`ShadowMap/scripts/run_full_recal_batch.sh`（单次 Python 调用 + 单进程池，按分钟 bucket 并行，避免嵌套进程）。
 - 配置统一：通过 `ShadowMap/.shadowmap.env`（模板：`ShadowMap/.shadowmap.env.example`）消除两台机器路径差异。
-- 可选提速开关：`MOBILITY_INCLUDE_CANOPY=false`（建筑-only；树冠是主要瓶颈，必要时优先关掉以保证吞吐）。
+- 论文数据建议：优先 **带树冠**（`MOBILITY_INCLUDE_CANOPY=true`），并依赖“夜间快速路径”减少不必要的几何计算（见 `MOBILITY_NIGHT_IRRADIANCE_THRESHOLD`）。
+- 可选提速开关：`MOBILITY_INCLUDE_CANOPY=false`（建筑-only；用于压测、Demo 或追赶进度时的折中）。
+- 长跑稳定性：遇到 `BrokenProcessPool` 时可自动重启/降并发（`MOBILITY_POOL_RESTARTS_PER_FILE` / `MOBILITY_POOL_RESTART_BACKOFF`）。
+
+#### B.1) Paper dataset production (recommended)
+
+建议把“论文数据产出”当作一个明确的流水线（可审计、可复现）：
+
+1) **结构校验**：`validate_sunlight_csv.py` 扫描输出并写出 bad list  
+2) **修复历史坏文件**：`repair_sunlight_csv.py`（自动备份）  
+3) **重算 bad files（带树冠）**：离线 Python 批处理重算指定 targets  
+4) **合并到最终目录（带备份）**：`rsync --backup --backup-dir=...`  
+5) **最终校验与清单**：再次 validate，并输出文件清单/样本数用于论文统计
 
 ### C) Data expansion (e.g. North America tiles)
 

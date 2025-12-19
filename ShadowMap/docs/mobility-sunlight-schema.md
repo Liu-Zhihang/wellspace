@@ -1,48 +1,60 @@
-## Mobility 日照/阴影字段速览
+## Mobility 日照/阴影字段速览（以离线 Python 链路为准）
+
+本仓库支持两条计算链路：
+
+1) **离线/批处理（推荐用于论文与统计）**：`batch_mobility_shadow.py` 直接读取本地 Buildings / Canopy / ERA5 计算  
+2) **实时/交互（Demo）**：前端 → 后端 → `POST /api/analysis/shadow` + `/api/weather/current`
+
+两条链路输出字段对齐：最终结果均为 `*-sunlight.csv`，仅生成方式不同。
 
 ### 输入（CSV 关键字段）
-| 变量 | 描述 | 用途 | 来源 |
+| 字段 | 描述 | 用途/规则 | 来源 |
 | --- | --- | --- | --- |
-| timestamp | 秒级时间戳（UTC） | 分桶至分钟 | CSV |
-| fnl_lon / fnl_lat | 经纬度（优先） | 定位 | CSV |
-| gps_lon / gps_lat | 经纬度（次优） | 定位 | CSV |
-| gpx_lon / gpx_lat | 经纬度（再次） | 定位 | CSV |
-| air_lon / air_lat | 经纬度（兜底） | 定位 | CSV |
-| 其他业务列 | traceId/速度等 | 透传 | CSV |
+| timestamp | Unix epoch seconds（秒，int/float） | 向下取整到分钟分桶 | CSV |
+| fnl_lon / fnl_lat | 经纬度（优先） | 坐标优先级最高 | CSV |
+| gps_lon / gps_lat | 经纬度（次优） | `fnl_*` 缺失时使用 | CSV |
+| gpx_lon / gpx_lat | 经纬度（再次） | `fnl/gps` 缺失时使用 | CSV |
+| air_lon / air_lat | 经纬度（兜底） | 仍缺失时使用 | CSV |
+| 其他业务列 | 速度、状态等 | 原样透传到输出 | CSV |
 
-### 请求（按分钟桶，POST /api/analysis/shadow）
-| 变量 | 描述 | 用途 | 来源 |
-| --- | --- | --- | --- |
-| bbox | {west,south,east,north} | 限定建筑/树冠查询范围 | 桶内点包络 |
-| timestamp | 分钟起点 ISO | 对应分钟桶 | 分桶时间 |
-| timeGranularityMinutes | 固定 1 | 控制时间步长 | 固定 |
-| outputs | shadowPolygons/sunlightGrid/heatmap=false | 控制返回内容 | 固定 |
-| metadata.includeCanopy | 是否含树冠 | 控制遮挡 | 默认 true/调用方 |
-| metadata.canopyRasterPath | 树冠栅格路径 | 控制遮挡 | 环境/调用方 |
-| geometry | 可选 GeoJSON | 限定分析区域 | 调用方 |
+### 分桶与引擎输入（按分钟 bucket）
 
-### 天气（并行 `/api/weather/current`，ERA5 本地）
-| 变量 | 描述 | 用途 | 来源 |
+> 离线链路内部构造与 HTTP 请求体等价的“分钟桶 payload”，但不经过网络；HTTP 链路会把这些字段封装成 `POST /api/analysis/shadow` 请求体。
+
+| 字段 | 描述 | 离线/批处理（Python） | 实时/交互（HTTP） |
 | --- | --- | --- | --- |
-| cloudCover | 0–1 云量（tcc） | 计算 sunlightFactor | ERA5 |
-| sunlightFactor | 0.15–1（1 - tcc*0.85） | 衰减日照 | 计算 |
-| solarIrradianceWm2 | 短波辐照度 W/m²（ssrd 差分/Δt） | 叠加阴影掩码 | ERA5 |
+| bucketStart | 分钟桶起点（UTC ISO，如 `2025-12-14T08:30:00.000Z`） | 内部由 `timestamp` 向下取整生成；写入输出 `bucketStart` | 作为请求体 `timestamp` |
+| bucketEnd | 分钟桶终点（兼容字段） | 默认与 `bucketStart` 相同 | 历史实现可能为 `bucketStart + 1min`（两者下游应兼容） |
+| bbox | `{west,south,east,north}` | 桶内点包络（零面积会做微扩展） | 请求体 `bbox` |
+| timeGranularityMinutes | 时间粒度（分钟） | 固定 `1` | 请求体 `timeGranularityMinutes=1` |
+| includeCanopy | 是否将树冠作为遮挡体 | `--include-canopy` / `MOBILITY_INCLUDE_CANOPY` | `metadata.includeCanopy` |
+| canopyRasterPath | 树冠 GeoTIFF 路径 | `--canopy` / `SHADOW_ENGINE_CANOPY_RASTER_PATH` | `metadata.canopyRasterPath` |
+| buildingsPath / layer | 建筑数据（GPKG/GeoJSON）与图层名 | `--buildings` / `--buildings-layer` | 由后端/GeoServer/WFS 配置决定（Demo） |
+| geometry（可选） | 指定分析区域（GeoJSON） | 当前批处理未使用（按 bbox 计算） | 可作为请求体 `geometry` |
+
+### 天气（ERA5，本地；HTTP 仅用于 Demo）
+
+| 字段 | 描述 | 用途 | 来源 |
+| --- | --- | --- | --- |
+| cloudCover | 0–1 总云量（tcc） | 计算 `sunlightFactor` | ERA5 |
+| sunlightFactor | `max(0.15, 1 - tcc*0.85)` | 云量衰减系数 | 计算 |
+| solarIrradianceWm2 | 短波辐照度（W/m²）= `max(0, Δssrd/Δt)` | 夜间快速路径/辐照积分 | ERA5 |
 
 ### 输出（追加字段）
-| 变量 | 描述 | 用途 | 来源 |
-| --- | --- | --- | --- |
-| sunlit | 0/1 是否日照 | 基础判定 | 引擎结果/回退 |
-| shadowPercent | 0–100 阴影占比 | 基础判定 | 引擎结果/回退 |
-| bucketStart / bucketEnd | 分钟桶起止 | 对齐分钟 | 请求/响应 |
-| source | engine / fallback_error/400/500 等 | 标记数据来源或降级原因 | 计算 |
-| errorDetail | 错误文本（含状态码） | 调试/过滤 | 计算 |
-| cloudCover | 0–1 | 记录云量 | 天气 |
-| sunlightFactor | 0.15–1 | 记录衰减系数 | 天气 |
-| sunlitEffective | sunlit * sunlightFactor | 云量修正 | 计算 |
-| shadowPercentEffective | 100 - sunlitEffective*100 | 云量修正 | 计算 |
-| solarIrradianceWm2 | 辐照度 W/m² | 记录原值 | 天气 |
-| irradianceEffective | 阴影掩码后的辐照度 | 物理量计算 | 计算 |
-| durationSeconds | 当前点代表的时长（邻点差，限 1–300s） | 积分时长 | 计算 |
-| sunlightSeconds | durationSeconds * sunlitEffective | 日照时长 | 计算 |
-| shadowSeconds | durationSeconds * shadowPercentEffective/100 | 阴影时长 | 计算 |
-| irradianceJ | irradianceEffective * durationSeconds | 辐照能量（J） | 计算 |
+| 字段 | 描述 | 备注 |
+| --- | --- | --- |
+| sunlit | 0/1 是否日照 | 点级几何判定（离线链路为 0/1） |
+| shadowPercent | 0–100 阴影占比 | 离线链路为 0 或 100（命中阴影=100）；`night/fallback_error` 为 0 |
+| bucketStart / bucketEnd | 分钟桶起止（UTC ISO） | 用于分钟对齐、聚合 |
+| source | `engine` / `night` / `fallback_error` | 成功/夜间快速路径/异常降级 |
+| errorDetail | 错误文本（截断） | 仅 `fallback_error` 可能非空 |
+| cloudCover | 0–1 | 云量（tcc） |
+| sunlightFactor | 0.15–1 | 云量衰减系数 |
+| sunlitEffective | `sunlit * sunlightFactor` | `night/fallback_error` 可能为空（下游按 0 处理） |
+| shadowPercentEffective | `100 - sunlitEffective*100` | 同上 |
+| solarIrradianceWm2 | W/m² | `ssrd` 差分得到的辐照度 |
+| irradianceEffective | 阴影掩码后的辐照度（W/m²） | `sunlit=0` → 0，否则 `solarIrradianceWm2` |
+| durationSeconds | 当前点代表的时长（秒） | 相邻点差值，clamp 1–300；末行默认 60 |
+| sunlightSeconds | `durationSeconds * sunlitEffective` | 有效日照时长（秒） |
+| shadowSeconds | `durationSeconds * shadowPercentEffective/100` | 有效阴影时长（秒） |
+| irradianceJ | `irradianceEffective * durationSeconds` | 累积辐射能量（J） |

@@ -9,12 +9,25 @@ ShadowMap visualises urban building shadows and sunlight exposure. The repositor
 
 See `DOCS_INDEX.md` first if you are new to this repository (data layout, batch compute, GeoServer/WFS runbooks).
 
+## Two Main Workflows
+
+This repo supports two primary workflows. Keep them conceptually separate:
+
+1) **Demo / interactive (HTTP)**
+   - React frontend → Express backend → WFS/DEM/weather services (GeoServer/PostGIS + ERA5).
+   - Used for live 3D visualisation and ad-hoc analysis.
+
+2) **Paper / offline batch (Python-first, recommended for research outputs)**
+   - Runs locally without `node -> HTTP -> backend` to avoid network/IO bottlenecks.
+   - Computes per-minute mobility sunlight/shadow directly from local buildings (GPKG/GeoJSON), canopy raster (optional), and ERA5.
+   - Produces `*-sunlight.csv` outputs that are designed for downstream statistical analysis.
+
 ## Feature Highlights
 
 - **Mapbox-first experience** – Clean 3D layout built on ShadeMap + Mapbox GL.
 - **Shadow analysis** – calculates building shadows and daylight hours based on date/time.
 - **Multiple data sources** – WFS, cached datasets, DEM elevation tiles with fallbacks.
-- **Weather-aware shading** – GFS-derived cloud attenuation with local caching.
+- **Weather-aware shading** – ERA5-derived cloud attenuation (tcc/ssrd) with local caching.
 - **Performance helpers** – multi-level cache, smart shadow scheduler, debounced updates.
 - **Geometry analysis (in progress)** – upcoming ability to upload GeoJSON polygons for shadow coverage & sunlight statistics (`REQ-ANALYSIS-01`).
 
@@ -64,6 +77,22 @@ Run the batched recompute runner (single Python invocation, bucket-level concurr
 
 ```bash
 CONCURRENCY=32 bash ShadowMap/scripts/run_full_recal_batch.sh
+```
+
+### Output Quality (recommended for paper data)
+
+Some legacy `*-sunlight.csv` outputs were produced without proper CSV quoting, which can break column alignment and downstream statistics.
+
+Use the built-in validators before running analyses:
+
+```bash
+FINAL_OUT="$HOME/DATASET/GLAN_processed"
+python3 ShadowMap/scripts/validate_sunlight_csv.py --root "$FINAL_OUT" --max-rows-per-file 5000 \
+  --write-bad-list "$FINAL_OUT/_shadowmap_tasks/bad_sunlight_files.txt"
+
+python3 ShadowMap/scripts/repair_sunlight_csv.py --root "$FINAL_OUT" \
+  --bad-list "$FINAL_OUT/_shadowmap_tasks/bad_sunlight_files.txt" \
+  --write
 ```
 
 ## Current Focus

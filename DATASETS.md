@@ -2,7 +2,7 @@
 
 本文件用于解决「两台机器路径不同」「脚本/服务里硬编码路径」导致的迁移问题。核心原则：所有路径与服务地址都通过环境变量配置，不写死在脚本/代码里。
 
-最后更新：2025-12-15
+最后更新：2025-12-19
 
 ## 1) 推荐的数据目录结构（Workstation A 示例）
 
@@ -14,7 +14,7 @@
   GLAN_processed/                          # 旧输出（最终归档）
   GLAN_processed_recalc_*/                 # 新一轮重算输出（临时/中间）
   Height/hong_kong_cleaned.gpkg            # BUILDING_LOCAL_GEOJSON
-  Tree/HKtree_small.tif                    # SHADOW_ENGINE_CANOPY_RASTER_PATH
+  HKtree_small.tif                         # SHADOW_ENGINE_CANOPY_RASTER_PATH（示例；也可放在 Tree/ 下）
   era5/era5_%Y%m_hk.nc                     # ERA5_FILE_TEMPLATE
 ```
 
@@ -120,6 +120,18 @@ python3 ShadowMap/scripts/repair_sunlight_csv.py --root "$FINAL_OUT" \
 ```
 
 修复后原文件会被移动到：`$FINAL_OUT/_repair_backup_YYYY-mm-dd_HHMMSS/`。
+
+## 6.2) 论文数据产出建议（可复现 / 可审计）
+
+建议把“论文最终数据”产出为一个全新的输出根目录（不要直接覆盖历史目录），并保留清晰的备份与清单：
+
+1) **生成/确认 targets**：targets 中必须是 `INPUT_ROOT` 下的源 CSV 相对路径（例如 `ST/batch10/1069.csv`），不要包含 `-sunlight` 后缀。  
+2) **重算输出到新目录**：如 `GLAN_processed_paper_canopy_v1/`（目录内可包含 `_logs/` 与 `_shadowmap_tasks/`）。  
+3) **合并到最终分析目录**：只同步 `*-sunlight.csv`，并用 `--backup --backup-dir` 备份被覆盖旧文件（见 6 章节示例）。  
+4) **最终 validate**：对“最终分析目录”做一次全量或抽样校验；将 bad list 与修复备份目录一起归档。  
+5) **写清单（manifest）**：建议输出一个 `manifest.txt`（所有 `*-sunlight.csv` 的相对路径排序列表）与最终数量，写入论文分析记录。
+
+> 经验提示：避免把 `_bench_*`、临时目录、日志目录下的 `*-sunlight.csv` 计入样本统计（例如过滤 `! -path '*/_bench_*/*'`）。
 
 ## 7) 后端/前端与 GeoServer 的关系（快速对齐）
 

@@ -1,6 +1,6 @@
 # Codebase Structure
 
-Last updated: 2025-12-15  
+Last updated: 2025-12-19  
 Maintainer: ShadowMap dev team
 
 ---
@@ -60,7 +60,7 @@ Build tooling: Vite + pnpm (`pnpm run dev`, `pnpm run build`).
 src/
 ├── app.ts                    # Express app setup
 ├── routes/                   # REST endpoints (buildings, DEM, weather, health)
-├── services/                 # DEM tiles, WFS proxy helpers, GFS integration
+├── services/                 # DEM tiles, WFS proxy helpers, ERA5 integration
 └── config/                   # Environment configuration
 ```
 
@@ -85,12 +85,19 @@ Primary entry points live under `ShadowMap/scripts/`:
 - `batch_mobility_shadow.py` – Python batch compute core (bucket-level concurrency; supports canopy toggle).
 - `run_full_recal_batch.sh` – batched recompute runner (single Python invocation; retry files treated as a file list).
 - `rebuild_mobility_tasks.py` – scan missing outputs and (re)create retry files.
+- `validate_sunlight_csv.py` – structural validation for `*-sunlight.csv` (write bad list).
+- `repair_sunlight_csv.py` – repair legacy bad CSV quoting/alignment (auto backup).
 - `ShadowMap/.shadowmap.env.example` – machine profile template to unify paths across machines.
+
+IRBM (residence exposure) lives in the same `scripts/` folder:
+
+- `residence_irbm.py` – pure Python IRBM compute.
+- `run_residence_irbm.sh` – wrapper (auto loads `.shadowmap.env`).
 
 ## Shared Conventions
 
 - TypeScript strict mode on both frontend and backend.
 - Zustand store exposes map state (`src/store/shadowMapStore.ts`).
-- Frontend caching utilities in `src/utils/multiLevelCache.ts`; backend目前依赖 WFS 代理与 GFS 查询。
+- Frontend caching utilities in `src/utils/multiLevelCache.ts`; backend目前依赖 WFS 代理与 ERA5 天气查询。
 
 Keep this document updated whenever directories move, major files are added, or responsibilities change.
