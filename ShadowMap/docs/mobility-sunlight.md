@@ -30,7 +30,10 @@
 3) **天气（ERA5，本地）**：
    - 变量：`tcc`（cloudCover, 0–1）、`ssrd`（累积 J/m²）。
    - `sunlightFactor = max(0.15, 1 - tcc*0.85)`
-   - `solarIrradianceWm2 = max(0, Δssrd/Δt)`（W/m²）
+   - `solarIrradianceWm2 = energy/Δt`（W/m²）
+     - 若 `ssrd` 为“累积量”（cumulative），则 `energy = max(0, ssrd(t1)-ssrd(t0))`
+     - 若 `ssrd` 已是“逐小时累积”（incremental），则 `energy = max(0, ssrd(t1))`
+     - 实现会自动探测两种形态并选择合适公式（见 `ShadowMap/scripts/batch_mobility_shadow.py`、`ShadowMap/scripts/era5_extract.py`）
 4) **夜间快速路径（离线批处理）**：
    - 若 `solarIrradianceWm2 <= MOBILITY_NIGHT_IRRADIANCE_THRESHOLD`，直接标记 `source=night`，跳过几何阴影计算。
 5) **阴影建模（建筑 + 可选树冠）**：

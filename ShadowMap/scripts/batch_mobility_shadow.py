@@ -435,6 +435,7 @@ class BucketResult:
 
 _WEATHER_CACHE: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
 _ERA5_DATASET_CACHE: Dict[str, Tuple[Any, str]] = {}
+_ERA5_SSRD_MODE_CACHE: Dict[str, str] = {}
 _CANOPY_DATASET_CACHE: Dict[str, Any] = {}
 _BUILDINGS_PRELOAD_CACHE: Dict[Tuple[str, Optional[str]], Dict[str, Any]] = {}
 
@@ -448,6 +449,7 @@ def _cleanup_caches() -> None:
         except Exception:
             pass
     _ERA5_DATASET_CACHE.clear()
+    _ERA5_SSRD_MODE_CACHE.clear()
 
     for ds in list(_CANOPY_DATASET_CACHE.values()):
         try:
@@ -493,7 +495,6 @@ def _fetch_weather_era5(lat: float, lon: float, timestamp_iso: str, template: Op
     import numpy as np
 
     target = datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00")).astimezone(timezone.utc)
-    target_naive = target.replace(tzinfo=None)
     file_path = _resolve_era5_path(template, fallback, target)
 
     cached = _ERA5_DATASET_CACHE.get(file_path)
@@ -520,16 +521,29 @@ def _fetch_weather_era5(lat: float, lon: float, timestamp_iso: str, template: Op
     if lon_norm < 0 and float(lon_values.max()) > 180:
         lon_norm = (lon_norm + 360) % 360
 
-    diffs = np.abs(
-        np.array([(np.datetime64(target_naive) - t).astype("timedelta64[s]").astype(int) for t in times])
-    )
-    idx = int(np.argmin(diffs))
-    if idx == 0:
-        idx0, idx1 = 0, min(1, len(times) - 1)
-    elif idx == len(times) - 1:
-        idx0, idx1 = len(times) - 2, len(times) - 1
-    else:
-        idx0, idx1 = idx - 1, idx
+    def nearest_idx(dt: datetime) -> int:
+        dt_naive = dt.replace(tzinfo=None)
+        diffs = np.abs(
+            np.array([(np.datetime64(dt_naive) - t).astype("timedelta64[s]").astype(int) for t in times])
+        )
+        return int(np.argmin(diffs))
+
+    # Prefer a stable "hour bucket" lookup:
+    # For any minute within the hour, compute the irradiance for [hour, hour+1h] rather than using the nearest
+    # timestamp. This avoids noon/afternoon artifacts when ssrd is already hourly-accumulated.
+    hour0 = target.replace(minute=0, second=0, microsecond=0)
+    hour1 = hour0 + timedelta(hours=1)
+    idx0 = nearest_idx(hour0)
+    idx1 = nearest_idx(hour1)
+    if idx0 == idx1:
+        # Fallback to the old behavior if the dataset cannot resolve the two endpoints.
+        idx = nearest_idx(target)
+        if idx == 0:
+            idx0, idx1 = 0, min(1, len(times) - 1)
+        elif idx == len(times) - 1:
+            idx0, idx1 = len(times) - 2, len(times) - 1
+        else:
+            idx0, idx1 = idx - 1, idx
 
     t0 = ds.isel({time_var: idx0})
     t1 = ds.isel({time_var: idx1})
@@ -544,7 +558,39 @@ def _fetch_weather_era5(lat: float, lon: float, timestamp_iso: str, template: Op
     time0 = int(np.datetime64(t0[time_var].values).astype("datetime64[s]").astype(int))
     time1 = int(np.datetime64(t1[time_var].values).astype("datetime64[s]").astype(int))
     dt_seconds = max(int(time1 - time0), 1)
-    irradiance = max((ssrd1 - ssrd0) / dt_seconds, 0.0)
+
+    mode = _ERA5_SSRD_MODE_CACHE.get(file_path)
+    if mode is None:
+        try:
+            series = ds["ssrd"].sel(latitude=lat, longitude=lon_norm, method="nearest").values
+            values = np.array(series, dtype="float64").reshape(-1)
+            values = values[np.isfinite(values)]
+            if len(values) < 10:
+                mode = "cumulative"
+            else:
+                diffs = np.diff(values)
+                neg_ratio = float((diffs < -1e-3).sum()) / float(max(len(diffs), 1))
+                mode = "incremental" if neg_ratio > 0.2 else "cumulative"
+        except Exception:
+            mode = "cumulative"
+        _ERA5_SSRD_MODE_CACHE[file_path] = mode
+
+    # ERA5 ssrd can appear in two common shapes depending on preprocessing:
+    # - cumulative (monotonic within a reset window): use delta between endpoints
+    # - incremental (hourly accumulation already): use the endpoint value (t1)
+    if mode == "incremental":
+        energy_jm2 = ssrd1
+        energy_source = "ssrd(t1)"
+    else:
+        energy_jm2 = ssrd1 - ssrd0
+        if energy_jm2 < 0:
+            # Handle reset windows (e.g., forecast accumulation resets) robustly.
+            energy_jm2 = ssrd1
+            energy_source = "ssrd(t1) reset"
+        else:
+            energy_source = "ssrd(t1)-ssrd(t0)"
+
+    irradiance = max(float(energy_jm2) / float(dt_seconds), 0.0)
 
     cloud_cover = clamp(point_tcc, 0.0, 1.0)
     return cloud_cover, irradiance, {
@@ -554,6 +600,8 @@ def _fetch_weather_era5(lat: float, lon: float, timestamp_iso: str, template: Op
         "idx1": idx1,
         "dt_seconds": dt_seconds,
         "time_var": time_var,
+        "ssrd_mode": mode,
+        "ssrd_energy": energy_source,
     }
 
 

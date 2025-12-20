@@ -42,7 +42,7 @@ ShadowMap/                                 # workspace root (app + scripts)
 └── Chinese documents                      # operational notes (CN)
 ```
 
-See `CODEBASE_STRUCTURE.md` for detailed directory information.
+See `DOCS_INDEX.md` for the canonical guide; `CODEBASE_STRUCTURE.md` is kept as a short pointer.
 
 ## Getting Started
 
@@ -101,10 +101,10 @@ python3 ShadowMap/scripts/repair_sunlight_csv.py --root "$FINAL_OUT" \
 2. Scale offline mobility sunlight/shadow batch compute (Python-first; canopy optional).
 3. Keep docs/data/runbooks in sync as datasets and machines evolve.
 
-See `DEVELOPMENT_PLAN.md` for the sprint plan and task status.
+See `DOCS_INDEX.md` for the canonical workflows; `DEVELOPMENT_PLAN.md` is kept as a short pointer.
 
 ## Collaboration Rules
 
 - Every new task must be recorded in the plan document and analysed (plan mode) before implementation.
-- After finishing a task, update the relevant docs (`CODEBASE_STRUCTURE.md`, `DEVELOPMENT_PLAN.md`, README if needed).
+- After finishing a task, update the relevant docs (`DOCS_INDEX.md`, README if needed; keep appendix docs in sync when they are still referenced).
 - Keep branches short (`fix/...`, `feat/...`, `docs/...`) and merge only after build/tests succeed.

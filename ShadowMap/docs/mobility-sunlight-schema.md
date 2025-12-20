@@ -38,7 +38,7 @@
 | --- | --- | --- | --- |
 | cloudCover | 0–1 总云量（tcc） | 计算 `sunlightFactor` | ERA5 |
 | sunlightFactor | `max(0.15, 1 - tcc*0.85)` | 云量衰减系数 | 计算 |
-| solarIrradianceWm2 | 短波辐照度（W/m²）= `max(0, Δssrd/Δt)` | 夜间快速路径/辐照积分 | ERA5 |
+| solarIrradianceWm2 | 短波辐照度（W/m²）= `energy/Δt` | 夜间快速路径/辐照积分 | ERA5（自动适配 ssrd 形态） |
 
 ### 输出（追加字段）
 | 字段 | 描述 | 备注 |

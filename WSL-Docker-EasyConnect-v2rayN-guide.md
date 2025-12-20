@@ -2,6 +2,8 @@
 
 完整记录：解决 WSL 代理冲突、安装 Docker、容器化运行 EasyConnect，并配合 v2rayN + SwitchyOmega 实现「内网走 EasyConnect 容器，外网走 v2rayN」的分流方案。
 
+> 本文为长文参考；快速要点已收敛到 `DOCS_INDEX.md` 的「7) WSL / Docker / 代理」。
+
 ## 1. 核心目标
 - 在 WSL2 中运行 Docker。
 - 使用容器运行 EasyConnect，隔离对 Windows 路由表的影响。

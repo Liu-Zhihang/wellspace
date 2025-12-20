@@ -15,7 +15,7 @@
 
 ## 4. 气象反演（ERA5，本地）
 - 云量衰减：$K_{cloud} = \max(0.15,\; 1 - 0.85 \times \text{tcc})$  
-- 辐照度：$I_{atm} = \dfrac{\max(0,\; ssrd(t_{k+1}) - ssrd(t_k))}{\Delta t}$，$\Delta t=3600$s；ssrd 已含云/气溶胶衰减。  
+- 辐照度：$I_{atm} = \dfrac{E_{ssrd}}{\Delta t}$，$\Delta t=3600$s；其中 $E_{ssrd}$ 根据 `ssrd` 形态（累积/逐小时）选择差分或直接使用；实现会自动探测。  
 - 输出：`cloudCover`、`sunlightFactor=K_cloud`、`solarIrradianceWm2=I_atm`。
 
 ## 5. 阴影建模（建筑 + 可选树冠）

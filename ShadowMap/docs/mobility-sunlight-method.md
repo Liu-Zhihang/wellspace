@@ -28,7 +28,7 @@
    - 输入：桶中心 `lat/lon`，`bucketStart`；ERA5 tcc、ssrd。  
    - 处理：  
      - 云量衰减：$ \text{sunlightFactor} = \max(0.15,\; 1 - \text{tcc} \times 0.85) $  
-     - 辐照度：$ \text{solarIrradianceWm2} = \dfrac{\max(0,\; ssrd(t_1) - ssrd(t_0))}{\Delta t} $  
+     - 辐照度：$ \text{solarIrradianceWm2} = \dfrac{energy}{\Delta t} $，其中 `energy` 由 `ssrd` 的数据形态决定（累积量用差分，逐小时量用本身）。  
    - 输出：`cloudCover`、`sunlightFactor`、`solarIrradianceWm2`。
 
 4) **阴影建模（建筑/树冠遮挡）**  
@@ -65,7 +65,7 @@
 ### 4. 公式汇总
 - 分桶：$ \text{bucketStart} = \left\lfloor \dfrac{timestamp}{60} \right\rfloor \times 60\,(s) $  
 - 云量：$ \text{sunlightFactor} = \max(0.15,\; 1 - \text{tcc} \times 0.85) $  
-- 辐照度：$ \text{solarIrradianceWm2} = \dfrac{\max(0,\; ssrd(t_1)-ssrd(t_0))}{\Delta t} $  
+- 辐照度：$ \text{solarIrradianceWm2} = \dfrac{energy}{\Delta t} $（`energy`：累积量用差分，逐小时量用本身）  
 - 阴影判定：$ \text{sunlit\_raw} \in \{0,1\} $，无几何回退 $ 1-\text{avgShadowPercent}/100 $  
 - 云量修正：$ \text{sunlitEffective} = \text{sunlit\_raw} \times \text{sunlightFactor} $；$ \text{shadowPercentEffective} = 100 - \text{sunlitEffective} \times 100 $  
 - 辐照度掩码：$ \text{irradianceEffective} = (\text{sunlit\_raw}==0)?0:\text{solarIrradianceWm2} $  

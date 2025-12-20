@@ -50,7 +50,9 @@ $$\text{bbox} = \{ \min(\lambda), \min(\phi), \max(\lambda), \max(\phi) \mid (\p
 
 由于 ERA5 的辐射数据为累积值，我们需要计算瞬时辐照度 $I_{atm}$ (`solarIrradianceWm2`)：
 
-$$I_{atm} = \frac{\max(0, \text{ssrd}(t_{k+1}) - \text{ssrd}(t_k))}{\Delta t_{era}}$$
+$$I_{atm} = \frac{E_{ssrd}}{\Delta t_{era}}$$
+
+其中 $E_{ssrd}$ 为该小时的短波辐射能量（$J/m^2$）：若 `ssrd` 为累积量则使用差分 $ssrd(t_{k+1})-ssrd(t_k)$；若 `ssrd` 已是逐小时累积则直接使用 $ssrd(t_{k+1})$。实现会自动探测两种形态。
 
 同时，定义云量衰减系数 $K_{cloud}$ (`sunlightFactor`)，用于修正几何日照的有效性。根据经验模型，云层覆盖会导致日照强度的非线性衰减：
 

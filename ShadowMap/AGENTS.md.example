@@ -1,4 +1,6 @@
-# Repository Guidelines
+# Repository Guidelines（示例）
+
+> Note: this is a template. If you want local agent instructions, copy to `ShadowMap/AGENTS.md` (gitignored).
 
 ## Project Structure & Module Organization
 - `shadow-map-backend/`: TypeScript Express API. Source code lives in `src/`, compiled output in `dist/`, smoke scripts in `test-*.sh`.
@@ -29,7 +31,7 @@
 ## Testing Guidelines
 - No global unit suite yet; rely on targeted scripts and ad-hoc checks.
 - Add `*.test.ts` near complex logic when introducing new algorithms; exclude tests from production builds.
-- Validate data imports via GeoServer/PostGIS steps outlined in `Chinese documents/ops/瓦片数据导入与统一流程.md`.
+- Validate data imports via GeoServer/PostGIS steps outlined in `Chinese documents/ops/空间数据服务运维手册.md`.
 
 ## Commit & Pull Request Guidelines
 - Commit titles follow `[scope] message` (`scope` ∈ {`backend`,`frontend`,`docs`}): e.g., `[frontend] Center map on Hong Kong`.

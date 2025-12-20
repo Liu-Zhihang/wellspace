@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import xarray as xr
@@ -52,7 +52,7 @@ def main():
     try:
         lat = float(lat)
         lon = float(lon)
-        target = datetime.fromisoformat(str(iso_time).replace("Z", "+00:00"))
+        target = datetime.fromisoformat(str(iso_time).replace("Z", "+00:00")).astimezone(timezone.utc)
     except Exception as e:
         respond({"error": "invalid_params", "message": str(e)}, exit_code=1)
 
@@ -79,15 +79,27 @@ def main():
     if lon < 0 and lon_values.max() > 180:
         lon = (lon + 360) % 360
 
-    # 最近时间步
-    time_diffs = np.abs(np.array([(np.datetime64(target) - t).astype("timedelta64[s]").astype(int) for t in times]))
-    idx = int(np.argmin(time_diffs))
-    if idx == 0:
-        idx0, idx1 = 0, min(1, len(times) - 1)
-    elif idx == len(times) - 1:
-        idx0, idx1 = len(times) - 2, len(times) - 1
-    else:
-        idx0, idx1 = idx - 1, idx
+    def nearest_idx(dt: datetime) -> int:
+        dt_naive = dt.replace(tzinfo=None)
+        diffs = np.abs(
+            np.array([(np.datetime64(dt_naive) - t).astype("timedelta64[s]").astype(int) for t in times])
+        )
+        return int(np.argmin(diffs))
+
+    # Prefer hour bucket endpoints to avoid noon/afternoon artifacts.
+    hour0 = target.replace(minute=0, second=0, microsecond=0)
+    hour1 = hour0 + timedelta(hours=1)
+    idx0 = nearest_idx(hour0)
+    idx1 = nearest_idx(hour1)
+    if idx0 == idx1:
+        # Fallback to the old behavior if the dataset cannot resolve the two endpoints.
+        idx = nearest_idx(target)
+        if idx == 0:
+            idx0, idx1 = 0, min(1, len(times) - 1)
+        elif idx == len(times) - 1:
+            idx0, idx1 = len(times) - 2, len(times) - 1
+        else:
+            idx0, idx1 = idx - 1, idx
 
     t0 = ds.isel({time_var: idx0})
     t1 = ds.isel({time_var: idx1})
@@ -102,7 +114,33 @@ def main():
     time0 = np.datetime64(t0[time_var].values).astype("datetime64[s]").astype(int)
     time1 = np.datetime64(t1[time_var].values).astype("datetime64[s]").astype(int)
     dt = max(int(time1 - time0), 1)
-    irradiance = max((ssrd1 - ssrd0) / dt, 0.0)
+
+    # Detect whether ssrd is cumulative or already hourly-accumulated (incremental).
+    try:
+        series = ds["ssrd"].sel(latitude=lat, longitude=lon, method="nearest").values
+        values = np.array(series, dtype="float64").reshape(-1)
+        values = values[np.isfinite(values)]
+        if len(values) < 10:
+            mode = "cumulative"
+        else:
+            diffs = np.diff(values)
+            neg_ratio = float((diffs < -1e-3).sum()) / float(max(len(diffs), 1))
+            mode = "incremental" if neg_ratio > 0.2 else "cumulative"
+    except Exception:
+        mode = "cumulative"
+
+    if mode == "incremental":
+        energy_jm2 = ssrd1
+        energy_source = "ssrd(t1)"
+    else:
+        energy_jm2 = ssrd1 - ssrd0
+        if energy_jm2 < 0:
+            energy_jm2 = ssrd1
+            energy_source = "ssrd(t1) reset"
+        else:
+            energy_source = "ssrd(t1)-ssrd(t0)"
+
+    irradiance = max(float(energy_jm2) / float(dt), 0.0)
 
     out = {
         "cloudCover": max(min(point_tcc, 1.0), 0.0),
@@ -115,6 +153,8 @@ def main():
             "idx1": int(idx1),
             "dt_seconds": dt,
             "time_var": time_var,
+            "ssrd_mode": mode,
+            "ssrd_energy": energy_source,
         },
     }
     respond(out)

@@ -16,15 +16,15 @@
 
 ## 当前建议阅读顺序（Demo / 数据服务）
 
-1) 空间数据服务部署：`ops/空间数据服务部署.md`  
-2) 瓦片数据导入：`ops/瓦片数据导入与统一流程.md`  
-3) 后端配置与自检：`backend/后端文档.md`  
+1) 空间数据服务运维主线（部署 + 导入 + 验证）：`ops/空间数据服务运维手册.md`  
+2) 后端配置与自检：`backend/后端文档.md`  
 
 ## 文件清单
 
 - 运维（ops）
-  - `ops/空间数据服务部署.md`：PostGIS + GeoServer 服务部署与验证
-  - `ops/瓦片数据导入与统一流程.md`：瓦片 GeoJSON/DEM 入库、发布与校验流程
+  - `ops/空间数据服务运维手册.md`：PostGIS + GeoServer 部署、瓦片入库、GeoServer 刷新与 ShadowMap 后端联调（主线）
+  - `ops/空间数据服务部署.md`：入口（已合并；保留路径兼容）
+  - `ops/瓦片数据导入与统一流程.md`：入口（已合并；保留路径兼容）
 
 - 数据集（datasets）
   - `datasets/TUM数据介绍.md`：GlobalBuildingAtlas 数据说明（LoD1/Height 等）
@@ -45,5 +45,4 @@
   - `archive/mapbox-gl-shadow-simulator使用手册.md`：第三方 README 摘录（以官方为准）
 
 - 研究方法（analysis）
-  - `analysis/residence-sunlight-IRBM-method.md`：居住地阳光暴露（IRBM）方法与 NEAP 分析框架（详细版）
-
+  - `analysis/residence-sunlight-IRBM-method.md`：入口（当前有效版本见 `ShadowMap/docs/residence-sunlight-IRBM-method.md`）

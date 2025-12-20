@@ -20,6 +20,10 @@ Thumbs.db
 # MCP configuration (local only)
 .mcp.json
 
+# Local agent instructions (do not commit)
+AGENTS.md
+ShadowMap/AGENTS.md
+
 # Temporary scripts
 word_vector.py
 
