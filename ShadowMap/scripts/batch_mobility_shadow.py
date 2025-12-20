@@ -830,9 +830,11 @@ def _process_bucket(job: BucketJob) -> BucketResult:
                 or _bounds_diagonal_m(job.bbox) >= float(job.worker.buildings_point_buffer_threshold_m)
             )
         )
-        buildings = _load_buildings_preloaded_points(job.points, job.worker) if use_point_buffer else _get_buildings(job.bbox, job.worker)
-        if buildings.empty:
-            raise RuntimeError("No building features returned for the specified bounds/geometry")
+        buildings = (
+            _load_buildings_preloaded_points(job.points, job.worker)
+            if use_point_buffer
+            else _get_buildings(job.bbox, job.worker)
+        )
 
         if job.worker.include_canopy and job.worker.canopy_raster_path:
             canopy_path = job.worker.canopy_raster_path
@@ -875,7 +877,70 @@ def _process_bucket(job: BucketJob) -> BucketResult:
             else:
                 warnings.append(f"[Canopy] raster not found: {canopy_path}")
 
-        shadows = generate_shadows(buildings, job.bucket_key, job.worker.timezone)
+        if buildings.empty:
+            updates: List[RowUpdate] = []
+            for point in job.points:
+                sunlit = 1
+                shadow_percent = 0.0
+                sunlit_effective = (
+                    float(sunlit) if sunlight_factor_value is None else float(sunlit) * float(sunlight_factor_value)
+                )
+                shadow_percent_effective = 100.0 - sunlit_effective * 100.0
+                irradiance_effective = None if solar_irradiance_value is None else float(solar_irradiance_value)
+                updates.append(
+                    RowUpdate(
+                        index=point.index,
+                        values={
+                            "sunlit": sunlit,
+                            "shadowPercent": shadow_percent,
+                            "bucketStart": job.bucket_key,
+                            "bucketEnd": bucket_end,
+                            "source": "engine",
+                            "errorDetail": "",
+                            "cloudCover": cloud_cover_out,
+                            "sunlightFactor": sunlight_factor_out,
+                            "sunlitEffective": sunlit_effective,
+                            "shadowPercentEffective": shadow_percent_effective,
+                            "solarIrradianceWm2": solar_irradiance_out,
+                            "irradianceEffective": irradiance_effective if irradiance_effective is not None else "",
+                        },
+                    )
+                )
+            return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
+
+        try:
+            shadows = generate_shadows(buildings, job.bucket_key, job.worker.timezone)
+        except Exception as exc:
+            err_msg = str(exc)
+            if (
+                "Given time before sunrise or after sunset" in err_msg
+                or "outside daylight" in err_msg.lower()
+            ):
+                # ERA5 provides hourly-average irradiance; near sunset a minute bucket can be after
+                # sunset even when the hourly average is still > 0. Treat as night for this minute.
+                updates: List[RowUpdate] = []
+                for point in job.points:
+                    updates.append(
+                        RowUpdate(
+                            index=point.index,
+                            values={
+                                "sunlit": 0,
+                                "shadowPercent": 0,
+                                "bucketStart": job.bucket_key,
+                                "bucketEnd": job.bucket_key,
+                                "source": "night",
+                                "errorDetail": "",
+                                "cloudCover": cloud_cover_out,
+                                "sunlightFactor": sunlight_factor_out,
+                                "sunlitEffective": "",
+                                "shadowPercentEffective": "",
+                                "solarIrradianceWm2": 0.0,
+                                "irradianceEffective": "",
+                            },
+                        )
+                    )
+                return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
+            raise
 
         geoms = [g for g in shadows.geometry if g is not None and not g.is_empty] if not shadows.empty else []
         tree = STRtree(geoms) if geoms else None
