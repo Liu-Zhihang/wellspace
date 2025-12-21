@@ -197,8 +197,11 @@ def _aggregate_frames(df: pd.DataFrame, record: FileRecord, sun_col: str,
     def _sum_period(col: str, start: int, end: int) -> pd.Series:
         subset = df[(df["hour"] >= start) & (df["hour"] < end)]
         if subset.empty:
-            return pd.Series(dtype=float)
-        return subset.groupby("date")[col].sum()
+            return pd.Series(dtype=float, name=col, index=pd.Index([], name="date"))
+        out = subset.groupby("date")[col].sum()
+        out.name = col
+        out.index.name = "date"
+        return out
 
     morning_cloud = _sum_period(sun_col, 6, 10) / 60
     midday_cloud = _sum_period(sun_col, 10, 14) / 60
