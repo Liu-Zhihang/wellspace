@@ -88,3 +88,11 @@
 - 结构完整性：`ShadowMap/scripts/validate_sunlight_csv.py`
 - 语义异常（抓“下午系统性清零/全 night”）：`ShadowMap/scripts/qc_sunlight_daylight.py`
 
+---
+
+### 8) （可选但推荐）室内剔除/掩码
+
+如果轨迹点大量位于建筑 footprint 内（室内），日照会被系统性高估。建议在统计前做一次室内处理：
+
+- 脚本：`ShadowMap/scripts/indoor_filter_sunlight_csv.py`
+- 推荐模式：`--mode mask`（室内点保留行，但把 `sunlightSeconds/irradianceJ` 等暴露量置 0，并标记 `indoor=1`）
