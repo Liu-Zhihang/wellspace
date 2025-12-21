@@ -38,7 +38,9 @@
 对每个 bucket，用 ERA5 最近网格点提取：
 
 - `cloudCover = clamp(tcc, 0..1)`
-- `sunlightFactor = max(0.15, 1 - 0.85*cloudCover)`
+- `sunlightFactor = max(min, 1 - coef*cloudCover)`（默认 `min=0.15`、`coef=0.85`，可用环境变量 `MOBILITY_SUNLIGHT_FACTOR_MIN / MOBILITY_SUNLIGHT_FACTOR_COEF` 调参；把 `min=0` 可用于“移除下限”的敏感性测试）
+
+敏感性测试（推荐，速度快）：无需重算阴影/树冠/ERA5，可用 `ShadowMap/scripts/recompute_sunlight_factor.py` 对已生成的 `*-sunlight.csv` 重新计算 `sunlightFactor/sunlitEffective/sunlightSeconds` 等字段，快速生成新版本数据集用于对照。
 
 **关键：`ssrd` → `solarIrradianceWm2`（W/m²）**
 

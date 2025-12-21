@@ -777,7 +777,13 @@ def _process_bucket(job: BucketJob) -> BucketResult:
             job.worker.era5_file_path,
         )
         cf = clamp(cloud_cover_value, 0.0, 1.0)
-        sunlight_factor_value = max(0.15, 1.0 - cf * 0.85)
+        sunlight_min = float(os.getenv("MOBILITY_SUNLIGHT_FACTOR_MIN", "0.15"))
+        sunlight_coef = float(os.getenv("MOBILITY_SUNLIGHT_FACTOR_COEF", "0.85"))
+        if sunlight_min < 0:
+            sunlight_min = 0.0
+        if sunlight_coef < 0:
+            sunlight_coef = 0.0
+        sunlight_factor_value = max(sunlight_min, 1.0 - cf * sunlight_coef)
     except Exception as exc:
         warnings.append(f"[Weather error][{job.file_label}][{job.bucket_key}] {exc}")
         cloud_cover_value = None
