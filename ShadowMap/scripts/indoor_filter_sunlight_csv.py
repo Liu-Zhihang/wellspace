@@ -27,6 +27,7 @@ import csv
 import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
@@ -112,6 +113,10 @@ def _is_indoor(tree, geoms, pt) -> bool:
 
 
 def _compute_bounds(file_path: Path) -> Optional[Tuple[float, float, float, float]]:
+    return _compute_bounds_limited(file_path, max_rows=0)
+
+
+def _compute_bounds_limited(file_path: Path, *, max_rows: int) -> Optional[Tuple[float, float, float, float]]:
     minx = miny = float("inf")
     maxx = maxy = float("-inf")
     found = 0
@@ -132,6 +137,8 @@ def _compute_bounds(file_path: Path) -> Optional[Tuple[float, float, float, floa
             miny = min(miny, lat)
             maxy = max(maxy, lat)
             found += 1
+            if max_rows > 0 and found >= max_rows:
+                break
 
     if found == 0 or not (minx < float("inf") and miny < float("inf")):
         return None
@@ -228,6 +235,99 @@ def process_file(
     return stats
 
 
+def scan_file(
+    src: Path,
+    *,
+    buildings_path: str,
+    buildings_layer: Optional[str],
+    max_rows: int,
+) -> FileStats:
+    from shapely.geometry import Point
+
+    stats = FileStats()
+    bounds = _compute_bounds_limited(src, max_rows=max_rows)
+    if bounds is None:
+        return stats
+
+    buildings_gdf = _load_buildings(buildings_path, buildings_layer, bbox=bounds)
+    stats.buildings_loaded = int(len(buildings_gdf))
+    tree, geoms = _build_tree(buildings_gdf)
+
+    coord_cache: Dict[Tuple[int, int], bool] = {}
+
+    with src.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            stats.rows += 1
+            lon_raw, lat_raw = pick_lon_lat(row)
+            if not lon_raw or not lat_raw:
+                stats.missing_coords += 1
+                continue
+            try:
+                lon = float(lon_raw)
+                lat = float(lat_raw)
+            except Exception:
+                stats.missing_coords += 1
+                continue
+
+            key = (int(round(lon * 1e5)), int(round(lat * 1e5)))  # ~1m grid cache
+            indoor = coord_cache.get(key)
+            if indoor is None:
+                indoor = _is_indoor(tree, geoms, Point(lon, lat))
+                coord_cache[key] = indoor
+            if indoor:
+                stats.indoor_rows += 1
+
+            if max_rows > 0 and stats.rows >= max_rows:
+                break
+
+    return stats
+
+
+def _looks_processed(path: Path) -> bool:
+    try:
+        if not path.exists() or path.stat().st_size <= 0:
+            return False
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            header = fh.readline().strip("\r\n")
+    except Exception:
+        return False
+    if not header:
+        return False
+    cols = [c.strip() for c in header.split(",")]
+    return "indoor" in cols and "indoorReason" in cols
+
+
+def _run_one(
+    src_path: str,
+    dst_path: str,
+    rel_path: str,
+    *,
+    buildings_path: str,
+    buildings_layer: Optional[str],
+    mode: str,
+    write: bool,
+    max_rows_per_file: int,
+) -> Tuple[str, FileStats]:
+    src = Path(src_path)
+    if write:
+        st = process_file(
+            src,
+            Path(dst_path),
+            buildings_path=buildings_path,
+            buildings_layer=buildings_layer,
+            mode=mode,
+        )
+    else:
+        st = scan_file(
+            src,
+            buildings_path=buildings_path,
+            buildings_layer=buildings_layer,
+            max_rows=max_rows_per_file,
+        )
+    return rel_path, st
+
+
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description="Indoor filter for *-sunlight.csv")
     parser.add_argument("--root", required=True, help="Root directory containing *-sunlight.csv files")
@@ -252,6 +352,18 @@ def main(argv: Sequence[str]) -> int:
         help="Optional file list (one relative path per line, relative to --root).",
     )
     parser.add_argument("--limit-files", type=int, default=0, help="Optional: stop after N files (0 = no limit).")
+    parser.add_argument(
+        "--max-rows-per-file",
+        type=int,
+        default=0,
+        help="Rows to scan per file (0 = full file). Default: 0",
+    )
+    parser.add_argument("--workers", type=int, default=1, help="Parallel workers (file-level). Default: 1")
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Do not skip already-processed destination files (default: resume/skip).",
+    )
     args = parser.parse_args(list(argv))
 
     root = Path(args.root).expanduser().resolve()
@@ -262,6 +374,16 @@ def main(argv: Sequence[str]) -> int:
     buildings_path = str(Path(args.buildings).expanduser().resolve())
     if not os.path.exists(buildings_path):
         print(f"[Fatal] buildings not found: {buildings_path}", file=sys.stderr)
+        return 2
+
+    try:
+        import geopandas  # noqa: F401
+        import shapely  # noqa: F401
+    except Exception as exc:
+        print(
+            f"[Fatal] Missing dependencies for indoor filtering (need geopandas + shapely): {exc}",
+            file=sys.stderr,
+        )
         return 2
 
     layer = str(args.buildings_layer).strip() or None
@@ -287,13 +409,24 @@ def main(argv: Sequence[str]) -> int:
         print(f"[Fatal] no *-sunlight.csv files under {root}", file=sys.stderr)
         return 2
 
+    workers = int(args.workers)
+    if workers < 1:
+        print("[Fatal] --workers must be >= 1", file=sys.stderr)
+        return 2
+
     print(f"[Scan] files={len(files)} root={root}")
-    print(f"[Config] mode={args.mode} write={bool(args.write)} out_root={out_root} in_place={bool(args.in_place)}")
+    print(
+        f"[Config] mode={args.mode} write={bool(args.write)} out_root={out_root} in_place={bool(args.in_place)} "
+        f"workers={workers} max_rows_per_file={int(args.max_rows_per_file) or 0}"
+    )
 
     started = time.time()
     total_rows = 0
     total_indoor = 0
-    for i, src in enumerate(files, start=1):
+    jobs: list[Tuple[str, str, str]] = []
+    skipped_existing = 0
+    resume = (not bool(args.no_resume)) and bool(args.write)
+    for src in files:
         if not src.exists():
             print(f"[Skip] missing: {src}", file=sys.stderr)
             continue
@@ -302,32 +435,74 @@ def main(argv: Sequence[str]) -> int:
         except Exception:
             rel = Path(src.name)
         dst = (out_root / rel) if not args.in_place else src
+        if resume and dst.exists() and _looks_processed(dst):
+            skipped_existing += 1
+            continue
+        jobs.append((str(src), str(dst), str(rel)))
 
-        if args.write:
-            st = process_file(
-                src,
-                dst,
+    if skipped_existing:
+        print(f"[Resume] skipped_existing={skipped_existing}")
+
+    completed = 0
+    if workers == 1:
+        for src_path, dst_path, rel_path in jobs:
+            rel_out, st = _run_one(
+                src_path,
+                dst_path,
+                rel_path,
                 buildings_path=buildings_path,
                 buildings_layer=layer,
                 mode=str(args.mode),
+                write=bool(args.write),
+                max_rows_per_file=int(args.max_rows_per_file),
             )
-        else:
-            st = FileStats()
-
-        total_rows += st.rows
-        total_indoor += st.indoor_rows
-
-        if i % 10 == 0 or i == len(files):
-            elapsed = int(round(time.time() - started))
-            ratio = 0.0 if total_rows == 0 else (total_indoor / total_rows) * 100.0
-            print(f"[Progress] {i}/{len(files)} rows={total_rows} indoor={total_indoor} ({ratio:.2f}%) elapsed={elapsed}s")
+            completed += 1
+            total_rows += st.rows
+            total_indoor += st.indoor_rows
+            if completed % 10 == 0 or completed == len(jobs):
+                elapsed = int(round(time.time() - started))
+                ratio = 0.0 if total_rows == 0 else (total_indoor / total_rows) * 100.0
+                print(
+                    f"[Progress] {completed}/{len(jobs)} rows={total_rows} indoor={total_indoor} "
+                    f"({ratio:.2f}%) elapsed={elapsed}s"
+                )
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futures = [
+                ex.submit(
+                    _run_one,
+                    src_path,
+                    dst_path,
+                    rel_path,
+                    buildings_path=buildings_path,
+                    buildings_layer=layer,
+                    mode=str(args.mode),
+                    write=bool(args.write),
+                    max_rows_per_file=int(args.max_rows_per_file),
+                )
+                for src_path, dst_path, rel_path in jobs
+            ]
+            for fut in as_completed(futures):
+                rel_out, st = fut.result()
+                completed += 1
+                total_rows += st.rows
+                total_indoor += st.indoor_rows
+                if completed % 10 == 0 or completed == len(jobs):
+                    elapsed = int(round(time.time() - started))
+                    ratio = 0.0 if total_rows == 0 else (total_indoor / total_rows) * 100.0
+                    print(
+                        f"[Progress] {completed}/{len(jobs)} rows={total_rows} indoor={total_indoor} "
+                        f"({ratio:.2f}%) elapsed={elapsed}s"
+                    )
 
     elapsed = int(round(time.time() - started))
     ratio = 0.0 if total_rows == 0 else (total_indoor / total_rows) * 100.0
-    print(f"[Done] files={len(files)} rows={total_rows} indoor={total_indoor} ({ratio:.2f}%) elapsed={elapsed}s")
+    print(
+        f"[Done] files={len(files)} processed={len(jobs)} skipped_existing={skipped_existing} "
+        f"rows={total_rows} indoor={total_indoor} ({ratio:.2f}%) elapsed={elapsed}s"
+    )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

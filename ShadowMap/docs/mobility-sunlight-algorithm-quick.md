@@ -96,3 +96,4 @@
 
 - 脚本：`ShadowMap/scripts/indoor_filter_sunlight_csv.py`
 - 推荐模式：`--mode mask`（室内点保留行，但把 `sunlightSeconds/irradianceJ` 等暴露量置 0，并标记 `indoor=1`）
+- 推荐并行与断点续跑：加 `--workers N`（文件级并行），中断后再次运行会自动跳过已处理文件（需要时用 `--no-resume` 强制重跑）。
