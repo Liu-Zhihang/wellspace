@@ -33,6 +33,16 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except Exception:
+        return default
+
+
 def pick_lon_lat(row: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
     # Indoor filtering can be sensitive to GPS jitter; we support a configurable
     # coordinate priority (comma-separated sources).
@@ -181,6 +191,36 @@ def _compute_bounds_limited(file_path: Path, *, max_rows: int) -> Optional[Tuple
     return (minx, miny, maxx, maxy)
 
 
+def _meters_to_degrees(buffer_m: float, *, mean_lat: float) -> float:
+    import math
+
+    m = abs(float(buffer_m))
+    if m <= 0:
+        return 0.0
+    cos_lat = math.cos(math.radians(float(mean_lat)))
+    cos_lat = max(0.1, abs(cos_lat))
+    deg_lat = m / 111_000.0
+    deg_lon = m / (111_000.0 * cos_lat)
+    return max(deg_lat, deg_lon)
+
+
+def _expand_bounds(bounds: Tuple[float, float, float, float], *, expand: float) -> Tuple[float, float, float, float]:
+    minx, miny, maxx, maxy = bounds
+    e = abs(float(expand))
+    return (minx - e, miny - e, maxx + e, maxy + e)
+
+
+def _maybe_buffer_buildings(buildings_gdf, *, buffer_m: float, mean_lat: float):
+    if not buffer_m:
+        return buildings_gdf
+    dist_deg = _meters_to_degrees(buffer_m, mean_lat=mean_lat)
+    if buffer_m < 0:
+        dist_deg = -dist_deg
+    buildings_gdf = buildings_gdf.copy()
+    buildings_gdf["geometry"] = buildings_gdf.geometry.buffer(dist_deg)
+    return buildings_gdf
+
+
 def _mask_indoor_row(row: Dict[str, str]) -> None:
     row["sunlit"] = "0"
     row["shadowPercent"] = "100"
@@ -199,6 +239,7 @@ def process_file(
     *,
     buildings_path: str,
     buildings_layer: Optional[str],
+    buildings_buffer_m: float,
     mode: str,
 ) -> FileStats:
     from shapely.geometry import Point
@@ -208,7 +249,10 @@ def process_file(
     if bounds is None:
         return stats
 
-    buildings_gdf = _load_buildings(buildings_path, buildings_layer, bbox=bounds)
+    mean_lat = (bounds[1] + bounds[3]) / 2.0
+    expand = _meters_to_degrees(buildings_buffer_m, mean_lat=mean_lat)
+    buildings_gdf = _load_buildings(buildings_path, buildings_layer, bbox=_expand_bounds(bounds, expand=expand))
+    buildings_gdf = _maybe_buffer_buildings(buildings_gdf, buffer_m=buildings_buffer_m, mean_lat=mean_lat)
     stats.buildings_loaded = int(len(buildings_gdf))
     tree, geoms = _build_tree(buildings_gdf)
 
@@ -276,6 +320,7 @@ def scan_file(
     *,
     buildings_path: str,
     buildings_layer: Optional[str],
+    buildings_buffer_m: float,
     max_rows: int,
 ) -> FileStats:
     from shapely.geometry import Point
@@ -285,7 +330,10 @@ def scan_file(
     if bounds is None:
         return stats
 
-    buildings_gdf = _load_buildings(buildings_path, buildings_layer, bbox=bounds)
+    mean_lat = (bounds[1] + bounds[3]) / 2.0
+    expand = _meters_to_degrees(buildings_buffer_m, mean_lat=mean_lat)
+    buildings_gdf = _load_buildings(buildings_path, buildings_layer, bbox=_expand_bounds(bounds, expand=expand))
+    buildings_gdf = _maybe_buffer_buildings(buildings_gdf, buffer_m=buildings_buffer_m, mean_lat=mean_lat)
     stats.buildings_loaded = int(len(buildings_gdf))
     tree, geoms = _build_tree(buildings_gdf)
 
@@ -341,6 +389,7 @@ def _run_one(
     *,
     buildings_path: str,
     buildings_layer: Optional[str],
+    buildings_buffer_m: float,
     mode: str,
     write: bool,
     max_rows_per_file: int,
@@ -352,6 +401,7 @@ def _run_one(
             Path(dst_path),
             buildings_path=buildings_path,
             buildings_layer=buildings_layer,
+            buildings_buffer_m=buildings_buffer_m,
             mode=mode,
         )
     else:
@@ -359,6 +409,7 @@ def _run_one(
             src,
             buildings_path=buildings_path,
             buildings_layer=buildings_layer,
+            buildings_buffer_m=buildings_buffer_m,
             max_rows=max_rows_per_file,
         )
     return rel_path, st
@@ -369,6 +420,12 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--root", required=True, help="Root directory containing *-sunlight.csv files")
     parser.add_argument("--buildings", required=True, help="Buildings dataset path (GPKG/GeoJSON)")
     parser.add_argument("--buildings-layer", default="", help="Optional layer name for GPKG")
+    parser.add_argument(
+        "--buildings-buffer-m",
+        type=float,
+        default=_env_float("MOBILITY_INDOOR_BUILDINGS_BUFFER_M", 0.0),
+        help="Buffer building footprints by N meters before indoor test (approx in EPSG:4326). Default: 0",
+    )
     parser.add_argument(
         "--mode",
         choices=("mask", "flag"),
@@ -453,7 +510,8 @@ def main(argv: Sequence[str]) -> int:
     print(f"[Scan] files={len(files)} root={root}")
     print(
         f"[Config] mode={args.mode} write={bool(args.write)} out_root={out_root} in_place={bool(args.in_place)} "
-        f"workers={workers} max_rows_per_file={int(args.max_rows_per_file) or 0}"
+        f"workers={workers} max_rows_per_file={int(args.max_rows_per_file) or 0} "
+        f"buildings_buffer_m={float(args.buildings_buffer_m):g}"
     )
 
     started = time.time()
@@ -488,6 +546,7 @@ def main(argv: Sequence[str]) -> int:
                 rel_path,
                 buildings_path=buildings_path,
                 buildings_layer=layer,
+                buildings_buffer_m=float(args.buildings_buffer_m),
                 mode=str(args.mode),
                 write=bool(args.write),
                 max_rows_per_file=int(args.max_rows_per_file),
@@ -512,6 +571,7 @@ def main(argv: Sequence[str]) -> int:
                     rel_path,
                     buildings_path=buildings_path,
                     buildings_layer=layer,
+                    buildings_buffer_m=float(args.buildings_buffer_m),
                     mode=str(args.mode),
                     write=bool(args.write),
                     max_rows_per_file=int(args.max_rows_per_file),
