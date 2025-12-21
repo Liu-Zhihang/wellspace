@@ -15,7 +15,9 @@
 
 ### 1) 输入
 
-- 轨迹 CSV：至少包含 `timestamp`（Unix epoch seconds）和经纬度列（按 `fnl`→`gps`→`gpx`→`air` 优先级取第一组可用坐标）
+- 轨迹 CSV：至少包含 `timestamp`（Unix epoch seconds）和经纬度列（默认按 `fnl`→`gps`→`gpx`→`air` 优先级取第一组可用坐标；可用 `MOBILITY_COORD_PRIORITY` 覆盖）
+  - 室内判定/后处理可单独配置 `MOBILITY_INDOOR_COORD_PRIORITY`，默认优先使用 `stay_point_x/y`（仅 `stay_status>=1` 时有效）提高稳定性
+  - 如需规避部分数据中 `fnl_*` 抖动，可临时改成 `MOBILITY_COORD_PRIORITY="gps,fnl,gpx,air"` 做敏感性对照
 - 建筑：本地 GPKG/GeoJSON（香港默认 `hong_kong_cleaned.gpkg`，高度字段 `height` 字符串可自动转 float）
 - 树冠（可选）：GeoTIFF（如 `HKtree_small.tif`）
 - ERA5（本地）：逐小时 NetCDF（`tcc` 与 `ssrd`）

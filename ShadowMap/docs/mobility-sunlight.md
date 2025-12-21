@@ -20,7 +20,8 @@
 ### 输入要点（CSV）
 
 - `timestamp`：Unix epoch seconds（整数或浮点），用于按分钟分桶。
-- 坐标优先级：`fnl_lon/fnl_lat` → `gps` → `gpx` → `air`（取第一组可用坐标）。
+- 坐标优先级：`fnl_lon/fnl_lat` → `gps` → `gpx` → `air`（取第一组可用坐标，可用 `MOBILITY_COORD_PRIORITY` 覆盖）。
+  - 室内判定/后处理可单独配置 `MOBILITY_INDOOR_COORD_PRIORITY`，默认优先 `stay_point_x/y`（仅 `stay_status>=1` 时有效）。
 - 其他业务字段透传；当前 mobility 输出不区分室内/室外（如需室内逻辑请在下游处理或在前端渲染层做标注）。
 
 ### 核心流程（分钟桶）

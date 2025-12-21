@@ -339,10 +339,54 @@ def write_csv(out_file: Path, headers: Sequence[str], rows: Sequence[Dict[str, A
             pass
 
 
+def _coord_priority(env_key: str, default: str) -> List[str]:
+    raw = (os.getenv(env_key) or default).strip()
+    parts = [p.strip().lower() for p in raw.replace(";", ",").split(",") if p.strip()]
+    return parts
+
+
+def _is_stay_point(row: Dict[str, str]) -> bool:
+    raw = (row.get("stay_status") or "").strip()
+    if not raw:
+        return False
+    try:
+        return float(raw) >= 1.0
+    except Exception:
+        return raw.lower() in {"1", "true", "yes", "y"}
+
+
 def pick_lon_lat(row: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
-    lon = row.get("fnl_lon") or row.get("gps_lon") or row.get("gpx_lon") or row.get("air_lon")
-    lat = row.get("fnl_lat") or row.get("gps_lat") or row.get("gpx_lat") or row.get("air_lat")
-    return lon, lat
+    # Default priority follows the legacy pipeline: `fnl_*` first.
+    # If you need to bypass `fnl_*` jitter for an experiment, override with:
+    #   MOBILITY_COORD_PRIORITY="gps,fnl,gpx,air"
+    priority = _coord_priority("MOBILITY_COORD_PRIORITY", "fnl,gps,gpx,air,lnglat")
+    is_stay = _is_stay_point(row)
+
+    sources: Dict[str, Tuple[str, str]] = {
+        "gps": ("gps_lon", "gps_lat"),
+        "fnl": ("fnl_lon", "fnl_lat"),
+        "gpx": ("gpx_lon", "gpx_lat"),
+        "air": ("air_lon", "air_lat"),
+        # Some pipelines keep stay-point centers (lon/lat) for stable indoor checks.
+        "stay_point": ("stay_point_x", "stay_point_y"),
+        # Frontend datasets may use `lng/lat` or `lon/lat`.
+        "lnglat": ("lng", "lat"),
+        "lonlat": ("lon", "lat"),
+    }
+
+    for src in priority:
+        pair = sources.get(src)
+        if not pair:
+            continue
+        lon_key, lat_key = pair
+        if src == "stay_point" and not is_stay:
+            continue
+        lon = (row.get(lon_key) or "").strip()
+        lat = (row.get(lat_key) or "").strip()
+        if lon and lat:
+            return lon, lat
+
+    return None, None
 
 
 @dataclass(frozen=True)

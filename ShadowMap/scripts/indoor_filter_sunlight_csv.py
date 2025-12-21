@@ -34,9 +34,45 @@ from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 
 def pick_lon_lat(row: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
-    lon = row.get("fnl_lon") or row.get("gps_lon") or row.get("gpx_lon") or row.get("air_lon")
-    lat = row.get("fnl_lat") or row.get("gps_lat") or row.get("gpx_lat") or row.get("air_lat")
-    return lon, lat
+    # Indoor filtering can be sensitive to GPS jitter; we support a configurable
+    # coordinate priority (comma-separated sources).
+    #
+    # Default: use stay-point center when staying, otherwise `fnl_*` (legacy), then GPS.
+    # Override with: `MOBILITY_INDOOR_COORD_PRIORITY="stay_point,fnl,gps,gpx,air"`, etc.
+    raw = (os.getenv("MOBILITY_INDOOR_COORD_PRIORITY") or "stay_point,fnl,gps,gpx,air,lnglat").strip()
+    priority = [p.strip().lower() for p in raw.replace(";", ",").split(",") if p.strip()]
+
+    stay_raw = (row.get("stay_status") or "").strip()
+    is_stay = False
+    if stay_raw:
+        try:
+            is_stay = float(stay_raw) >= 1.0
+        except Exception:
+            is_stay = stay_raw.lower() in {"1", "true", "yes", "y"}
+
+    sources: Dict[str, Tuple[str, str]] = {
+        "stay_point": ("stay_point_x", "stay_point_y"),
+        "gps": ("gps_lon", "gps_lat"),
+        "fnl": ("fnl_lon", "fnl_lat"),
+        "gpx": ("gpx_lon", "gpx_lat"),
+        "air": ("air_lon", "air_lat"),
+        "lnglat": ("lng", "lat"),
+        "lonlat": ("lon", "lat"),
+    }
+
+    for src in priority:
+        pair = sources.get(src)
+        if not pair:
+            continue
+        lon_key, lat_key = pair
+        if src == "stay_point" and not is_stay:
+            continue
+        lon = (row.get(lon_key) or "").strip()
+        lat = (row.get(lat_key) or "").strip()
+        if lon and lat:
+            return lon, lat
+
+    return None, None
 
 
 def iter_sunlight_files(root: Path) -> Iterable[Path]:

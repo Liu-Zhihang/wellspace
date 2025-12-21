@@ -11,10 +11,12 @@
 | 字段 | 描述 | 用途/规则 | 来源 |
 | --- | --- | --- | --- |
 | timestamp | Unix epoch seconds（秒，int/float） | 向下取整到分钟分桶 | CSV |
-| fnl_lon / fnl_lat | 经纬度（优先） | 坐标优先级最高 | CSV |
+| fnl_lon / fnl_lat | 经纬度（默认优先） | 默认作为轨迹点坐标（可用 `MOBILITY_COORD_PRIORITY` 调整） | CSV |
 | gps_lon / gps_lat | 经纬度（次优） | `fnl_*` 缺失时使用 | CSV |
 | gpx_lon / gpx_lat | 经纬度（再次） | `fnl/gps` 缺失时使用 | CSV |
 | air_lon / air_lat | 经纬度（兜底） | 仍缺失时使用 | CSV |
+| stay_status | 是否停留（0/1） | 配合 `stay_point_*` 用于更稳定的室内判定/可选坐标策略 | CSV |
+| stay_point_x / stay_point_y | 停留点中心（lon/lat） | 仅 `stay_status>=1` 时有效；默认用于室内判定（`MOBILITY_INDOOR_COORD_PRIORITY`） | CSV |
 | 其他业务列 | 速度、状态等 | 原样透传到输出 | CSV |
 
 ### 分桶与引擎输入（按分钟 bucket）
