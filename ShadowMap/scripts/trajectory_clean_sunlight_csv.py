@@ -223,6 +223,7 @@ class CleanResult:
     kept_seconds: float = 0.0
     dropped: int = 0
     dropped_seconds: float = 0.0
+    stay_point: int = 0
     missing_coords: int = 0
     invalid_timestamp: int = 0
     jump_speed: int = 0
@@ -257,6 +258,7 @@ def _try_import_movingpandas() -> Optional[Tuple[Any, Any, Any, Any, Any]]:
 def _compute_keep_mask(
     file_path: Path,
     *,
+    keep_only_moving: bool,
     max_speed_kmh: float,
     max_gap_s: float,
     min_segment_s: float,
@@ -267,6 +269,8 @@ def _compute_keep_mask(
     ts: list[Optional[float]] = []
     lon: list[Optional[float]] = []
     lat: list[Optional[float]] = []
+    dur_raw: list[float] = []
+    is_stay: list[bool] = []
     reason: list[str] = []
 
     with file_path.open("r", encoding="utf-8", newline="") as fh:
@@ -277,6 +281,8 @@ def _compute_keep_mask(
             ts.append(t)
             lon.append(x)
             lat.append(y)
+            dur_raw.append(_safe_float(row.get("durationSeconds")))
+            is_stay.append(_is_stay_point(row))
             if t is None:
                 reason.append("invalid_timestamp")
             elif x is None or y is None:
@@ -293,6 +299,9 @@ def _compute_keep_mask(
     for i in range(n):
         if reason[i]:
             keep[i] = False
+        elif keep_only_moving and is_stay[i]:
+            keep[i] = False
+            reason[i] = "stay_point"
 
     valid_indices = [i for i in range(n) if keep[i]]
     valid_indices.sort(key=lambda i: float(ts[i] or 0.0))
@@ -360,15 +369,21 @@ def _compute_keep_mask(
     for seg in segments:
         if not seg:
             continue
-        # Segment length in seconds (sum of clamped dt between kept points; +60s for last point).
-        seg_len = 0.0
-        for pos in range(len(seg) - 1):
-            i = seg[pos]
-            j = seg[pos + 1]
-            dt = float(ts[j] or 0.0) - float(ts[i] or 0.0)
-            if dt > 0:
-                seg_len += clamp(dt, 1.0, 300.0)
-        seg_len += 60.0
+        # Segment length in seconds.
+        # keep_only_moving: use original per-row durations (avoid counting stop-time).
+        if keep_only_moving:
+            seg_len = 0.0
+            for i in seg:
+                seg_len += clamp(float(dur_raw[i] or 0.0), 0.0, 300.0)
+        else:
+            seg_len = 0.0
+            for pos in range(len(seg) - 1):
+                i = seg[pos]
+                j = seg[pos + 1]
+                dt = float(ts[j] or 0.0) - float(ts[i] or 0.0)
+                if dt > 0:
+                    seg_len += clamp(dt, 1.0, 300.0)
+            seg_len += 60.0
 
         if seg_len < min_segment_s:
             for i in seg:
@@ -379,12 +394,15 @@ def _compute_keep_mask(
         for pos in range(len(seg)):
             i = seg[pos]
             seg_id[i] = seg_counter
-            if pos + 1 < len(seg):
-                j = seg[pos + 1]
-                dt = float(ts[j] or 0.0) - float(ts[i] or 0.0)
-                new_duration[i] = clamp(dt, 1.0, 300.0) if dt > 0 else 60.0
+            if keep_only_moving:
+                new_duration[i] = clamp(float(dur_raw[i] or 0.0), 0.0, 300.0)
             else:
-                new_duration[i] = 60.0
+                if pos + 1 < len(seg):
+                    j = seg[pos + 1]
+                    dt = float(ts[j] or 0.0) - float(ts[i] or 0.0)
+                    new_duration[i] = clamp(dt, 1.0, 300.0) if dt > 0 else 60.0
+                else:
+                    new_duration[i] = 60.0
         seg_counter += 1
 
     return keep, reason, seg_id, new_duration, speed_to_prev
@@ -393,6 +411,7 @@ def _compute_keep_mask(
 def _compute_keep_mask_movingpandas(
     file_path: Path,
     *,
+    keep_only_moving: bool,
     max_speed_kmh: float,
     max_gap_s: float,
     min_segment_s: float,
@@ -411,6 +430,7 @@ def _compute_keep_mask_movingpandas(
     if imported is None:
         return _compute_keep_mask(
             file_path,
+            keep_only_moving=keep_only_moving,
             max_speed_kmh=max_speed_kmh,
             max_gap_s=max_gap_s,
             min_segment_s=min_segment_s,
@@ -424,6 +444,8 @@ def _compute_keep_mask_movingpandas(
     ts: list[Optional[float]] = []
     lon: list[Optional[float]] = []
     lat: list[Optional[float]] = []
+    dur_raw: list[float] = []
+    is_stay: list[bool] = []
     reason: list[str] = []
 
     with file_path.open("r", encoding="utf-8", newline="") as fh:
@@ -434,6 +456,8 @@ def _compute_keep_mask_movingpandas(
             ts.append(t)
             lon.append(x)
             lat.append(y)
+            dur_raw.append(_safe_float(row.get("durationSeconds")))
+            is_stay.append(_is_stay_point(row))
             if t is None:
                 reason.append("invalid_timestamp")
             elif x is None or y is None:
@@ -450,6 +474,9 @@ def _compute_keep_mask_movingpandas(
     for i in range(n):
         if reason[i]:
             keep[i] = False
+        elif keep_only_moving and is_stay[i]:
+            keep[i] = False
+            reason[i] = "stay_point"
 
     valid_indices = [i for i in range(n) if keep[i]]
     valid_indices.sort(key=lambda i: float(ts[i] or 0.0))
@@ -507,6 +534,7 @@ def _compute_keep_mask_movingpandas(
         # MovingPandas 执行失败则回退到内置后端（避免跑到一半全崩）
         return _compute_keep_mask(
             file_path,
+            keep_only_moving=keep_only_moving,
             max_speed_kmh=max_speed_kmh,
             max_gap_s=max_gap_s,
             min_segment_s=min_segment_s,
@@ -600,14 +628,19 @@ def _compute_keep_mask_movingpandas(
     for seg in segments:
         if not seg:
             continue
-        seg_len = 0.0
-        for pos in range(len(seg) - 1):
-            i = seg[pos]
-            j = seg[pos + 1]
-            dt = float(ts[j] or 0.0) - float(ts[i] or 0.0)
-            if dt > 0:
-                seg_len += clamp(dt, 1.0, 300.0)
-        seg_len += 60.0
+        if keep_only_moving:
+            seg_len = 0.0
+            for i in seg:
+                seg_len += clamp(float(dur_raw[i] or 0.0), 0.0, 300.0)
+        else:
+            seg_len = 0.0
+            for pos in range(len(seg) - 1):
+                i = seg[pos]
+                j = seg[pos + 1]
+                dt = float(ts[j] or 0.0) - float(ts[i] or 0.0)
+                if dt > 0:
+                    seg_len += clamp(dt, 1.0, 300.0)
+            seg_len += 60.0
 
         if seg_len < min_segment_s:
             for i in seg:
@@ -618,12 +651,15 @@ def _compute_keep_mask_movingpandas(
         for pos in range(len(seg)):
             i = seg[pos]
             seg_id[i] = seg_counter
-            if pos + 1 < len(seg):
-                j = seg[pos + 1]
-                dt = float(ts[j] or 0.0) - float(ts[i] or 0.0)
-                new_duration[i] = clamp(dt, 1.0, 300.0) if dt > 0 else 60.0
+            if keep_only_moving:
+                new_duration[i] = clamp(float(dur_raw[i] or 0.0), 0.0, 300.0)
             else:
-                new_duration[i] = 60.0
+                if pos + 1 < len(seg):
+                    j = seg[pos + 1]
+                    dt = float(ts[j] or 0.0) - float(ts[i] or 0.0)
+                    new_duration[i] = clamp(dt, 1.0, 300.0) if dt > 0 else 60.0
+                else:
+                    new_duration[i] = 60.0
         seg_counter += 1
 
     return keep, reason, seg_id, new_duration, speed_to_prev
@@ -682,6 +718,7 @@ def process_file(
     mode: str,
     no_canopy_root: Optional[Path],
     backend: str,
+    keep_only_moving: bool,
     max_speed_kmh: float,
     max_gap_s: float,
     min_segment_s: float,
@@ -691,6 +728,7 @@ def process_file(
     if backend == "movingpandas":
         keep, reason, seg_id, new_duration, speed_to_prev = _compute_keep_mask_movingpandas(
             src,
+            keep_only_moving=keep_only_moving,
             max_speed_kmh=max_speed_kmh,
             max_gap_s=max_gap_s,
             min_segment_s=min_segment_s,
@@ -700,6 +738,7 @@ def process_file(
     else:
         keep, reason, seg_id, new_duration, speed_to_prev = _compute_keep_mask(
             src,
+            keep_only_moving=keep_only_moving,
             max_speed_kmh=max_speed_kmh,
             max_gap_s=max_gap_s,
             min_segment_s=min_segment_s,
@@ -815,7 +854,9 @@ def process_file(
                 stats.kept_seconds += duration_s
             else:
                 stats.dropped_seconds += orig_duration
-                if reason[idx] == "missing_coords":
+                if reason[idx] == "stay_point":
+                    stats.stay_point += 1
+                elif reason[idx] == "missing_coords":
                     stats.missing_coords += 1
                 elif reason[idx] == "invalid_timestamp":
                     stats.invalid_timestamp += 1
@@ -842,6 +883,7 @@ def scan_file(
     src: Path,
     *,
     backend: str,
+    keep_only_moving: bool,
     max_speed_kmh: float,
     max_gap_s: float,
     min_segment_s: float,
@@ -851,6 +893,7 @@ def scan_file(
     if backend == "movingpandas":
         keep, reason, _seg_id, new_duration, _speed_to_prev = _compute_keep_mask_movingpandas(
             src,
+            keep_only_moving=keep_only_moving,
             max_speed_kmh=max_speed_kmh,
             max_gap_s=max_gap_s,
             min_segment_s=min_segment_s,
@@ -860,6 +903,7 @@ def scan_file(
     else:
         keep, reason, _seg_id, new_duration, _speed_to_prev = _compute_keep_mask(
             src,
+            keep_only_moving=keep_only_moving,
             max_speed_kmh=max_speed_kmh,
             max_gap_s=max_gap_s,
             min_segment_s=min_segment_s,
@@ -874,7 +918,9 @@ def scan_file(
             st.kept_seconds += float(new_duration[i])
             continue
         st.dropped += 1
-        if reason[i] == "missing_coords":
+        if reason[i] == "stay_point":
+            st.stay_point += 1
+        elif reason[i] == "missing_coords":
             st.missing_coords += 1
         elif reason[i] == "invalid_timestamp":
             st.invalid_timestamp += 1
@@ -906,6 +952,7 @@ def _run_one(
     mode: str,
     no_canopy_root: Optional[str],
     backend: str,
+    keep_only_moving: bool,
     max_speed_kmh: float,
     max_gap_s: float,
     min_segment_s: float,
@@ -921,6 +968,7 @@ def _run_one(
         mode=mode,
         no_canopy_root=nc_root,
         backend=backend,
+        keep_only_moving=keep_only_moving,
         max_speed_kmh=max_speed_kmh,
         max_gap_s=max_gap_s,
         min_segment_s=min_segment_s,
@@ -966,6 +1014,11 @@ def main(argv: Sequence[str]) -> int:
     p.add_argument("--min-segment-min", type=float, default=_env_float("MOBILITY_CLEAN_MIN_SEGMENT_MIN", 5.0))
     p.add_argument("--spike-return-m", type=float, default=_env_float("MOBILITY_CLEAN_SPIKE_RETURN_M", 50.0))
     p.add_argument("--spike-distance-m", type=float, default=_env_float("MOBILITY_CLEAN_SPIKE_DISTANCE_M", 200.0))
+    p.add_argument(
+        "--keep-only-moving",
+        action="store_true",
+        help="Drop stay points (stay_status>=1) and keep only continuous moving points. Durations are taken from the original file.",
+    )
 
     args = p.parse_args(list(argv))
 
@@ -1018,13 +1071,14 @@ def main(argv: Sequence[str]) -> int:
     min_segment_s = float(args.min_segment_min) * 60.0
     spike_return_m = float(args.spike_return_m)
     spike_distance_m = float(args.spike_distance_m)
+    keep_only_moving = bool(args.keep_only_moving) or _parse_bool(os.getenv("MOBILITY_CLEAN_KEEP_ONLY_MOVING"), default=False)
 
     print(f"[Scan] files={len(files)} root={root}")
     print(
         f"[Config] backend={backend} mode={args.mode} write={bool(args.write)} out_root={out_root} in_place={bool(args.in_place)} "
         f"workers={workers} max_speed_kmh={max_speed_kmh:g} max_gap_s={max_gap_s:g} min_segment_min={float(args.min_segment_min):g} "
         f"spike_return_m={spike_return_m:g} spike_distance_m={spike_distance_m:g} "
-        f"no_canopy_root={no_canopy_root or '(none)'}"
+        f"keep_only_moving={bool(keep_only_moving)} no_canopy_root={no_canopy_root or '(none)'}"
     )
 
     resume = bool(args.write) and (not bool(args.no_resume))
@@ -1053,7 +1107,14 @@ def main(argv: Sequence[str]) -> int:
     total_rows = total_kept = total_dropped = 0
     total_kept_s = 0.0
     total_dropped_s = 0.0
-    reasons: Dict[str, int] = {"missing_coords": 0, "invalid_timestamp": 0, "jump_speed": 0, "spike_return": 0, "short_segment": 0}
+    reasons: Dict[str, int] = {
+        "stay_point": 0,
+        "missing_coords": 0,
+        "invalid_timestamp": 0,
+        "jump_speed": 0,
+        "spike_return": 0,
+        "short_segment": 0,
+    }
     warnings = 0
 
     def accumulate(st: CleanResult) -> None:
@@ -1063,6 +1124,7 @@ def main(argv: Sequence[str]) -> int:
         total_dropped += st.dropped
         total_kept_s += st.kept_seconds
         total_dropped_s += st.dropped_seconds
+        reasons["stay_point"] += st.stay_point
         reasons["missing_coords"] += st.missing_coords
         reasons["invalid_timestamp"] += st.invalid_timestamp
         reasons["jump_speed"] += st.jump_speed
@@ -1080,6 +1142,7 @@ def main(argv: Sequence[str]) -> int:
                     mode=str(args.mode),
                     no_canopy_root=no_canopy_root or None,
                     backend=backend,
+                    keep_only_moving=keep_only_moving,
                     max_speed_kmh=max_speed_kmh,
                     max_gap_s=max_gap_s,
                     min_segment_s=min_segment_s,
@@ -1090,6 +1153,7 @@ def main(argv: Sequence[str]) -> int:
                 st = scan_file(
                     Path(src_path),
                     backend=backend,
+                    keep_only_moving=keep_only_moving,
                     max_speed_kmh=max_speed_kmh,
                     max_gap_s=max_gap_s,
                     min_segment_s=min_segment_s,
@@ -1115,6 +1179,7 @@ def main(argv: Sequence[str]) -> int:
                             mode=str(args.mode),
                             no_canopy_root=no_canopy_root or None,
                             backend=backend,
+                            keep_only_moving=keep_only_moving,
                             max_speed_kmh=max_speed_kmh,
                             max_gap_s=max_gap_s,
                             min_segment_s=min_segment_s,
@@ -1128,6 +1193,7 @@ def main(argv: Sequence[str]) -> int:
                             scan_file,
                             Path(src_path),
                             backend=backend,
+                            keep_only_moving=keep_only_moving,
                             max_speed_kmh=max_speed_kmh,
                             max_gap_s=max_gap_s,
                             min_segment_s=min_segment_s,
