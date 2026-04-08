@@ -8,6 +8,7 @@ Usage:
 
 Options:
   --engine node|python   Engine mode, defaults to node
+  --preset NAME          national-sparse|urban-dense convenience preset
   --input-root PATH      Input root containing CSVs
   --output-root PATH     Output root for *-sunlight.csv
   --targets-file PATH    Manifest of CSV paths relative to input-root
@@ -43,7 +44,16 @@ Options:
 EOF
 }
 
-engine="node"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+# shellcheck disable=SC1091
+source "${repo_root}/scripts/lib/load_shadowmap_env.sh"
+shadowmap_load_env "${repo_root}"
+
+engine="${ENGINE:-node}"
+preset="${MOBILITY_RUNNER_PRESET:-}"
 input_root=""
 output_root=""
 targets_file=""
@@ -77,9 +87,54 @@ shadow_cache_cell_size_m="${MOBILITY_SHADOW_CACHE_CELL_SIZE_M:-0}"
 shadow_cache_max_entries="${MOBILITY_SHADOW_CACHE_MAX_ENTRIES:-128}"
 era5_template="${ERA5_FILE_TEMPLATE:-}"
 
+apply_preset() {
+  local value="${1:-}"
+  case "${value}" in
+    national-sparse)
+      grouping_mode="run-cell-minute"
+      cell_size_m="12000"
+      cell_context_m="800"
+      shadow_cache_cell_size_m="0"
+      shadow_cache_max_entries="0"
+      ;;
+    urban-dense)
+      grouping_mode="run-cell-minute"
+      cell_size_m="500"
+      cell_context_m="800"
+      shadow_cache_cell_size_m="0"
+      shadow_cache_max_entries="0"
+      ;;
+    "")
+      ;;
+    *)
+      echo "[Fatal] Unknown preset: ${value} (expected national-sparse|urban-dense)" >&2
+      exit 2
+      ;;
+  esac
+}
+
+for ((i=1; i<=$#; i++)); do
+  arg="${!i}"
+  case "${arg}" in
+    --preset)
+      next_index=$((i + 1))
+      if [ "${next_index}" -le "$#" ]; then
+        preset="${!next_index}"
+      fi
+      ;;
+    --preset=*)
+      preset="${arg#*=}"
+      ;;
+  esac
+done
+
+apply_preset "${preset}"
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --engine) engine="${2:-}"; shift 2 ;;
+    --preset) preset="${2:-}"; shift 2 ;;
+    --preset=*) preset="${1#*=}"; shift ;;
     --input-root) input_root="${2:-}"; shift 2 ;;
     --output-root) output_root="${2:-}"; shift 2 ;;
     --targets-file) targets_file="${2:-}"; shift 2 ;;
@@ -127,13 +182,6 @@ if ! [[ "${shards}" =~ ^[1-9][0-9]*$ ]] || ! [[ "${concurrency}" =~ ^[1-9][0-9]*
   exit 1
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "${script_dir}/../.." && pwd)"
-timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-
-# shellcheck disable=SC1091
-source "${repo_root}/scripts/lib/load_shadowmap_env.sh"
-shadowmap_load_env "${repo_root}"
 if [ "${engine}" = "node" ]; then
   shadowmap_activate_node "${repo_root}"
   shadowmap_require_node 18
@@ -177,6 +225,7 @@ cat > "${command_path}" <<EOF
 cd "${repo_root}"
 ./scripts/ops/run_mobility_shadow_sharded.sh \\
   --engine "${engine}" \\
+  --preset "${preset}" \\
   --input-root "${input_root}" \\
   --output-root "${output_root}" \\
   --targets-file "${targets_file}" \\
@@ -229,6 +278,7 @@ write_summary() {
   "started_at_utc": "${timestamp}",
   "ended_at_utc": "${ended_at}",
   "engine": "${engine}",
+  "preset": "${preset}",
   "input_root": "${input_root}",
   "output_root": "${output_root}",
   "targets_file": "${targets_copy}",
