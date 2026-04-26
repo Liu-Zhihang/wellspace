@@ -20,7 +20,7 @@ pnpm run dev
 ```
 
 1. Confirm the backend (`npm run dev` in `shadow-map-backend`) is running.
-2. Open http://localhost:5173 and select **Clean 3D** (default choice in the header toggle).
+2. Open http://localhost:5173 (Clean 3D loads automatically).
 3. Wait for the logs: `🗺️ Initialising Mapbox GL viewport…`, `✅ ShadeMap initialised`, `☁️ Cloud cover …`.
 
 ## UI Walkthrough

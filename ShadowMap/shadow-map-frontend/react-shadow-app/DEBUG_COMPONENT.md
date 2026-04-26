@@ -26,7 +26,7 @@ If you only see errors:
 
 DevTools → Elements:
 
-- The root `<div class="shadow-map-header">` contains the mode toggle.
+- The root `<div class="shadow-map-header">` contains the Clean 3D status chip.
 - Clean toolbar buttons live under `.pointer-events-auto` within `<main>`.
 - If elements exist but are hidden, inspect `z-index` and `pointer-events`.
 
@@ -42,7 +42,7 @@ Filter by `weather` and `wfs`:
 
 - Click “Reload buildings” in the Left toolbar to refresh GeoJSON.
 - Toggle “Auto cloud attenuation” off/on inside the Shadow panel to reset opacity.
-- Switch to “Mapbox” mode, then back to “Clean 3D” to force a full remount.
+- Refresh the page (Ctrl/Cmd + R) to remount the viewport if the canvas is blank.
 
 ## 6. When Filing an Issue
 

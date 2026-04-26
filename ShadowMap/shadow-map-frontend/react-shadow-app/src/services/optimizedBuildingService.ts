@@ -3,6 +3,7 @@
  * 解决OSM API响应不稳定和获取慢的问题
  */
 
+import { API_BASE_URL } from '../config/runtime';
 import { buildingCache } from '../utils/multiLevelCache';
 
 interface BuildingTile {
@@ -159,7 +160,7 @@ export class OptimizedBuildingService {
 
     try {
       const response = await fetch(
-        `http://localhost:3500/api/buildings/${Math.floor(tile.z)}/${tile.x}/${tile.y}.json`,
+        `${API_BASE_URL}/buildings/${Math.floor(tile.z)}/${tile.x}/${tile.y}.json`,
         {
           signal: controller.signal,
           headers: {

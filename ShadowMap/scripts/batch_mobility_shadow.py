@@ -24,7 +24,7 @@ import warnings
 from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -92,8 +92,20 @@ def configure_runtime() -> None:
     )
     warnings.filterwarnings(
         "ignore",
-        message=r".*syntax is deprecated\\..*authority:code.*",
+        message=r".*syntax is deprecated.*",
         category=FutureWarning,
+        module=r"pyproj(\..*)?",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*\+init=<authority>:<code>.*preferred initialization method.*",
+        category=FutureWarning,
+        module=r"pyproj(\..*)?",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*CRS not set for some of the concatenation inputs.*",
+        category=UserWarning,
     )
 
 
@@ -527,6 +539,15 @@ class WorkerConfig:
 
 
 @dataclass(frozen=True)
+class BucketWeather:
+    cloud_cover_out: Any
+    sunlight_factor_out: Any
+    solar_irradiance_out: Any
+    is_night: bool
+    warnings: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class BucketJob:
     bucket_key: str
     bbox: Dict[str, float]
@@ -535,10 +556,21 @@ class BucketJob:
     file_label: str
     shadow_cache_key: Optional[str] = None
     shadow_cache_bbox: Optional[Dict[str, float]] = None
+    obstacle_cache_key: Optional[str] = None
+    obstacle_cache_bbox: Optional[Dict[str, float]] = None
     cell_x: Optional[int] = None
     cell_y: Optional[int] = None
     shadow_cell_x: Optional[int] = None
     shadow_cell_y: Optional[int] = None
+    weather: Optional[BucketWeather] = None
+
+
+@dataclass(frozen=True)
+class ObstacleBatchJob:
+    obstacle_key: str
+    obstacle_bbox: Dict[str, float]
+    jobs: List[BucketJob]
+    file_label: str
 
 
 @dataclass(frozen=True)
@@ -598,6 +630,19 @@ def _cleanup_caches() -> None:
 
 
 atexit.register(_cleanup_caches)
+
+
+def _cleanup_weather_caches() -> None:
+    for ds, _engine in list(_ERA5_DATASET_CACHE.values()):
+        try:
+            close = getattr(ds, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            pass
+    _ERA5_DATASET_CACHE.clear()
+    _ERA5_SSRD_MODE_CACHE.clear()
+    _WEATHER_CACHE.clear()
 
 
 def _open_era5_dataset(file_path: str):
@@ -813,7 +858,7 @@ def _connect_postgis(worker: WorkerConfig):
     if worker.postgis_password:
         connect_kwargs["password"] = worker.postgis_password
 
-    last_exc: Optional[Exception] = None
+    errors: List[str] = []
     if worker.postgis_dsn:
         try:
             import psycopg2  # type: ignore
@@ -822,7 +867,7 @@ def _connect_postgis(worker: WorkerConfig):
             _POSTGIS_CONNECTION_CACHE[key] = conn
             return conn
         except Exception as exc:
-            last_exc = exc
+            errors.append(f"psycopg2_dsn={exc}")
         try:
             import psycopg  # type: ignore
 
@@ -830,7 +875,7 @@ def _connect_postgis(worker: WorkerConfig):
             _POSTGIS_CONNECTION_CACHE[key] = conn
             return conn
         except Exception as exc:
-            last_exc = exc
+            errors.append(f"psycopg_dsn={exc}")
     else:
         try:
             import psycopg2  # type: ignore
@@ -839,7 +884,7 @@ def _connect_postgis(worker: WorkerConfig):
             _POSTGIS_CONNECTION_CACHE[key] = conn
             return conn
         except Exception as exc:
-            last_exc = exc
+            errors.append(f"psycopg2_kwargs={exc}")
         try:
             import psycopg  # type: ignore
 
@@ -847,11 +892,11 @@ def _connect_postgis(worker: WorkerConfig):
             _POSTGIS_CONNECTION_CACHE[key] = conn
             return conn
         except Exception as exc:
-            last_exc = exc
+            errors.append(f"psycopg_kwargs={exc}")
 
     raise RuntimeError(
         "Unable to connect to PostGIS. Install psycopg2-binary or psycopg, and verify PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD."
-        f" last_error={last_exc}"
+        f" errors={'; '.join(errors) if errors else 'unknown'}"
     )
 
 
@@ -903,6 +948,7 @@ def _select_postgis_columns(worker: WorkerConfig) -> List[str]:
 
 def _load_buildings_postgis(bounds: Dict[str, float], worker: WorkerConfig):
     import geopandas as gpd
+    from shapely import wkb
 
     if not worker.postgis_table:
         raise RuntimeError("Missing PostGIS table: set --postgis-table or $MOBILITY_POSTGIS_TABLE")
@@ -947,7 +993,43 @@ def _load_buildings_postgis(bounds: Dict[str, float], worker: WorkerConfig):
         params.append(int(worker.max_features))
 
     conn = _connect_postgis(worker)
-    gdf = gpd.read_postgis(sql_query, conn, geom_col="geom", params=params)
+    with conn.cursor() as cur:
+        cur.execute(sql_query, params)
+        rows = cur.fetchall()
+        column_names = [str(desc[0]) for desc in cur.description]
+
+    records: List[Dict[str, Any]] = []
+    geometries = []
+    for row in rows:
+        item = dict(zip(column_names, row))
+        raw_geom = item.pop("geom", None)
+        if raw_geom is None:
+            continue
+
+        geom_value = raw_geom
+        if isinstance(raw_geom, memoryview):
+            geom_value = raw_geom.tobytes()
+        elif isinstance(raw_geom, bytearray):
+            geom_value = bytes(raw_geom)
+
+        if isinstance(geom_value, bytes):
+            if geom_value.startswith(b"\\x"):
+                geometry = wkb.loads(geom_value[2:].decode("ascii"), hex=True)
+            else:
+                try:
+                    geometry = wkb.loads(geom_value)
+                except Exception:
+                    geometry = wkb.loads(geom_value.decode("ascii"), hex=True)
+        elif isinstance(geom_value, str):
+            text = geom_value[2:] if geom_value.startswith("\\x") else geom_value
+            geometry = wkb.loads(text, hex=True)
+        else:
+            geometry = wkb.loads(bytes(geom_value))
+
+        records.append(item)
+        geometries.append(geometry)
+
+    gdf = gpd.GeoDataFrame(records, geometry=geometries, crs="EPSG:4326")
     if gdf.crs is None:
         try:
             gdf.set_crs(epsg=4326, inplace=True)
@@ -1078,6 +1160,28 @@ def _load_buildings_preloaded_points(points: Sequence[BucketPoint], worker: Work
     return subset
 
 
+def _concat_geodataframes(parts: Sequence[Any], fallback_crs: Optional[Any] = None):
+    import geopandas as gpd
+    import pandas as pd
+
+    frames = [part for part in parts if part is not None and not part.empty]
+    if not frames:
+        return gpd.GeoDataFrame(geometry=[], crs=fallback_crs or "EPSG:4326")
+
+    geometry_name = frames[0].geometry.name
+    result = gpd.GeoDataFrame(
+        pd.concat(frames, ignore_index=True),
+        geometry=geometry_name,
+        crs=getattr(frames[0], "crs", None) or fallback_crs,
+    )
+    if getattr(result, "crs", None) is None and fallback_crs is not None:
+        try:
+            result = result.set_crs(fallback_crs, allow_override=True)
+        except Exception:
+            pass
+    return result
+
+
 def _get_buildings(bounds: Dict[str, float], worker: WorkerConfig):
     if worker.buildings_source == "postgis":
         return _load_buildings_postgis(bounds, worker)
@@ -1104,10 +1208,252 @@ def _put_shadow_cache_entry(cache_key: Optional[str], entry: Dict[str, Any], max
         _SHADOW_RESULT_CACHE.popitem(last=False)
 
 
-def _process_bucket(job: BucketJob) -> BucketResult:
-    warnings: List[str] = []
-    bucket_end = job.bucket_key
+def _use_point_buffer(job: BucketJob, query_bounds: Mapping[str, float]) -> bool:
+    return bool(
+        job.worker.buildings_source == "file"
+        and job.worker.buildings_mode == "preload"
+        and float(job.worker.buildings_point_buffer_m) > 0.0
+        and (
+            float(job.worker.buildings_point_buffer_threshold_m) <= 0.0
+            or _bounds_diagonal_m(query_bounds) >= float(job.worker.buildings_point_buffer_threshold_m)
+        )
+    )
 
+
+def _load_obstacles_for_bounds(
+    job: BucketJob,
+    query_bounds: Dict[str, float],
+    *,
+    use_point_buffer: bool,
+):
+    from engine_core import canopy_to_gdf, preprocess_buildings
+
+    buildings = (
+        _load_buildings_preloaded_points(job.points, job.worker)
+        if use_point_buffer
+        else _get_buildings(query_bounds, job.worker)
+    )
+
+    if job.worker.include_canopy and job.worker.canopy_raster_path:
+        canopy_path = job.worker.canopy_raster_path
+        if os.path.exists(canopy_path):
+            canopy_ds = _open_canopy_dataset(canopy_path)
+            canopy_gdf = None
+            if use_point_buffer:
+                buffer_m = float(job.worker.buildings_point_buffer_m)
+                if buffer_m > 0:
+                    parts: List[Any] = []
+                    seen: set[Tuple[float, float]] = set()
+                    deg_lat = buffer_m / 111_000.0
+                    for bp in job.points:
+                        key = (round(float(bp.lat), 3), round(float(bp.lon), 3))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        cos_lat = max(math.cos(math.radians(float(bp.lat))), 1e-6)
+                        deg_lon = buffer_m / (111_000.0 * cos_lat)
+                        bbox = {
+                            "west": float(bp.lon) - deg_lon,
+                            "east": float(bp.lon) + deg_lon,
+                            "south": float(bp.lat) - deg_lat,
+                            "north": float(bp.lat) + deg_lat,
+                        }
+                        part = canopy_to_gdf(canopy_ds, bbox)
+                        if part is not None and not part.empty:
+                            parts.append(part)
+                    if parts:
+                        canopy_gdf = _concat_geodataframes(parts, getattr(buildings, "crs", None))
+            else:
+                canopy_gdf = canopy_to_gdf(canopy_ds, query_bounds)
+
+            if canopy_gdf is not None and not canopy_gdf.empty:
+                try:
+                    if getattr(canopy_gdf, "crs", None) is None and getattr(buildings, "crs", None) is not None:
+                        canopy_gdf = canopy_gdf.set_crs(buildings.crs, allow_override=True)
+                except Exception:
+                    pass
+                buildings = _concat_geodataframes(
+                    [buildings, canopy_gdf],
+                    getattr(buildings, "crs", None) or getattr(canopy_gdf, "crs", None),
+                )
+
+    if buildings.empty:
+        return {"mode": "empty", "buildings": None}
+
+    return {
+        "mode": "ready",
+        "buildings": preprocess_buildings(buildings),
+    }
+
+
+def _build_shadow_cache_entry_for_job(
+    job: BucketJob,
+    buildings_preprocessed,
+) -> Dict[str, Any]:
+    from engine_core import generate_shadows
+    from shapely.strtree import STRtree
+
+    try:
+        shadows = generate_shadows(
+            buildings_preprocessed.copy(deep=False),
+            job.bucket_key,
+            job.worker.timezone,
+            buildings_preprocessed=True,
+        )
+    except Exception as exc:
+        err_msg = str(exc)
+        if (
+            "Given time before sunrise or after sunset" in err_msg
+            or "outside daylight" in err_msg.lower()
+        ):
+            return {"mode": "night", "geoms": [], "tree": None}
+        raise
+
+    geoms = [g for g in shadows.geometry if g is not None and not g.is_empty] if not shadows.empty else []
+    return {
+        "mode": "shadow",
+        "geoms": geoms,
+        "tree": STRtree(geoms) if geoms else None,
+    }
+
+
+def _row_updates_from_shadow_cache(
+    job: BucketJob,
+    cache_entry: Optional[Dict[str, Any]],
+    *,
+    cloud_cover_out: Any,
+    sunlight_factor_out: Any,
+    solar_irradiance_out: Any,
+) -> BucketResult:
+    if cache_entry is not None and cache_entry.get("mode") == "empty":
+        updates: List[RowUpdate] = []
+        for point in job.points:
+            sunlit = 1
+            shadow_pct = 0
+            sunlit_effective = (
+                float(sunlit)
+                if sunlight_factor_out in ("", None)
+                else float(sunlit) * float(sunlight_factor_out)
+            )
+            shadow_effective = 100.0 - sunlit_effective * 100.0
+            irradiance_effective = (
+                float(solar_irradiance_out)
+                if solar_irradiance_out not in ("", None)
+                else ""
+            )
+            updates.append(
+                RowUpdate(
+                    index=point.index,
+                    file_index=point.file_index,
+                    values={
+                        "sunlit": sunlit,
+                        "shadowPercent": shadow_pct,
+                        "bucketStart": job.bucket_key,
+                        "bucketEnd": job.bucket_key,
+                        "source": "engine",
+                        "errorDetail": "",
+                        "cloudCover": cloud_cover_out,
+                        "sunlightFactor": sunlight_factor_out,
+                        "sunlitEffective": sunlit_effective,
+                        "shadowPercentEffective": shadow_effective,
+                        "solarIrradianceWm2": solar_irradiance_out,
+                        "irradianceEffective": irradiance_effective,
+                    },
+                )
+            )
+        return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=[])
+
+    if cache_entry is not None and cache_entry.get("mode") == "night":
+        updates = []
+        for point in job.points:
+            updates.append(
+                RowUpdate(
+                    index=point.index,
+                    file_index=point.file_index,
+                    values={
+                        "sunlit": 0,
+                        "shadowPercent": 0,
+                        "bucketStart": job.bucket_key,
+                        "bucketEnd": job.bucket_key,
+                        "source": "night",
+                        "errorDetail": "",
+                        "cloudCover": cloud_cover_out,
+                        "sunlightFactor": sunlight_factor_out,
+                        "sunlitEffective": "",
+                        "shadowPercentEffective": "",
+                        "solarIrradianceWm2": solar_irradiance_out,
+                        "irradianceEffective": "",
+                    },
+                )
+            )
+        return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=[])
+
+    updates = []
+    geoms = list(cache_entry.get("geoms") or []) if cache_entry is not None else []
+    tree = cache_entry.get("tree") if cache_entry is not None else None
+
+    if tree is None and geoms:
+        from shapely.strtree import STRtree
+
+        tree = STRtree(geoms)
+
+    from shapely.geometry import Point
+
+    for point in job.points:
+        pt = Point(point.lon, point.lat)
+        shadow_pct = 0.0
+        if tree is not None:
+            try:
+                for idx in tree.query(pt):
+                    geom = geoms[int(idx)]
+                    if geom.covers(pt):
+                        shadow_pct = 100.0
+                        break
+            except Exception:
+                for geom in geoms:
+                    if geom.covers(pt):
+                        shadow_pct = 100.0
+                        break
+        sunlit = 1 if shadow_pct <= 0 else 0
+
+        sunlit_effective = (
+            float(sunlit)
+            if sunlight_factor_out in ("", None)
+            else float(sunlit) * float(sunlight_factor_out)
+        )
+        shadow_effective = 100.0 - sunlit_effective * 100.0
+        irradiance_effective = (
+            ""
+            if solar_irradiance_out in ("", None)
+            else (0.0 if sunlit == 0 else float(solar_irradiance_out))
+        )
+
+        updates.append(
+            RowUpdate(
+                index=point.index,
+                file_index=point.file_index,
+                values={
+                    "sunlit": sunlit,
+                    "shadowPercent": shadow_pct,
+                    "bucketStart": job.bucket_key,
+                    "bucketEnd": job.bucket_key,
+                    "source": "engine",
+                    "errorDetail": "",
+                    "cloudCover": cloud_cover_out,
+                    "sunlightFactor": sunlight_factor_out,
+                    "sunlitEffective": sunlit_effective,
+                    "shadowPercentEffective": shadow_effective,
+                    "solarIrradianceWm2": solar_irradiance_out,
+                    "irradianceEffective": irradiance_effective,
+                },
+            )
+        )
+
+    return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=[])
+
+
+def _evaluate_bucket_weather(job: BucketJob) -> BucketWeather:
+    warnings: List[str] = []
     cloud_cover_value: Optional[float] = None
     solar_irradiance_value: Optional[float] = None
     sunlight_factor_value: Optional[float] = None
@@ -1141,233 +1487,87 @@ def _process_bucket(job: BucketJob) -> BucketResult:
     cloud_cover_out: Any = cloud_cover_value if cloud_cover_value is not None else ""
     sunlight_factor_out: Any = sunlight_factor_value if sunlight_factor_value is not None else ""
     solar_irradiance_out: Any = solar_irradiance_value if solar_irradiance_value is not None else ""
+    is_night = bool(
+        solar_irradiance_value is not None and solar_irradiance_value <= night_irradiance_threshold
+    )
+    return BucketWeather(
+        cloud_cover_out=cloud_cover_out,
+        sunlight_factor_out=sunlight_factor_out,
+        solar_irradiance_out=solar_irradiance_out,
+        is_night=is_night,
+        warnings=tuple(warnings),
+    )
 
-    if solar_irradiance_value is not None and solar_irradiance_value <= night_irradiance_threshold:
-        updates: List[RowUpdate] = []
-        for point in job.points:
-            updates.append(
-                RowUpdate(
-                    index=point.index,
-                    file_index=point.file_index,
-                    values={
-                        "sunlit": 0,
-                        "shadowPercent": 0,
-                        "bucketStart": job.bucket_key,
-                        "bucketEnd": job.bucket_key,
-                        "source": "night",
-                        "errorDetail": "",
-                        "cloudCover": cloud_cover_out,
-                        "sunlightFactor": sunlight_factor_out,
-                        "sunlitEffective": "",
-                        "shadowPercentEffective": "",
-                        "solarIrradianceWm2": solar_irradiance_out,
-                        "irradianceEffective": "",
-                    },
-                )
+
+def _get_bucket_weather(job: BucketJob) -> BucketWeather:
+    return job.weather if job.weather is not None else _evaluate_bucket_weather(job)
+
+
+def _night_bucket_result(job: BucketJob, weather: BucketWeather) -> BucketResult:
+    updates: List[RowUpdate] = []
+    for point in job.points:
+        updates.append(
+            RowUpdate(
+                index=point.index,
+                file_index=point.file_index,
+                values={
+                    "sunlit": 0,
+                    "shadowPercent": 0,
+                    "bucketStart": job.bucket_key,
+                    "bucketEnd": job.bucket_key,
+                    "source": "night",
+                    "errorDetail": "",
+                    "cloudCover": weather.cloud_cover_out,
+                    "sunlightFactor": weather.sunlight_factor_out,
+                    "sunlitEffective": "",
+                    "shadowPercentEffective": "",
+                    "solarIrradianceWm2": weather.solar_irradiance_out,
+                    "irradianceEffective": "",
+                },
             )
-        return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
+        )
+    return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=list(weather.warnings))
+
+
+def _process_bucket(job: BucketJob) -> BucketResult:
+    weather = _get_bucket_weather(job)
+    if weather.is_night:
+        return _night_bucket_result(job, weather)
 
     try:
         if str(ENGINE_PATH) not in sys.path:
             sys.path.append(str(ENGINE_PATH))
 
-        import pandas as pd
-        from shapely.geometry import Point
-        from shapely.strtree import STRtree
-
-        from engine_core import canopy_to_gdf, generate_shadows
-
         cache_entry = _get_shadow_cache_entry(job.shadow_cache_key)
         query_bounds = job.shadow_cache_bbox or job.bbox
-
-        use_point_buffer = (
-            cache_entry is None
-            and job.worker.buildings_source == "file"
-            and job.worker.buildings_mode == "preload"
-            and float(job.worker.buildings_point_buffer_m) > 0.0
-            and (
-                float(job.worker.buildings_point_buffer_threshold_m) <= 0.0
-                or _bounds_diagonal_m(query_bounds) >= float(job.worker.buildings_point_buffer_threshold_m)
-            )
-        )
+        use_point_buffer = cache_entry is None and _use_point_buffer(job, query_bounds)
         if cache_entry is None:
-            buildings = (
-                _load_buildings_preloaded_points(job.points, job.worker)
-                if use_point_buffer
-                else _get_buildings(query_bounds, job.worker)
+            obstacle_entry = _load_obstacles_for_bounds(
+                job,
+                query_bounds,
+                use_point_buffer=use_point_buffer,
             )
-
-            if job.worker.include_canopy and job.worker.canopy_raster_path:
-                canopy_path = job.worker.canopy_raster_path
-                if os.path.exists(canopy_path):
-                    canopy_ds = _open_canopy_dataset(canopy_path)
-                    canopy_gdf = None
-                    if use_point_buffer:
-                        buffer_m = float(job.worker.buildings_point_buffer_m)
-                        if buffer_m > 0:
-                            parts: List[Any] = []
-                            seen: set[Tuple[float, float]] = set()
-                            deg_lat = buffer_m / 111_000.0
-                            for bp in job.points:
-                                key = (round(float(bp.lat), 3), round(float(bp.lon), 3))
-                                if key in seen:
-                                    continue
-                                seen.add(key)
-                                cos_lat = max(math.cos(math.radians(float(bp.lat))), 1e-6)
-                                deg_lon = buffer_m / (111_000.0 * cos_lat)
-                                bbox = {
-                                    "west": float(bp.lon) - deg_lon,
-                                    "east": float(bp.lon) + deg_lon,
-                                    "south": float(bp.lat) - deg_lat,
-                                    "north": float(bp.lat) + deg_lat,
-                                }
-                                part = canopy_to_gdf(canopy_ds, bbox)
-                                if part is not None and not part.empty:
-                                    parts.append(part)
-                            if parts:
-                                canopy_gdf = pd.concat(parts, ignore_index=True)
-                    else:
-                        canopy_gdf = canopy_to_gdf(canopy_ds, query_bounds)
-                    if canopy_gdf is not None and not canopy_gdf.empty:
-                        try:
-                            if getattr(canopy_gdf, "crs", None) is None and getattr(buildings, "crs", None) is not None:
-                                canopy_gdf = canopy_gdf.set_crs(buildings.crs, allow_override=True)
-                        except Exception:
-                            pass
-                        buildings = pd.concat([buildings, canopy_gdf], ignore_index=True)
-                else:
-                    warnings.append(f"[Canopy] raster not found: {canopy_path}")
-
-            if buildings.empty:
+            if obstacle_entry.get("mode") == "empty":
                 cache_entry = {"mode": "empty", "geoms": [], "tree": None}
                 _put_shadow_cache_entry(job.shadow_cache_key, cache_entry, int(job.worker.shadow_cache_max_entries))
             else:
-                try:
-                    shadows = generate_shadows(buildings, job.bucket_key, job.worker.timezone)
-                except Exception as exc:
-                    err_msg = str(exc)
-                    if (
-                        "Given time before sunrise or after sunset" in err_msg
-                        or "outside daylight" in err_msg.lower()
-                    ):
-                        cache_entry = {"mode": "night", "geoms": [], "tree": None}
-                        _put_shadow_cache_entry(
-                            job.shadow_cache_key,
-                            cache_entry,
-                            int(job.worker.shadow_cache_max_entries),
-                        )
-                    else:
-                        raise
-                if cache_entry is None:
-                    geoms = [g for g in shadows.geometry if g is not None and not g.is_empty] if not shadows.empty else []
-                    cache_entry = {
-                        "mode": "shadow",
-                        "geoms": geoms,
-                        "tree": STRtree(geoms) if geoms else None,
-                    }
-                    _put_shadow_cache_entry(job.shadow_cache_key, cache_entry, int(job.worker.shadow_cache_max_entries))
+                cache_entry = _build_shadow_cache_entry_for_job(job, obstacle_entry["buildings"])
+                _put_shadow_cache_entry(job.shadow_cache_key, cache_entry, int(job.worker.shadow_cache_max_entries))
 
-        if cache_entry is not None and cache_entry.get("mode") == "empty":
-            updates: List[RowUpdate] = []
-            for point in job.points:
-                sunlit = 1
-                shadow_percent = 0.0
-                sunlit_effective = (
-                    float(sunlit) if sunlight_factor_value is None else float(sunlit) * float(sunlight_factor_value)
-                )
-                shadow_percent_effective = 100.0 - sunlit_effective * 100.0
-                irradiance_effective = None if solar_irradiance_value is None else float(solar_irradiance_value)
-                updates.append(
-                    RowUpdate(
-                        index=point.index,
-                        file_index=point.file_index,
-                        values={
-                            "sunlit": sunlit,
-                            "shadowPercent": shadow_percent,
-                            "bucketStart": job.bucket_key,
-                            "bucketEnd": bucket_end,
-                            "source": "engine",
-                            "errorDetail": "",
-                            "cloudCover": cloud_cover_out,
-                            "sunlightFactor": sunlight_factor_out,
-                            "sunlitEffective": sunlit_effective,
-                            "shadowPercentEffective": shadow_percent_effective,
-                            "solarIrradianceWm2": solar_irradiance_out,
-                            "irradianceEffective": irradiance_effective if irradiance_effective is not None else "",
-                        },
-                    )
-                )
-            return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
-
-        if cache_entry is not None and cache_entry.get("mode") == "night":
-            updates = []
-            for point in job.points:
-                updates.append(
-                    RowUpdate(
-                        index=point.index,
-                        file_index=point.file_index,
-                        values={
-                            "sunlit": 0,
-                            "shadowPercent": 0,
-                            "bucketStart": job.bucket_key,
-                            "bucketEnd": job.bucket_key,
-                            "source": "night",
-                            "errorDetail": "",
-                            "cloudCover": cloud_cover_out,
-                            "sunlightFactor": sunlight_factor_out,
-                            "sunlitEffective": "",
-                            "shadowPercentEffective": "",
-                            "solarIrradianceWm2": 0.0,
-                            "irradianceEffective": "",
-                        },
-                    )
-                )
-            return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
-
-        geoms = list(cache_entry.get("geoms") or []) if cache_entry is not None else []
-        tree = cache_entry.get("tree") if cache_entry is not None else None
-
-        updates: List[RowUpdate] = []
-        for point in job.points:
-            pt = Point(point.lon, point.lat)
-            in_shadow = False
-            if tree is not None:
-                candidates = tree.query(pt)
-                for cand in candidates:
-                    geom = cand if hasattr(cand, "covers") else geoms[int(cand)]
-                    if geom.covers(pt):
-                        in_shadow = True
-                        break
-
-            shadow_percent = 100.0 if (geoms and in_shadow) else 0.0
-            sunlit = 0 if in_shadow else 1
-            sunlit_effective = (
-                float(sunlit) if sunlight_factor_value is None else float(sunlit) * float(sunlight_factor_value)
+        result = _row_updates_from_shadow_cache(
+            job,
+            cache_entry,
+            cloud_cover_out=weather.cloud_cover_out,
+            sunlight_factor_out=weather.sunlight_factor_out,
+            solar_irradiance_out=weather.solar_irradiance_out,
+        )
+        if weather.warnings:
+            return BucketResult(
+                bucket_key=result.bucket_key,
+                row_updates=result.row_updates,
+                warnings=list(weather.warnings) + list(result.warnings),
             )
-            shadow_percent_effective = 100.0 - sunlit_effective * 100.0
-            irradiance_effective = (
-                None
-                if solar_irradiance_value is None
-                else (0.0 if sunlit == 0 else float(solar_irradiance_value))
-            )
-
-            values: Dict[str, Any] = {
-                "sunlit": sunlit,
-                "shadowPercent": shadow_percent,
-                "bucketStart": job.bucket_key,
-                "bucketEnd": bucket_end,
-                "source": "engine",
-                "errorDetail": "",
-                "cloudCover": cloud_cover_out,
-                "sunlightFactor": sunlight_factor_out,
-                "sunlitEffective": sunlit_effective,
-                "shadowPercentEffective": shadow_percent_effective,
-                "solarIrradianceWm2": solar_irradiance_out,
-                "irradianceEffective": irradiance_effective if irradiance_effective is not None else "",
-            }
-            updates.append(RowUpdate(index=point.index, file_index=point.file_index, values=values))
-
-        return BucketResult(bucket_key=job.bucket_key, row_updates=updates, warnings=warnings)
+        return result
     except Exception as exc:
         err_msg = str(exc)
         expected = (
@@ -1375,6 +1575,7 @@ def _process_bucket(job: BucketJob) -> BucketResult:
             or "outside daylight" in err_msg.lower()
             or "No building features returned" in err_msg
         )
+        warnings = list(weather.warnings)
         if not expected:
             warnings.append(f"[Bucket error][{job.file_label}][{job.bucket_key}] {err_msg}")
 
@@ -1392,11 +1593,11 @@ def _process_bucket(job: BucketJob) -> BucketResult:
                         "bucketEnd": job.bucket_key,
                         "source": "fallback_error",
                         "errorDetail": detail,
-                        "cloudCover": cloud_cover_out,
-                        "sunlightFactor": sunlight_factor_out,
+                        "cloudCover": weather.cloud_cover_out,
+                        "sunlightFactor": weather.sunlight_factor_out,
                         "sunlitEffective": "",
                         "shadowPercentEffective": "",
-                        "solarIrradianceWm2": solar_irradiance_out,
+                        "solarIrradianceWm2": weather.solar_irradiance_out,
                         "irradianceEffective": "",
                     },
                 )
@@ -1614,6 +1815,14 @@ def _write_loaded_table(table: LoadedTable, config: Config, idx: int, total: int
     print(f"[Done][{idx + 1}/{total}] {table.relative} -> {rel_out} ({elapsed_s}s) buckets={bucket_count}")
 
 
+def _apply_bucket_result(result: BucketResult, tables_by_index: Mapping[int, LoadedTable]) -> None:
+    for update in result.row_updates:
+        table = tables_by_index.get(update.file_index)
+        if table is None:
+            continue
+        table.rows[update.index].update(update.values)
+
+
 def _build_run_cell_jobs(tables: Sequence[LoadedTable], worker_cfg: WorkerConfig, config: Config) -> Tuple[List[BucketJob], Dict[int, int], int]:
     grouped: Dict[Tuple[str, int, int], List[BucketPoint]] = {}
     bucket_counts: Dict[int, int] = {}
@@ -1640,6 +1849,8 @@ def _build_run_cell_jobs(tables: Sequence[LoadedTable], worker_cfg: WorkerConfig
         shadow_cell_y = math.floor(cell_y / shadow_stride)
         shadow_cache_key: Optional[str] = None
         shadow_cache_bbox: Optional[Dict[str, float]] = None
+        obstacle_cache_key: Optional[str] = None
+        obstacle_cache_bbox: Optional[Dict[str, float]] = None
         if worker_cfg.shadow_cache_cell_size_m > 0:
             shadow_cache_key = (
                 f"{bucket_key}|shadow-cell|{shadow_cell_x}|{shadow_cell_y}|"
@@ -1651,6 +1862,17 @@ def _build_run_cell_jobs(tables: Sequence[LoadedTable], worker_cfg: WorkerConfig
                 worker_cfg.shadow_cache_cell_size_m,
             )
             shadow_cache_bbox = _expand_bounds_by_meters(shadow_bounds, config.cell_context_m)
+            obstacle_cache_key = (
+                f"obstacle|shadow-cell|{shadow_cell_x}|{shadow_cell_y}|"
+                f"{int(round(worker_cfg.shadow_cache_cell_size_m))}|{int(round(config.cell_context_m))}"
+            )
+            obstacle_cache_bbox = dict(shadow_cache_bbox)
+        else:
+            obstacle_cache_key = (
+                f"obstacle|cell|{cell_x}|{cell_y}|"
+                f"{int(round(config.cell_size_m))}|{int(round(config.cell_context_m))}"
+            )
+            obstacle_cache_bbox = dict(payload["bbox"])
         jobs.append(
             BucketJob(
                 bucket_key=bucket_key,
@@ -1663,6 +1885,8 @@ def _build_run_cell_jobs(tables: Sequence[LoadedTable], worker_cfg: WorkerConfig
                 ),
                 shadow_cache_key=shadow_cache_key,
                 shadow_cache_bbox=shadow_cache_bbox,
+                obstacle_cache_key=obstacle_cache_key,
+                obstacle_cache_bbox=obstacle_cache_bbox,
                 cell_x=cell_x,
                 cell_y=cell_y,
                 shadow_cell_x=shadow_cell_x,
@@ -1672,15 +1896,241 @@ def _build_run_cell_jobs(tables: Sequence[LoadedTable], worker_cfg: WorkerConfig
 
     jobs.sort(
         key=lambda job: (
-            job.bucket_key,
+            job.obstacle_cache_key or "",
             job.shadow_cell_x if job.shadow_cell_x is not None else job.cell_x if job.cell_x is not None else 0,
             job.shadow_cell_y if job.shadow_cell_y is not None else job.cell_y if job.cell_y is not None else 0,
+            job.bucket_key,
             job.cell_x if job.cell_x is not None else 0,
             job.cell_y if job.cell_y is not None else 0,
             job.file_label,
         )
     )
     return jobs, bucket_counts, raw_bucket_count
+
+
+def _can_batch_obstacles(worker_cfg: WorkerConfig) -> bool:
+    return not (
+        worker_cfg.buildings_source == "file"
+        and worker_cfg.buildings_mode == "preload"
+        and float(worker_cfg.buildings_point_buffer_m) > 0.0
+    )
+
+
+def _build_obstacle_batches(jobs: Sequence[BucketJob]) -> Tuple[List[ObstacleBatchJob], int]:
+    grouped: "OrderedDict[str, List[BucketJob]]" = OrderedDict()
+    obstacle_bounds: Dict[str, Dict[str, float]] = {}
+    max_jobs_limit = max(0, int(parse_float(os.getenv("MOBILITY_OBSTACLE_BATCH_MAX_JOBS", "0"), 0.0)))
+
+    for job in jobs:
+        key = job.obstacle_cache_key or (
+            f"obstacle|bbox|{job.bbox['west']:.6f}|{job.bbox['south']:.6f}|"
+            f"{job.bbox['east']:.6f}|{job.bbox['north']:.6f}"
+        )
+        grouped.setdefault(key, []).append(job)
+        obstacle_bounds.setdefault(key, dict(job.obstacle_cache_bbox or job.bbox))
+
+    batches: List[ObstacleBatchJob] = []
+    max_jobs_per_batch = 0
+    for key, group in grouped.items():
+        ordered_group = sorted(
+            group,
+            key=lambda job: (
+                job.bucket_key,
+                job.cell_x if job.cell_x is not None else 0,
+                job.cell_y if job.cell_y is not None else 0,
+                job.file_label,
+            ),
+        )
+        if max_jobs_limit > 0 and len(ordered_group) > max_jobs_limit:
+            for chunk_idx, start in enumerate(range(0, len(ordered_group), max_jobs_limit)):
+                chunk = ordered_group[start : start + max_jobs_limit]
+                max_jobs_per_batch = max(max_jobs_per_batch, len(chunk))
+                chunk_key = f"{key}|chunk={chunk_idx:03d}"
+                batches.append(
+                    ObstacleBatchJob(
+                        obstacle_key=chunk_key,
+                        obstacle_bbox=obstacle_bounds[key],
+                        jobs=chunk,
+                        file_label=f"obstacle-batch[{chunk_key}]",
+                    )
+                )
+        else:
+            max_jobs_per_batch = max(max_jobs_per_batch, len(ordered_group))
+            batches.append(
+                ObstacleBatchJob(
+                    obstacle_key=key,
+                    obstacle_bbox=obstacle_bounds[key],
+                    jobs=ordered_group,
+                    file_label=f"obstacle-batch[{key}]",
+                )
+            )
+
+    batches.sort(key=lambda batch: (-len(batch.jobs), batch.obstacle_key))
+    return batches, max_jobs_per_batch
+
+
+def _apply_night_bucket_to_tables(
+    job: BucketJob,
+    weather: BucketWeather,
+    tables_by_index: Dict[int, LoadedTable],
+) -> None:
+    values = {
+        "sunlit": 0,
+        "shadowPercent": 0,
+        "bucketStart": job.bucket_key,
+        "bucketEnd": job.bucket_key,
+        "source": "night",
+        "errorDetail": "",
+        "cloudCover": weather.cloud_cover_out,
+        "sunlightFactor": weather.sunlight_factor_out,
+        "sunlitEffective": "",
+        "shadowPercentEffective": "",
+        "solarIrradianceWm2": weather.solar_irradiance_out,
+        "irradianceEffective": "",
+    }
+    for point in job.points:
+        table = tables_by_index.get(point.file_index)
+        if table is None:
+            continue
+        table.rows[point.index].update(values)
+
+
+def _preclassify_jobs_by_weather(
+    jobs: Sequence[BucketJob],
+    tables_by_index: Dict[int, LoadedTable],
+) -> Tuple[List[BucketJob], List[str], int, int]:
+    engine_jobs: List[BucketJob] = []
+    warnings: List[str] = []
+    night_jobs = 0
+    night_points = 0
+
+    for job in jobs:
+        weather = _evaluate_bucket_weather(job)
+        prepared_job = replace(job, weather=weather)
+        if weather.is_night:
+            _apply_night_bucket_to_tables(prepared_job, weather, tables_by_index)
+            if weather.warnings:
+                warnings.extend(weather.warnings)
+            night_jobs += 1
+            night_points += len(job.points)
+        else:
+            engine_jobs.append(prepared_job)
+
+    return engine_jobs, warnings, night_jobs, night_points
+
+
+def _process_obstacle_batch(batch: ObstacleBatchJob) -> List[BucketResult]:
+    results: List[BucketResult] = []
+    obstacle_entry: Optional[Dict[str, Any]] = None
+    per_bucket_shadow_cache: Dict[str, Dict[str, Any]] = {}
+
+    for job in batch.jobs:
+        weather = _get_bucket_weather(job)
+        if weather.is_night:
+            results.append(_night_bucket_result(job, weather))
+            continue
+
+        try:
+            if str(ENGINE_PATH) not in sys.path:
+                sys.path.append(str(ENGINE_PATH))
+
+            cache_key = job.shadow_cache_key or job.bucket_key
+            cache_entry = per_bucket_shadow_cache.get(cache_key)
+            if cache_entry is None:
+                if obstacle_entry is None:
+                    obstacle_entry = _load_obstacles_for_bounds(
+                        job,
+                        batch.obstacle_bbox,
+                        use_point_buffer=False,
+                    )
+                if obstacle_entry.get("mode") == "empty":
+                    cache_entry = {"mode": "empty", "geoms": [], "tree": None}
+                else:
+                    cache_entry = _build_shadow_cache_entry_for_job(job, obstacle_entry["buildings"])
+                per_bucket_shadow_cache[cache_key] = cache_entry
+
+            result = _row_updates_from_shadow_cache(
+                job,
+                cache_entry,
+                cloud_cover_out=weather.cloud_cover_out,
+                sunlight_factor_out=weather.sunlight_factor_out,
+                solar_irradiance_out=weather.solar_irradiance_out,
+            )
+            if weather.warnings:
+                result = BucketResult(
+                    bucket_key=result.bucket_key,
+                    row_updates=result.row_updates,
+                    warnings=list(weather.warnings) + list(result.warnings),
+                )
+            results.append(result)
+        except Exception as exc:
+            result = _job_failure_result(job, exc)
+            if weather.warnings:
+                result = BucketResult(
+                    bucket_key=result.bucket_key,
+                    row_updates=result.row_updates,
+                    warnings=list(weather.warnings) + list(result.warnings),
+                )
+            results.append(result)
+
+    return results
+
+
+def run_obstacle_batches(
+    batches: Sequence[ObstacleBatchJob],
+    max_workers: int,
+    executor: Optional[ProcessPoolExecutor] = None,
+) -> Iterable[BucketResult]:
+    if not batches:
+        return []
+    max_workers = max(1, max_workers)
+
+    iterator = iter(batches)
+    in_flight: set[Any] = set()
+    future_to_batch: Dict[Any, ObstacleBatchJob] = {}
+
+    def submit_next(target_executor: ProcessPoolExecutor) -> bool:
+        try:
+            next_batch = next(iterator)
+        except StopIteration:
+            return False
+        future = target_executor.submit(_process_obstacle_batch, next_batch)
+        in_flight.add(future)
+        future_to_batch[future] = next_batch
+        return True
+
+    def run(target_executor: ProcessPoolExecutor) -> Iterable[BucketResult]:
+        for _ in range(max_workers):
+            if not submit_next(target_executor):
+                break
+
+        while in_flight:
+            done, pending = wait(in_flight, return_when=FIRST_COMPLETED)
+            in_flight.clear()
+            in_flight.update(pending)
+            for future in done:
+                batch = future_to_batch.pop(future, None)
+                try:
+                    for result in future.result():
+                        yield result
+                except Exception as exc:
+                    if batch is None:
+                        yield BucketResult(
+                            bucket_key="unknown",
+                            row_updates=[],
+                            warnings=[f"[Batch crash][unknown] {str(exc)[:200]}"],
+                        )
+                    else:
+                        for job in batch.jobs:
+                            yield _job_failure_result(job, exc)
+                submit_next(target_executor)
+
+    if executor is not None:
+        yield from run(executor)
+        return
+
+    with ProcessPoolExecutor(max_workers=max_workers) as local_executor:
+        yield from run(local_executor)
 
 
 def process_files_run_cell_minute(
@@ -1729,10 +2179,32 @@ def process_files_run_cell_minute(
     )
 
     jobs, bucket_counts, raw_bucket_count = _build_run_cell_jobs(loaded_tables, worker_cfg, config)
-    total_points = sum(len(job.points) for job in jobs)
+    tables_by_index = {table.file_index: table for table in loaded_tables}
+    precompute_weather = parse_bool(os.getenv("MOBILITY_PRECOMPUTE_WEATHER", "true"), default=True)
+    night_jobs = 0
+    night_points = 0
+    preclassify_warnings: List[str] = []
+    if precompute_weather and jobs:
+        jobs, preclassify_warnings, night_jobs, night_points = _preclassify_jobs_by_weather(
+            jobs,
+            tables_by_index,
+        )
+        _cleanup_weather_caches()
+
+    use_obstacle_batches = _can_batch_obstacles(worker_cfg)
+    obstacle_batches: List[ObstacleBatchJob] = []
+    max_jobs_per_batch = 0
+    if use_obstacle_batches:
+        obstacle_batches, max_jobs_per_batch = _build_obstacle_batches(jobs)
+    total_jobs = len(jobs) + night_jobs
+    total_points = sum(len(job.points) for job in jobs) + night_points
     print(
         f"[Run cell-minute] files={len(loaded_tables)} "
-        f"rawBuckets={raw_bucket_count} groupedJobs={len(jobs)} "
+        f"rawBuckets={raw_bucket_count} groupedJobs={total_jobs} "
+        f"engineJobs={len(jobs)} "
+        f"preNightJobs={night_jobs} "
+        f"obstacleBatches={len(obstacle_batches) if use_obstacle_batches else 0} "
+        f"maxJobsPerObstacleBatch={max_jobs_per_batch if use_obstacle_batches else 0} "
         f"cellSizeM={config.cell_size_m:.0f} contextM={config.cell_context_m:.0f} "
         f"shadowCacheCellM={worker_cfg.shadow_cache_cell_size_m:.0f}"
     )
@@ -1744,33 +2216,38 @@ def process_files_run_cell_minute(
     progress_interval_s = max(0.0, float(config.progress_interval_s))
     progress_style = str(config.progress_style or "log")
 
-    tables_by_index = {table.file_index: table for table in loaded_tables}
+    completed_jobs += night_jobs
+    completed_points += night_points
+    for warn in preclassify_warnings:
+        print(warn, file=sys.stderr)
 
-    for result in run_bucket_jobs(jobs, config.concurrency, executor=executor):
+    result_stream = (
+        run_obstacle_batches(obstacle_batches, config.concurrency, executor=executor)
+        if use_obstacle_batches
+        else run_bucket_jobs(jobs, config.concurrency, executor=executor)
+    )
+
+    for result in result_stream:
         completed_jobs += 1
         completed_points += len(result.row_updates)
         for warn in result.warnings:
             print(warn, file=sys.stderr)
-        for update in result.row_updates:
-            table = tables_by_index.get(update.file_index)
-            if table is None:
-                continue
-            table.rows[update.index].update(update.values)
+        _apply_bucket_result(result, tables_by_index)
 
         now = time.time()
         should_report = (
             progress_interval_s > 0
-            and (now - last_progress >= progress_interval_s or completed_jobs >= len(jobs))
-            and len(jobs) > 0
+            and (now - last_progress >= progress_interval_s or completed_jobs >= total_jobs)
+            and total_jobs > 0
         )
         if should_report:
             elapsed_s = max(0.001, now - started_at)
             rate = completed_jobs / elapsed_s
-            remaining = max(0, len(jobs) - completed_jobs)
+            remaining = max(0, total_jobs - completed_jobs)
             eta_s = int(round(remaining / rate)) if rate > 0 else -1
-            pct = (completed_jobs / len(jobs)) * 100.0
+            pct = (completed_jobs / total_jobs) * 100.0
             line = (
-                f"[Progress][run-cell-minute] jobs={completed_jobs}/{len(jobs)} ({pct:.1f}%) "
+                f"[Progress][run-cell-minute] jobs={completed_jobs}/{total_jobs} ({pct:.1f}%) "
                 f"points={completed_points}/{total_points} elapsed={int(round(elapsed_s))}s eta={eta_s}s"
             )
             if progress_style == "single":
@@ -1779,7 +2256,7 @@ def process_files_run_cell_minute(
                 print(line, flush=True)
             last_progress = now
 
-    if progress_style == "single" and len(jobs) > 0:
+    if progress_style == "single" and total_jobs > 0:
         print("", flush=True)
 
     for idx, table in enumerate(loaded_tables):

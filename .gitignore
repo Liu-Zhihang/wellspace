@@ -19,6 +19,12 @@ Thumbs.db
 
 # MCP configuration (local only)
 .mcp.json
+ShadowMap/.codex
+ShadowMap/.codex/
+
+# Local agent instructions (do not commit)
+AGENTS.md
+ShadowMap/AGENTS.md
 
 # Temporary scripts
 word_vector.py
@@ -48,30 +54,25 @@ temp/
 !.env.example
 !.env.sample
 
-# 中文文档和临时脚本（本地开发文档，不上传）
-# 忽略所有包含中文字符的 Markdown 和 PDF 文件
-**/*数据*.md
-**/*文档*.md
-**/*指南*.md
-**/*配置*.md
-**/*部署*.md
-**/*安装*.md
-**/*设计*.md
-**/*.pdf
-空间数据服务部署.md
-MongoDB数据访问完整指南.md
-前端文档.md
-后端文档.md
-数据存储架构设计.md
-开发文档.md
-mcp安装的坑以及wsl配置codex的坑.md
+# ShadowMap machine profiles (local only)
+ShadowMap/.shadowmap.env
+
+# 中文文档：保留在仓库中，但请勿提交真实密码/密钥（只写变量名或占位符）。
 
 # PowerShell 脚本（临时工具）
 *.ps1
 
-# 临时目录
-ShadowMap/scripts/
+# 临时目录 / 脚本输出
+scripts/**/__pycache__/
+ShadowMap/scripts/**/__pycache__/
+ShadowMap/scripts/**/outputs/
+ShadowMap/scripts/**/outputs/**
+ShadowMap/scripts/mcp-call.mjs
 ShadowMap/$null
+_tmp_sun_test/
+result.png
+2001_500*.csv
+scripts/01_sunlight_data_description_800.py
 
 # 外部项目（不应该提交）
 ShadowMap/GlobalBuildingAtlas-main/
@@ -79,8 +80,10 @@ ShadowMap/leaflet-shadow-simulator-main/
 ShadowMap/mapbox-gl-shadow-simulator/
 
 # Local data / large assets (keep out of git history)
+dataset/
 ShadowMap/data/
 ShadowMap/storage/
+ShadowMap/result/
 ShadowMap/shadow-map-backend/data/
 ShadowMap/shadow-map-backend/dist/
 ShadowMap/shadow-map-backend/cache/
@@ -91,11 +94,13 @@ ShadowMap/Example/
 ShadowMap/Example/**/*.tif
 ShadowMap/Example/**/*.zip
 ShadowMap/shadow-map-frontend/react-shadow-app/public/Example/
+# ShadowMap/shadow-map-frontend/react-shadow-app/public/video/
 ShadowMap/shadow-map-frontend/react-shadow-app/public/**/*.tif
 ShadowMap/shadow-map-frontend/react-shadow-app/public/**/*.zip
 
 # 压缩归档（根目录文件）
 ShadowMap.zip
+*.tar.gz
 
 # Misc
 *.pid
@@ -103,3 +108,5 @@ ShadowMap.zip
 *.tgz
 **/tsconfig.tsbuildinfo
 **/*.tsbuildinfo
+
+GLAN_processed/

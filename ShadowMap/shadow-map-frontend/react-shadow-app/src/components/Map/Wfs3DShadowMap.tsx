@@ -10,6 +10,7 @@ import type { ShadowCalculationResult } from '../../services/shadowAnalysisServi
 import { getWfsBuildings } from '../../services/wfsBuildingService';
 import { debugHelper } from '../../utils/debugHelper';
 import * as SunCalc from 'suncalc';
+import { MAPBOX_ACCESS_TOKEN } from '../../config/runtime';
 
 interface Wfs3DShadowMapProps {
   className?: string;
@@ -41,7 +42,11 @@ export const Wfs3DShadowMap = ({ className = '' }: Wfs3DShadowMapProps) => {
 
     console.log('🗺️ Initialising WFS 3D shadow map...');
 
-    mapboxgl.accessToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
+    if (!MAPBOX_ACCESS_TOKEN) {
+      addStatusMessage('Mapbox access token is not configured.', 'error');
+      return;
+    }
+    mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,

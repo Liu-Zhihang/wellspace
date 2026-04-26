@@ -52,7 +52,7 @@ const RESOLVED_AXIS_ORDER: AxisOrder =
 const FALLBACK_AXIS_ORDER: AxisOrder = RESOLVED_AXIS_ORDER === 'latlon' ? 'lonlat' : 'latlon';
 
 const BUILDING_WFS_CONFIG = {
-  baseUrl: process.env['BUILDING_WFS_BASE_URL'] ?? 'http://10.13.12.164:8080/geoserver/shadowmap/wfs',
+  baseUrl: (process.env['BUILDING_WFS_BASE_URL'] ?? '').trim(),
   typeName: process.env['BUILDING_WFS_TYPE_NAME'] ?? 'shadowmap:buildings',
   version: BUILDING_WFS_VERSION,
   outputFormat: process.env['BUILDING_WFS_OUTPUT_FORMAT'] ?? 'application/json',
@@ -69,11 +69,29 @@ const BUILDING_WFS_CONFIG = {
   useAxisFallback: AXIS_ORDER_PREFERENCE === 'auto'
 };
 
-console.log(
-  `[BuildingWfs] Config axis=${BUILDING_WFS_CONFIG.axisOrder} ` +
-    `fallback=${BUILDING_WFS_CONFIG.useAxisFallback ? BUILDING_WFS_CONFIG.fallbackAxisOrder : 'disabled'} ` +
-    `geometry=${BUILDING_WFS_CONFIG.geometryProperty}`
-);
+const BUILDING_WFS_VERBOSE = process.env['LOG_VERBOSE_WFS'] === 'true';
+
+export function getBuildingWfsConfigSummary() {
+  return {
+    baseUrl: BUILDING_WFS_CONFIG.baseUrl,
+    typeName: BUILDING_WFS_CONFIG.typeName,
+    version: BUILDING_WFS_CONFIG.version,
+    srsName: BUILDING_WFS_CONFIG.srsName,
+    geometryProperty: BUILDING_WFS_CONFIG.geometryProperty,
+    tileIdProperty: BUILDING_WFS_CONFIG.tileIdProperty,
+    axisOrder: BUILDING_WFS_CONFIG.axisOrder,
+    axisOrderFallback: BUILDING_WFS_CONFIG.useAxisFallback ? BUILDING_WFS_CONFIG.fallbackAxisOrder : null,
+    maxFeatures: BUILDING_WFS_CONFIG.maxFeatures
+  };
+}
+
+if (BUILDING_WFS_VERBOSE) {
+  console.log(
+    `[BuildingWfs] Config axis=${BUILDING_WFS_CONFIG.axisOrder} ` +
+      `fallback=${BUILDING_WFS_CONFIG.useAxisFallback ? BUILDING_WFS_CONFIG.fallbackAxisOrder : 'disabled'} ` +
+      `geometry=${BUILDING_WFS_CONFIG.geometryProperty}`
+  );
+}
 
 const REQUEST_HEADERS = {
   'User-Agent': 'ShadowMap/1.0',
@@ -114,6 +132,10 @@ function buildRequestUrl(
   axisOrder: AxisOrder,
   tileIds: string[]
 ): string {
+  if (!BUILDING_WFS_CONFIG.baseUrl) {
+    throw new Error('BUILDING_WFS_BASE_URL is not configured.');
+  }
+
   const params: Record<string, string> = {
     service: 'WFS',
     version: BUILDING_WFS_CONFIG.version,
@@ -154,22 +176,24 @@ function buildRequestUrl(
   }
 
   const url = `${BUILDING_WFS_CONFIG.baseUrl}?${query.toString()}`;
-  console.log(
-    `[BuildingWfs] Built WFS URL (${axisOrder}, tiles=${tileIds.length > 0 ? tileIds.join(',') : 'none'}): ${url}`
-  );
+  if (BUILDING_WFS_VERBOSE) {
+    console.log(
+      `[BuildingWfs] Built WFS URL (${axisOrder}, tiles=${tileIds.length > 0 ? tileIds.join(',') : 'none'}): ${url}`
+    );
+  }
   return url;
 }
 
 function estimateHeight(properties: Record<string, any>): number {
-  const heightCandidate = Number(properties.height ?? properties.buildingHeight ?? properties.h);
+  const heightCandidate = Number(properties['height'] ?? properties['buildingHeight'] ?? properties['h']);
   if (!Number.isNaN(heightCandidate) && heightCandidate > 0) {
     return heightCandidate;
   }
 
   const areaCandidate = Number(
-    properties.area ??
-      properties.footprint_area ??
-      properties.geom_area ??
+    properties['area'] ??
+      properties['footprint_area'] ??
+      properties['geom_area'] ??
       properties['@area'] ??
       properties['shm_area']
   );
@@ -189,17 +213,17 @@ function normalizeFeature(feature: WfsBuildingFeature, index: number) {
     type: 'Feature',
     geometry: feature.geometry,
     properties: {
-      id: feature.properties.id ?? feature.properties.objectid ?? `building_${index}`,
+      id: feature.properties['id'] ?? feature.properties['objectid'] ?? `building_${index}`,
       height,
       levels: Math.max(1, Math.round(height / 3)),
       area:
         Number(
-          feature.properties.area ??
-            feature.properties.footprint_area ??
-            feature.properties.geom_area
+          feature.properties['area'] ??
+            feature.properties['footprint_area'] ??
+            feature.properties['geom_area']
         ) || 0,
       source: 'shadowmap-wfs',
-      buildingType: feature.properties.building_type ?? feature.properties.function ?? 'building',
+      buildingType: feature.properties['building_type'] ?? feature.properties['function'] ?? 'building',
       rawProperties: feature.properties
     }
   };
@@ -212,9 +236,11 @@ async function fetchWfsBuildingsOnce(
   tileIds: string[]
 ): Promise<WfsBuildingResponse> {
   const url = buildRequestUrl(bounds, maxFeatures, undefined, axisOrder, tileIds);
-  console.log(
-    `[BuildingWfs] Requesting buildings with axis=${axisOrder} tiles=${tileIds.join(',') || 'none'} bbox=${formatBBox(bounds, axisOrder)} maxFeatures=${maxFeatures ?? BUILDING_WFS_CONFIG.maxFeatures}`
-  );
+  if (BUILDING_WFS_VERBOSE) {
+    console.log(
+      `[BuildingWfs] Requesting buildings with axis=${axisOrder} tiles=${tileIds.join(',') || 'none'} bbox=${formatBBox(bounds, axisOrder)} maxFeatures=${maxFeatures ?? BUILDING_WFS_CONFIG.maxFeatures}`
+    );
+  }
 
   try {
     const response = await axios.get<WfsBuildingResponse>(url, {
@@ -228,20 +254,24 @@ async function fetchWfsBuildingsOnce(
 
     const payload = response.data ?? { type: 'FeatureCollection', features: [] };
     const featureCount = payload.features?.length ?? 0;
-    console.log(
-      `[BuildingWfs] Received ${featureCount} features (reported total=${payload.totalFeatures ?? payload.numberMatched ?? 'n/a'}) using axis=${axisOrder}`
-    );
+    if (BUILDING_WFS_VERBOSE) {
+      console.log(
+        `[BuildingWfs] Received ${featureCount} features (reported total=${payload.totalFeatures ?? payload.numberMatched ?? 'n/a'}) using axis=${axisOrder}`
+      );
+    }
     if (featureCount === 0) {
-      console.warn('[BuildingWfs] Empty feature collection returned.', {
-        hasFeaturesArray: Array.isArray(payload.features),
-        rawKeys: Object.keys(payload ?? {}),
-        axisOrder
-      });
-      try {
-        const preview = JSON.stringify(payload).slice(0, 600);
-        console.warn('[BuildingWfs] Response preview (truncated to 600 chars):', preview);
-      } catch {
-        console.warn('[BuildingWfs] Response preview unavailable (non-serializable payload).');
+      if (BUILDING_WFS_VERBOSE) {
+        console.warn('[BuildingWfs] Empty feature collection returned.', {
+          hasFeaturesArray: Array.isArray(payload.features),
+          rawKeys: Object.keys(payload ?? {}),
+          axisOrder
+        });
+        try {
+          const preview = JSON.stringify(payload).slice(0, 600);
+          console.warn('[BuildingWfs] Response preview (truncated to 600 chars):', preview);
+        } catch {
+          console.warn('[BuildingWfs] Response preview unavailable (non-serializable payload).');
+        }
       }
     }
 
@@ -295,10 +325,8 @@ export async function fetchWfsBuildings(bounds: BoundingBox, maxFeatures?: numbe
 
   try {
     const primaryResult = await fetchWfsBuildingsOnce(bounds, maxFeatures, primaryAxis, tileIds);
-    if (
-      BUILDING_WFS_CONFIG.useAxisFallback &&
-      primaryResult.numberReturned === 0
-    ) {
+    const shouldFallback = primaryAxis !== fallbackAxis && primaryResult.numberReturned === 0;
+    if (shouldFallback) {
       console.warn(
         `[BuildingWfs] Axis order ${primaryAxis} returned zero features; retrying with ${fallbackAxis}`
       );
@@ -308,7 +336,8 @@ export async function fetchWfsBuildings(bounds: BoundingBox, maxFeatures?: numbe
 
     return primaryResult;
   } catch (primaryError) {
-    if (!BUILDING_WFS_CONFIG.useAxisFallback) {
+    const shouldFallback = primaryAxis !== fallbackAxis;
+    if (!shouldFallback) {
       throw primaryError;
     }
 
@@ -351,9 +380,11 @@ async function fetchWfsBuildingsPaginatedOnce(
   let startIndex = 0;
   let reportedTotal = 0;
 
-  console.log(
-    `[BuildingWfs] Paging buildings with axis=${axisOrder} tiles=${tileIds.join(',') || 'none'} bbox=${formatBBox(bounds, axisOrder)} pageSize=${safeMax}`
-  );
+  if (BUILDING_WFS_VERBOSE) {
+    console.log(
+      `[BuildingWfs] Paging buildings axis=${axisOrder} tiles=${tileIds.join(',') || 'none'} bbox=${formatBBox(bounds, axisOrder)} pageSize=${safeMax}`
+    );
+  }
 
   while (aggregated.length < BUILDING_WFS_CONFIG.maxFeatures) {
     const url = buildRequestUrl(bounds, safeMax, startIndex, axisOrder, tileIds);
@@ -375,7 +406,15 @@ async function fetchWfsBuildingsPaginatedOnce(
       const pageFeatures = page.features ?? [];
 
       if (pageFeatures.length === 0) {
-        console.log('[BuildingWfs] No more features returned; stopping pagination.', { axisOrder });
+        console.warn(
+          '[BuildingWfs] Received empty feature set; stopping pagination.',
+          {
+            axisOrder,
+            startIndex,
+            bbox: formatBBox(bounds, axisOrder),
+            tiles: tileIds.length ? tileIds : 'none',
+          }
+        );
         try {
           const preview = JSON.stringify(page).slice(0, 600);
           console.warn('[BuildingWfs] Pagination response preview (truncated to 600 chars):', preview);
@@ -388,9 +427,11 @@ async function fetchWfsBuildingsPaginatedOnce(
       aggregated.push(...pageFeatures);
       reportedTotal = page.totalFeatures ?? page.numberMatched ?? reportedTotal;
 
-      console.log(
-        `[BuildingWfs] Page startIndex=${startIndex} returned ${pageFeatures.length} features (accumulated=${aggregated.length}) axis=${axisOrder}`
-      );
+      if (BUILDING_WFS_VERBOSE) {
+        console.log(
+          `[BuildingWfs] Page startIndex=${startIndex} returned ${pageFeatures.length} features (accumulated=${aggregated.length}) axis=${axisOrder}`
+        );
+      }
 
       if (pageFeatures.length < safeMax) {
         break;
@@ -439,10 +480,8 @@ export async function fetchWfsBuildingsPaginated(
 
   try {
     const primaryResult = await fetchWfsBuildingsPaginatedOnce(bounds, maxFeaturesPerRequest, primaryAxis, tileIds);
-    if (
-      BUILDING_WFS_CONFIG.useAxisFallback &&
-      primaryResult.numberReturned === 0
-    ) {
+    const shouldFallback = primaryAxis !== fallbackAxis && primaryResult.numberReturned === 0;
+    if (shouldFallback) {
       console.warn(
         `[BuildingWfs] Paginated query with axis ${primaryAxis} returned zero features; retrying with ${fallbackAxis}`
       );
@@ -452,7 +491,8 @@ export async function fetchWfsBuildingsPaginated(
 
     return primaryResult;
   } catch (primaryError) {
-    if (!BUILDING_WFS_CONFIG.useAxisFallback) {
+    const shouldFallback = primaryAxis !== fallbackAxis;
+    if (!shouldFallback) {
       throw primaryError;
     }
 
@@ -477,7 +517,9 @@ export async function testWfsConnection(): Promise<boolean> {
     const featureCount = response.features?.length ?? 0;
 
     if (featureCount > 0) {
-      console.log(`[BuildingWfs] Connectivity check succeeded with ${featureCount} sample features.`);
+      if (BUILDING_WFS_VERBOSE) {
+        console.log(`[BuildingWfs] Connectivity check succeeded with ${featureCount} sample features.`);
+      }
       return true;
     }
 

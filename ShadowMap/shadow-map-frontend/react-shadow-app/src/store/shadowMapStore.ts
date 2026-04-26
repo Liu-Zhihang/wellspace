@@ -1,5 +1,40 @@
 import { create } from 'zustand';
-import type { MapSettings, ShadowAnalysisResult, SunPosition, ShadowSettings, DataLayer, DataLayerType, WeatherSnapshot } from '../types/index.ts';
+import type {
+  MapSettings,
+  ShadowAnalysisResult,
+  SunPosition,
+  ShadowSettings,
+  DataLayer,
+  DataLayerType,
+  WeatherSnapshot,
+  UploadedGeometry,
+  GeometryAnalysis,
+  ShadowServiceStatus,
+  ShadowServiceResponse,
+  MobilityDataset,
+  MobilityCsvRecord,
+  MobilitySunlightSample,
+  MobilitySunlightProgress,
+  BoundingBox,
+} from '../types/index.ts';
+import { computeMobilitySunlightForRows } from '../services/mobilitySunlightService';
+
+type ViewportAction = (() => void) | (() => Promise<void>);
+
+interface ViewportActions {
+  loadBuildings?: ViewportAction;
+  initShadowSimulator?: ViewportAction;
+  clearBuildings?: () => void;
+  fitToBounds?: (bounds: BoundingBox, options?: { padding?: number; maxZoom?: number }) => void;
+  setViewPreset?: (preset: '2d' | '3d') => void;
+  flyTo?: (options: {
+    center: [number, number];
+    zoom?: number;
+    pitch?: number;
+    bearing?: number;
+    duration?: number;
+  }) => void;
+}
 
 export interface MobilityTracePoint {
   coordinates: [number, number];
@@ -8,52 +43,109 @@ export interface MobilityTracePoint {
 }
 
 interface ShadowMapState {
-  // 当前日期时间
+  // Current date-time state
   currentDate: Date;
   setCurrentDate: (date: Date) => void;
   
-  // 地图设置
+  // Mobility playback (independent from shadow timeline)
+  mobilityPlaybackTime: Date | null;
+  setMobilityPlaybackTime: (date: Date | null) => void;
+  isMobilityPlaying: boolean;
+  setMobilityPlaying: (playing: boolean) => void;
+  mobilityFlowStyle: 'trips' | 'path';
+  setMobilityFlowStyle: (style: 'trips' | 'path') => void;
+  mobilityColorBySunlight: boolean;
+  setMobilityColorBySunlight: (enabled: boolean) => void;
+  mobilityInferIndoor: boolean;
+  setMobilityInferIndoor: (enabled: boolean) => void;
+  mobilityDashIndoor: boolean;
+  setMobilityDashIndoor: (enabled: boolean) => void;
+  mobilityPathWidthScale: number;
+  setMobilityPathWidthScale: (scale: number) => void;
+  figureModeEnabled: boolean;
+  setFigureModeEnabled: (enabled: boolean) => void;
+  figureHudVisible: boolean;
+  setFigureHudVisible: (visible: boolean) => void;
+  
+  // Map settings
   mapSettings: MapSettings;
   updateMapSettings: (settings: Partial<MapSettings>) => void;
   
-  // 阴影设置
+  // Shadow settings
   shadowSettings: ShadowSettings;
   updateShadowSettings: (settings: Partial<ShadowSettings>) => void;
   
-  // 太阳位置信息
+  // Sun position
   sunPosition: SunPosition;
   setSunPosition: (position: SunPosition) => void;
   
-  // 阴影分析结果
+  // Legacy shadow analysis result
   analysisResult: ShadowAnalysisResult | null;
   setAnalysisResult: (result: ShadowAnalysisResult | null) => void;
   
-  // 统一的分析结果（兼容性）
+  // Consolidated analysis results (legacy compatibility)
   analysisResults: {
     sunPosition?: SunPosition;
     shadowArea?: number;
     analysisResult?: ShadowAnalysisResult | null;
   };
   setAnalysisResults: (results: Partial<ShadowMapState['analysisResults']>) => void;
+  shadowServiceStatus: ShadowServiceStatus;
+  shadowServiceResult: ShadowServiceResponse | null;
+  shadowServiceError: string | null;
+  setShadowServiceStatus: (status: ShadowServiceStatus) => void;
+  setShadowServiceResult: (result: ShadowServiceResponse | null) => void;
+  setShadowServiceError: (error: string | null) => void;
+  includeCanopy: boolean;
+  setIncludeCanopy: (enabled: boolean) => void;
   
-  // 分析半径
+  // Analysis radius
   analysisRadius: number;
   setAnalysisRadius: (radius: number) => void;
   
-  // 时间动画状态
+  // Time animation state
   isAnimating: boolean;
   setIsAnimating: (animating: boolean) => void;
   
-  // 地图中心和缩放
+  // Map view state
   mapCenter: [number, number];
   mapZoom: number;
   setMapView: (center: [number, number], zoom: number) => void;
   
-  // 状态消息
+  // Status messages
   statusMessages: Array<{ id: string; message: string; type: 'info' | 'warning' | 'error'; timestamp: Date }>;
   addStatusMessage: (message: string, type?: 'info' | 'warning' | 'error') => void;
   removeStatusMessage: (id: string) => void;
   clearStatusMessages: () => void;
+
+  // Mobility datasets (CSV-driven traces)
+  mobilityDatasets: MobilityDataset[];
+  mobilityTraces: Record<string, MobilityCsvRecord[]>;
+  addMobilityDataset: (dataset: MobilityDataset, rows: MobilityCsvRecord[]) => void;
+  removeMobilityDataset: (datasetId: string) => void;
+  setMobilityDatasetVisibility: (datasetId: string, visible: boolean) => void;
+  clearMobilityDatasets: () => void;
+  activeMobilityDatasetId: string | null;
+  setActiveMobilityDataset: (datasetId: string | null) => void;
+  mobilitySunlight: Record<string, MobilitySunlightSample[]>;
+  mobilitySunlightProgress: Record<string, MobilitySunlightProgress>;
+  mobilitySunlightStatus: Record<string, 'idle' | 'loading' | 'success' | 'error'>;
+  mobilitySunlightError: Record<string, string | null>;
+  computeMobilitySunlight: (datasetId: string) => Promise<void>;
+  clearMobilitySunlight: (datasetId?: string) => void;
+  exportMobilitySunlight: (datasetId: string, format: 'csv' | 'json') => void;
+
+  // Uploaded geometries & analysis
+  uploadedGeometries: UploadedGeometry[];
+  addUploadedGeometry: (geometry: UploadedGeometry) => void;
+  removeUploadedGeometry: (geometryId: string) => void;
+  clearUploadedGeometries: () => void;
+  selectedGeometryId: string | null;
+  selectGeometry: (geometryId: string | null) => void;
+  geometryAnalyses: Record<string, GeometryAnalysis>;
+  setGeometryAnalysis: (analysis: GeometryAnalysis) => void;
+  clearGeometryAnalyses: (geometryId?: string) => void;
+  exportGeometryAnalysis: (geometryId: string, format: 'json' | 'csv') => void;
 
   // Mobility trace
   mobilityTrace: MobilityTracePoint[];
@@ -65,19 +157,32 @@ interface ShadowMapState {
   setTracePlaying: (playing: boolean) => void;
   advanceTraceIndex: () => void;
   
-  // 数据层管理方法
+  // Data layer helpers
   toggleDataLayer: (layerId: DataLayerType) => void;
   updateDataLayer: (layerId: DataLayerType, updates: Partial<DataLayer>) => void;
   setActiveDataLayer: (layerId: DataLayerType) => void;
   getEnabledLayers: () => DataLayer[];
 
-  // 天气 / 云量信息
+  // Weather snapshot
   currentWeather: WeatherSnapshot;
   setCurrentWeather: (snapshot: Partial<WeatherSnapshot>) => void;
+
+  buildingsLoaded: boolean;
+  setBuildingsLoaded: (loaded: boolean) => void;
+  isLoadingBuildings: boolean;
+  setIsLoadingBuildings: (loading: boolean) => void;
+  shadowSimulatorReady: boolean;
+  setShadowSimulatorReady: (ready: boolean) => void;
+  isInitialisingShadow: boolean;
+  setIsInitialisingShadow: (loading: boolean) => void;
+  autoLoadBuildings: boolean;
+  setAutoLoadBuildings: (enabled: boolean) => void;
+  viewportActions: ViewportActions;
+  setViewportActions: (actions: Partial<ViewportActions>) => void;
 }
 
 export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
-  currentDate: new Date(2024, 0, 1, 12, 0, 0), // 🔧 默认中午12点，避免自动跳转到当前时间
+  currentDate: new Date(), // Default to now; avoids stale weather lookups
   setCurrentDate: (date: Date) => {
     // ✅ Validate date to prevent invalid values
     if (!date || isNaN(date.getTime())) {
@@ -87,9 +192,34 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     console.log('⏰ Setting current date:', date);
     set({ currentDate: new Date(date) });
   },
+
+  mobilityPlaybackTime: null,
+  setMobilityPlaybackTime: (date: Date | null) => {
+    if (date && isNaN(date.getTime())) {
+      console.error('❌ Invalid date provided to setMobilityPlaybackTime:', date);
+      return;
+    }
+    set({ mobilityPlaybackTime: date ? new Date(date) : null });
+  },
+  isMobilityPlaying: false,
+  setMobilityPlaying: (playing: boolean) => set({ isMobilityPlaying: playing }),
+  mobilityFlowStyle: 'trips',
+  setMobilityFlowStyle: (style: 'trips' | 'path') => set({ mobilityFlowStyle: style }),
+  mobilityColorBySunlight: true,
+  setMobilityColorBySunlight: (enabled: boolean) => set({ mobilityColorBySunlight: enabled }),
+  mobilityInferIndoor: false,
+  setMobilityInferIndoor: (enabled: boolean) => set({ mobilityInferIndoor: enabled }),
+  mobilityDashIndoor: true,
+  setMobilityDashIndoor: (enabled: boolean) => set({ mobilityDashIndoor: enabled }),
+  mobilityPathWidthScale: 1,
+  setMobilityPathWidthScale: (scale: number) => set({ mobilityPathWidthScale: scale }),
+  figureModeEnabled: false,
+  setFigureModeEnabled: (enabled: boolean) => set((state) => ({ figureModeEnabled: enabled, figureHudVisible: enabled ? true : state.figureHudVisible })),
+  figureHudVisible: true,
+  setFigureHudVisible: (visible: boolean) => set({ figureHudVisible: visible }),
   
   mapSettings: {
-    // 传统设置（保持兼容性）
+    // Legacy settings (for compatibility)
     shadowColor: '#01112f',
     shadowOpacity: 0.7,
     showShadowLayer: true,
@@ -97,28 +227,28 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     showDEMLayer: false,
     showCacheStats: false,
     showSunExposure: false,
-    // 🔧 新增：建筑物筛选控制
-    enableBuildingFilter: false, // 默认关闭筛选，显示所有建筑
-    // 🔧 新增：动态质量控制
-    enableDynamicQuality: true, // 默认开启动态质量调整
+    // Building filter controls
+    enableBuildingFilter: false, // Disabled by default; show all buildings
+    // Dynamic quality controls
+    enableDynamicQuality: true, // Enable adaptive quality by default
     autoOptimize: false,
     
-    // 新的数据层系统
+    // Data layer registry
     dataLayers: {
       shadows: {
         id: 'shadows',
-        name: '实时阴影',
-        description: '当前时刻的阴影覆盖情况',
+        name: 'Live Shadows',
+        description: 'Real-time shadow overlay for the current timestamp',
         icon: '🌑',
-        enabled: true, // 与showShadowLayer同步
+        enabled: true, // Mirrors showShadowLayer flag
         opacity: 0.7,
         color: '#01112f',
         renderMode: 'overlay'
       },
       sunlight_hours: {
         id: 'sunlight_hours',
-        name: '日照时长',
-        description: '一天内各区域的日照时长分析',
+        name: 'Sunlight Hours',
+        description: 'Displays sampled sunlight duration heatmap',
         icon: '☀️',
         enabled: false,
         opacity: 0.6,
@@ -126,8 +256,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       },
       annual_sunlight: {
         id: 'annual_sunlight',
-        name: '年度日照',
-        description: '全年日照强度和分布统计',
+        name: 'Annual Sunlight',
+        description: 'Annual sunlight distribution summary',
         icon: '🌞',
         enabled: false,
         opacity: 0.5,
@@ -135,8 +265,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       },
       buildings: {
         id: 'buildings',
-        name: '建筑物',
-        description: '建筑物轮廓和高度信息',
+        name: 'Buildings',
+        description: 'Building footprints and height attributes',
         icon: '🏢',
         enabled: true,
         opacity: 0.8,
@@ -145,8 +275,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       },
       terrain: {
         id: 'terrain',
-        name: '地形',
-        description: '数字高程模型（DEM）',
+        name: 'Terrain',
+        description: 'Digital elevation model (DEM)',
         icon: '🗻',
         enabled: false,
         opacity: 0.5,
@@ -155,12 +285,13 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     } as { [K in DataLayerType]: DataLayer },
     
     activeDataLayer: 'shadows' as DataLayerType,
+    baseMapId: 'mapbox-streets',
   },
   updateMapSettings: (settings: Partial<MapSettings>) => 
     set(state => {
       const newMapSettings = { ...state.mapSettings, ...settings };
       
-      // 同步数据层状态
+      // Sync derived layer flags
       if (settings.showShadowLayer !== undefined) {
         newMapSettings.dataLayers.shadows.enabled = settings.showShadowLayer;
       }
@@ -185,7 +316,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     shadowColor: '#01112f',
     shadowBlur: 2,
     enableShadowAnimation: false,
-    showSunExposure: false, // 控制太阳曝光热力图显示
+    showSunExposure: false,
     autoCloudAttenuation: true,
     manualSunlightFactor: 1,
   },
@@ -195,7 +326,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   sunPosition: { altitude: 0, azimuth: 0 },
   setSunPosition: (position: SunPosition) => {
     set({ sunPosition: position });
-    // 同时更新 analysisResults 中的 sunPosition
+    // Keep consolidated analysis sun position in sync
     const current = get();
     set({ 
       analysisResults: { 
@@ -211,6 +342,14 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   analysisResults: {},
   setAnalysisResults: (results: Partial<ShadowMapState['analysisResults']>) =>
     set(state => ({ analysisResults: { ...state.analysisResults, ...results } })),
+  shadowServiceStatus: 'idle',
+  shadowServiceResult: null,
+  shadowServiceError: null,
+  includeCanopy: true,
+  setShadowServiceStatus: (status) => set({ shadowServiceStatus: status }),
+  setShadowServiceResult: (result) => set({ shadowServiceResult: result }),
+  setShadowServiceError: (error) => set({ shadowServiceError: error ?? null }),
+  setIncludeCanopy: (enabled: boolean) => set({ includeCanopy: enabled }),
   
   analysisRadius: 500,
   setAnalysisRadius: (radius: number) => set({ analysisRadius: radius }),
@@ -218,8 +357,8 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
   isAnimating: false,
   setIsAnimating: (animating: boolean) => set({ isAnimating: animating }),
   
-  mapCenter: [39.9042, 116.4074], // 北京
-  mapZoom: 15,
+  mapCenter: [114.1694, 22.3193], // Hong Kong default (lng, lat)
+  mapZoom: 16,
   setMapView: (center: [number, number], zoom: number) => set({ mapCenter: center, mapZoom: zoom }),
 
   mobilityTrace: [],
@@ -255,15 +394,347 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
     set(state => ({
       statusMessages: [
         { id, message, type, timestamp: new Date() },
-        ...state.statusMessages.slice(0, 4) // 只保留最新的5条消息
+        ...state.statusMessages.slice(0, 4) // Keep newest five entries
       ]
     }));
   },
   removeStatusMessage: (id: string) => 
     set(state => ({ statusMessages: state.statusMessages.filter(msg => msg.id !== id) })),
   clearStatusMessages: () => set({ statusMessages: [] }),
+
+  mobilityDatasets: [],
+  mobilityTraces: {},
+  mobilitySunlight: {},
+  mobilitySunlightProgress: {},
+  mobilitySunlightStatus: {},
+  mobilitySunlightError: {},
+  addMobilityDataset: (dataset, rows) =>
+    set(state => ({
+      mobilityDatasets: [...state.mobilityDatasets, dataset],
+      mobilityTraces: { ...state.mobilityTraces, [dataset.id]: rows },
+    })),
+  removeMobilityDataset: (datasetId) =>
+    set(state => {
+      const { [datasetId]: _removed, ...rest } = state.mobilityTraces;
+      const remainingDatasets = state.mobilityDatasets.filter(dataset => dataset.id !== datasetId);
+      const removedWasActive = state.activeMobilityDatasetId === datasetId;
+      const nextDatasetId = removedWasActive ? (remainingDatasets[0]?.id ?? null) : state.activeMobilityDatasetId;
+      const nextDataset = remainingDatasets.find(dataset => dataset.id === nextDatasetId) ?? null;
+      return {
+        mobilityDatasets: remainingDatasets,
+        mobilityTraces: rest,
+        mobilitySunlight: Object.fromEntries(
+          Object.entries(state.mobilitySunlight).filter(([key]) => key !== datasetId),
+        ),
+        mobilitySunlightProgress: Object.fromEntries(
+          Object.entries(state.mobilitySunlightProgress).filter(([key]) => key !== datasetId),
+        ),
+        mobilitySunlightStatus: Object.fromEntries(
+          Object.entries(state.mobilitySunlightStatus).filter(([key]) => key !== datasetId),
+        ),
+        mobilitySunlightError: Object.fromEntries(
+          Object.entries(state.mobilitySunlightError).filter(([key]) => key !== datasetId),
+        ),
+        activeMobilityDatasetId: nextDatasetId,
+        mobilityPlaybackTime: removedWasActive
+          ? nextDataset
+            ? new Date(nextDataset.timeRange.start)
+            : null
+          : state.mobilityPlaybackTime,
+        isMobilityPlaying: removedWasActive ? false : state.isMobilityPlaying,
+      };
+    }),
+  setMobilityDatasetVisibility: (datasetId, visible) =>
+    set(state => ({
+      mobilityDatasets: state.mobilityDatasets.map(dataset =>
+        dataset.id === datasetId ? { ...dataset, visible } : dataset
+      ),
+    })),
+  clearMobilityDatasets: () =>
+    set({
+      mobilityDatasets: [],
+      mobilityTraces: {},
+      mobilitySunlight: {},
+      mobilitySunlightProgress: {},
+      mobilitySunlightStatus: {},
+      mobilitySunlightError: {},
+      activeMobilityDatasetId: null,
+      mobilityPlaybackTime: null,
+      isMobilityPlaying: false,
+    }),
+  activeMobilityDatasetId: null,
+  setActiveMobilityDataset: (datasetId: string | null) =>
+    set(state => {
+      if (!datasetId) {
+        return { activeMobilityDatasetId: null, mobilityPlaybackTime: null, isMobilityPlaying: false };
+      }
+      if (state.activeMobilityDatasetId === datasetId) {
+        return {};
+      }
+      const nextDataset = state.mobilityDatasets.find(dataset => dataset.id === datasetId) ?? null;
+      return {
+        activeMobilityDatasetId: datasetId,
+        mobilityPlaybackTime: nextDataset ? new Date(nextDataset.timeRange.start) : null,
+        isMobilityPlaying: false,
+      };
+    }),
+
+  computeMobilitySunlight: async (datasetId: string) => {
+    const state = get();
+    const rows = state.mobilityTraces[datasetId];
+    if (!rows || !rows.length) {
+      state.addStatusMessage?.('No mobility points available for sunlight analysis.', 'warning');
+      return;
+    }
+
+    set(current => ({
+      mobilitySunlightStatus: { ...current.mobilitySunlightStatus, [datasetId]: 'loading' },
+      mobilitySunlightProgress: { ...current.mobilitySunlightProgress, [datasetId]: { completed: 0, total: 0 } },
+      mobilitySunlightError: { ...current.mobilitySunlightError, [datasetId]: null },
+    }));
+
+    try {
+      let progressTotal: number | null = null;
+      const samples = await computeMobilitySunlightForRows(rows, {
+        includeCanopy: state.includeCanopy,
+        onProgress: (progress) => {
+          progressTotal = progress.total;
+          set(current => ({
+            mobilitySunlightProgress: { ...current.mobilitySunlightProgress, [datasetId]: progress },
+          }));
+        },
+      });
+      const total = typeof progressTotal === 'number' ? progressTotal : (samples.length || 1);
+      const finalProgress: MobilitySunlightProgress = { completed: total, total };
+      set(current => ({
+        mobilitySunlight: { ...current.mobilitySunlight, [datasetId]: samples },
+        mobilitySunlightProgress: { ...current.mobilitySunlightProgress, [datasetId]: finalProgress },
+        mobilitySunlightStatus: { ...current.mobilitySunlightStatus, [datasetId]: 'success' },
+      }));
+      state.addStatusMessage?.(`Sunlight states ready (${samples.length} points).`, 'info');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      set(current => ({
+        mobilitySunlightStatus: { ...current.mobilitySunlightStatus, [datasetId]: 'error' },
+        mobilitySunlightError: { ...current.mobilitySunlightError, [datasetId]: message },
+      }));
+      state.addStatusMessage?.(`Sunlight computation failed: ${message}`, 'error');
+    }
+  },
+
+  clearMobilitySunlight: (datasetId?: string) => {
+    if (!datasetId) {
+      set({ mobilitySunlight: {}, mobilitySunlightProgress: {}, mobilitySunlightStatus: {}, mobilitySunlightError: {} });
+      return;
+    }
+    set(state => {
+      const { [datasetId]: _removed, ...restSunlight } = state.mobilitySunlight;
+      const { [datasetId]: _progressRemoved, ...restProgress } = state.mobilitySunlightProgress;
+      const { [datasetId]: _statusRemoved, ...restStatus } = state.mobilitySunlightStatus;
+      const { [datasetId]: _errorRemoved, ...restError } = state.mobilitySunlightError;
+      return {
+        mobilitySunlight: restSunlight,
+        mobilitySunlightProgress: restProgress,
+        mobilitySunlightStatus: restStatus,
+        mobilitySunlightError: restError,
+      };
+    });
+  },
+
+  exportMobilitySunlight: (datasetId: string, format: 'csv' | 'json' = 'csv') => {
+    const state = get();
+    const samples = state.mobilitySunlight[datasetId];
+    if (!samples || !samples.length) {
+      state.addStatusMessage?.('⚠️ No sunlight samples to export.', 'warning');
+      return;
+    }
+
+    if (typeof window === 'undefined') return;
+
+    const dataset = state.mobilityDatasets.find(item => item.id === datasetId) ?? null;
+    const filenameBase = (dataset?.name || 'mobility').replace(/\s+/g, '_').toLowerCase();
+
+    if (format === 'json') {
+      const blob = new Blob([JSON.stringify(samples, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filenameBase}-sunlight.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      state.addStatusMessage?.('📄 Exported sunlight samples (JSON).', 'info');
+      return;
+    }
+
+    const header = [
+      'traceId',
+      'time',
+      'lng',
+      'lat',
+      'sunlit',
+      'shadowPercent',
+      'bucketStart',
+      'bucketEnd',
+      'source',
+      'cloudCover',
+      'sunlightFactor',
+      'sunlitEffective',
+      'shadowPercentEffective',
+      'solarIrradianceWm2',
+      'irradianceEffective',
+      'durationSeconds',
+      'sunlightSeconds',
+      'shadowSeconds',
+      'irradianceJ',
+    ].join(',') + '\n';
+
+    const rows = samples
+      .map(sample => {
+        const coords = sample.coordinates ?? [null, null];
+        return [
+          sample.traceId ?? '',
+          sample.timestamp instanceof Date ? sample.timestamp.toISOString() : '',
+          coords[0],
+          coords[1],
+          sample.sunlit,
+          sample.shadowPercent,
+          sample.bucketStart,
+          sample.bucketEnd,
+          sample.source,
+          sample.cloudCover ?? '',
+          sample.sunlightFactor ?? '',
+          sample.sunlitEffective ?? '',
+          sample.shadowPercentEffective ?? '',
+          sample.solarIrradianceWm2 ?? '',
+          sample.irradianceEffective ?? '',
+          sample.durationSeconds ?? '',
+          sample.sunlightSeconds ?? '',
+          sample.shadowSeconds ?? '',
+          sample.irradianceJ ?? '',
+        ].join(',');
+      })
+      .join('\n');
+
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filenameBase}-sunlight.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    state.addStatusMessage?.('📄 Exported sunlight samples (CSV).', 'info');
+  },
+
+  uploadedGeometries: [],
+  addUploadedGeometry: (geometry: UploadedGeometry) => {
+    const prevState = get();
+    set({
+      uploadedGeometries: [...prevState.uploadedGeometries, geometry],
+      selectedGeometryId: geometry.id,
+    });
+
+    get().addStatusMessage?.(`Uploaded geometry "${geometry.name}"`, 'info');
+  },
+  removeUploadedGeometry: (geometryId: string) => {
+    set(state => {
+      const remaining = state.uploadedGeometries.filter(item => item.id !== geometryId);
+      const { [geometryId]: _removed, ...restAnalyses } = state.geometryAnalyses;
+      const nextSelected = state.selectedGeometryId === geometryId ? (remaining[0]?.id ?? null) : state.selectedGeometryId;
+      return {
+        uploadedGeometries: remaining,
+        selectedGeometryId: nextSelected,
+        geometryAnalyses: restAnalyses,
+      };
+    });
+  },
+  clearUploadedGeometries: () => {
+    set({ uploadedGeometries: [], selectedGeometryId: null, geometryAnalyses: {} });
+  },
+  selectedGeometryId: null,
+  selectGeometry: (geometryId: string | null) => {
+    set({ selectedGeometryId: geometryId });
+  },
+  geometryAnalyses: {},
+  setGeometryAnalysis: (analysis: GeometryAnalysis) => {
+    set(state => ({
+      geometryAnalyses: {
+        ...state.geometryAnalyses,
+        [analysis.geometryId]: analysis,
+      },
+    }));
+  },
+  clearGeometryAnalyses: (geometryId?: string) => {
+    if (!geometryId) {
+      set({ geometryAnalyses: {} });
+      return;
+    }
+    set(state => {
+      const { [geometryId]: _removed, ...rest } = state.geometryAnalyses;
+      return { geometryAnalyses: rest };
+    });
+  },
+  exportGeometryAnalysis: (geometryId: string, format: 'json' | 'csv') => {
+    const state = get();
+    const analysis = state.geometryAnalyses[geometryId];
+    const geometry = state.uploadedGeometries.find(item => item.id === geometryId);
+
+    if (!analysis || !geometry) {
+      state.addStatusMessage?.('⚠️ No analysis data available for export.', 'warning');
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const filenameBase = (geometry.name || 'geometry').replace(/\s+/g, '_').toLowerCase();
+
+    if (format === 'json') {
+      const payload = {
+        geometry: geometry.feature,
+        stats: analysis.stats,
+        samples: analysis.samples ?? [],
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filenameBase}-analysis.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      state.addStatusMessage?.('📄 Exported analysis as JSON.', 'info');
+      return;
+    }
+
+    const samples = analysis.samples ?? [];
+    if (!samples.length) {
+      state.addStatusMessage?.('⚠️ No sample data available for CSV export.', 'warning');
+      return;
+    }
+
+    const header = 'lat,lng,shadowPercent,hoursOfSun\n';
+    const rows = samples
+      .map(sample => `${sample.lat},${sample.lng},${sample.shadowPercent},${sample.hoursOfSun}`)
+      .join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filenameBase}-analysis.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    state.addStatusMessage?.('📄 Exported analysis as CSV.', 'info');
+  },
   
-  // 数据层管理方法实现
+  // Data layer helper implementation (derived state)
   toggleDataLayer: (layerId: DataLayerType) => {
     set(state => {
       const newEnabled = !state.mapSettings.dataLayers[layerId].enabled;
@@ -278,7 +749,7 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
         }
       };
       
-      // 同步到传统设置
+      // Sync to legacy flags
       if (layerId === 'shadows') {
         newMapSettings.showShadowLayer = newEnabled;
       } else if (layerId === 'sunlight_hours') {
@@ -316,6 +787,20 @@ export const useShadowMapStore = create<ShadowMapState>((set, get) => ({
       }
     }));
   },
+
+  buildingsLoaded: false,
+  setBuildingsLoaded: (loaded: boolean) => set({ buildingsLoaded: loaded }),
+  isLoadingBuildings: false,
+  setIsLoadingBuildings: (loading: boolean) => set({ isLoadingBuildings: loading }),
+  shadowSimulatorReady: false,
+  setShadowSimulatorReady: (ready: boolean) => set({ shadowSimulatorReady: ready }),
+  isInitialisingShadow: false,
+  setIsInitialisingShadow: (loading: boolean) => set({ isInitialisingShadow: loading }),
+  autoLoadBuildings: true,
+  setAutoLoadBuildings: (enabled: boolean) => set({ autoLoadBuildings: enabled }),
+  viewportActions: {},
+  setViewportActions: (actions: Partial<ViewportActions>) =>
+    set(state => ({ viewportActions: { ...state.viewportActions, ...actions } })),
 
   currentWeather: {
     cloudCover: null,

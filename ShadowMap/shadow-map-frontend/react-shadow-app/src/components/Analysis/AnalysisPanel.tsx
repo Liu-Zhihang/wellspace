@@ -1,4 +1,70 @@
 import { useShadowMapStore } from '../../store/shadowMapStore';
+import { CANOPY_RASTER_PATH } from '../../config/runtime';
+import type { ShadowServiceResponse } from '../../types/index.ts';
+
+const formatNumber = (num: number | undefined, digits = 1) =>
+  typeof num === 'number' && Number.isFinite(num) ? num.toFixed(digits) : '—';
+
+const ShadowEngineStatusCard = ({
+  status,
+  result,
+  error,
+}: {
+  status: string;
+  result: ShadowServiceResponse | null;
+  error: string | null;
+}) => {
+  const statusMap: Record<string, { label: string; className: string }> = {
+    loading: { label: 'Running analysis…', className: 'bg-amber-100 text-amber-700' },
+    success: { label: 'Analysis ready', className: 'bg-emerald-100 text-emerald-700' },
+    error: { label: 'Analysis failed', className: 'bg-rose-100 text-rose-700' },
+    idle: { label: 'Idle', className: 'bg-slate-200 text-slate-700' },
+  };
+
+  const meta = statusMap[status] ?? statusMap.idle;
+
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-gray-500">Shadow Engine</p>
+          <p className="text-base font-semibold text-gray-800">{meta.label}</p>
+        </div>
+        <span className={`px-3 py-1 text-xs font-medium rounded-full ${meta.className}`}>{status}</span>
+      </div>
+
+      {result && (
+        <dl className="grid grid-cols-2 gap-3 text-sm text-gray-700">
+          <div>
+            <dt className="text-xs text-gray-500">Bucket</dt>
+            <dd>{new Date(result.bucketStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">Cache</dt>
+            <dd>{result.cache.hit ? 'Cache hit' : 'Fresh compute'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">Avg Sunlight</dt>
+            <dd>{result.metrics.avgSunlightHours.toFixed(1)} h</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-gray-500">Shadow Coverage</dt>
+            <dd>{result.metrics.avgShadowPercent.toFixed(1)}%</dd>
+          </div>
+        </dl>
+      )}
+
+      {error && <p className="text-xs text-rose-600">{error}</p>}
+    </div>
+  );
+};
+
+const NoGeometryHint = () => (
+  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-gray-600">
+    <p className="font-medium text-gray-800 mb-1">No geometry selected</p>
+    <p>Upload a polygon via the Layers panel, then select it on the map to run a shadow analysis.</p>
+  </div>
+);
 
 export const AnalysisPanel = () => {
   const {
@@ -6,29 +72,168 @@ export const AnalysisPanel = () => {
     analysisResults,
     statusMessages,
     removeStatusMessage,
+    uploadedGeometries,
+    selectedGeometryId,
+    selectGeometry,
+    geometryAnalyses,
+    exportGeometryAnalysis,
+    shadowServiceStatus,
+    shadowServiceResult,
+    shadowServiceError,
+    includeCanopy,
+    setIncludeCanopy,
   } = useShadowMapStore();
 
+  const currentGeometry = selectedGeometryId
+    ? uploadedGeometries.find((geometry) => geometry.id === selectedGeometryId)
+    : undefined;
+  const geometryAnalysis = selectedGeometryId
+    ? geometryAnalyses[selectedGeometryId]
+    : undefined;
 
-  // 格式化数值
-  const formatNumber = (num: number | undefined, decimals: number = 1): string => {
-    return num?.toFixed(decimals) || '-';
-  };
+  const canopyPathLabel = CANOPY_RASTER_PATH ?? 'engine default';
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-4 max-h-screen overflow-y-auto">
-      {/* 简洁标题 */}
-      <h3 className="text-lg font-medium text-gray-800">分析结果</h3>
+      <h3 className="text-lg font-medium text-gray-800">Analysis Results</h3>
 
-      {/* 太阳位置 - 简化显示 */}
+      <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2">
+        <div className="flex items-center gap-2 text-sm text-gray-700">
+          <span className="font-medium text-gray-800">Canopy mode</span>
+          <div className="inline-flex rounded-full bg-white shadow-sm border border-slate-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setIncludeCanopy(true)}
+              className={`px-3 py-1 text-xs font-semibold transition ${
+                includeCanopy ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-slate-100'
+              }`}
+            >
+              含树冠
+            </button>
+            <button
+              type="button"
+              onClick={() => setIncludeCanopy(false)}
+              className={`px-3 py-1 text-xs font-semibold transition ${
+                !includeCanopy ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-slate-100'
+              }`}
+            >
+              仅建筑
+            </button>
+          </div>
+        </div>
+        <span className="text-xs text-gray-500">Path: {canopyPathLabel}</span>
+      </div>
+
+      <ShadowEngineStatusCard
+        status={shadowServiceStatus}
+        result={shadowServiceResult}
+        error={shadowServiceError}
+      />
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h4 className="font-medium text-gray-800">Uploaded Geometries</h4>
+          {selectedGeometryId && (
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                onClick={() => exportGeometryAnalysis(selectedGeometryId, 'json')}
+                className="px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100"
+              >
+                Export JSON
+              </button>
+              <button
+                onClick={() => exportGeometryAnalysis(selectedGeometryId, 'csv')}
+                className="px-3 py-1 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100"
+              >
+                Export CSV
+              </button>
+            </div>
+          )}
+        </div>
+
+        {uploadedGeometries.length === 0 ? (
+          <NoGeometryHint />
+        ) : (
+          <div className="space-y-2">
+            {uploadedGeometries.map((geometry) => {
+              const isActive = geometry.id === selectedGeometryId;
+              return (
+                <button
+                  key={geometry.id}
+                  onClick={() => selectGeometry(geometry.id)}
+                  className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${
+                    isActive ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm' : 'border-gray-200 hover:border-blue-200 hover:bg-blue-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-sm">{geometry.name}</span>
+                    <span className="text-xs text-gray-500">
+                      {geometry.sourceFile ?? 'GeoJSON'}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    Uploaded {geometry.uploadedAt.toLocaleString()}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {currentGeometry && (
+          <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-600 space-y-1">
+            <div>
+              <span className="font-semibold text-gray-700">Extent: </span>
+              {currentGeometry.bbox.map((value) => value.toFixed(4)).join(', ')}
+            </div>
+            {typeof currentGeometry.area === 'number' && (
+              <div>
+                <span className="font-semibold text-gray-700">Estimated area: </span>
+                {currentGeometry.area.toFixed(2)} m²
+              </div>
+            )}
+          </div>
+        )}
+
+        {geometryAnalysis && (
+          <div className="bg-blue-50 rounded-xl p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🌥️</span>
+              <div>
+                <h4 className="font-medium text-gray-800">Analysis Overview</h4>
+                <p className="text-xs text-gray-600">Generated {geometryAnalysis.stats.generatedAt.toLocaleString()}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="text-center">
+                <div className="text-lg font-bold text-blue-600">
+                  {(geometryAnalysis.stats.shadedRatio * 100).toFixed(1)}%
+                </div>
+                <div className="text-gray-600">Shadow coverage</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold text-orange-500">
+                  {geometryAnalysis.stats.avgSunlightHours.toFixed(1)}h
+                </div>
+                <div className="text-gray-600">Average sunlight</div>
+              </div>
+              <div className="text-center col-span-2 text-xs text-gray-500">
+                Generated at {geometryAnalysis.stats.generatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {analysisResults.sunPosition && (
         <div className="bg-gradient-to-br from-yellow-50 to-orange-50 rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2">
             <span className="text-2xl">☀️</span>
             <div>
-              <h4 className="font-medium text-gray-800">太阳位置</h4>
+              <h4 className="font-medium text-gray-800">Sun Position</h4>
               <p className="text-sm text-gray-600">
-                高度 {formatNumber(analysisResults.sunPosition.altitude)}° · 
-                方位 {formatNumber(analysisResults.sunPosition.azimuth)}°
+                Altitude {formatNumber(analysisResults.sunPosition.altitude)}° · 
+                Azimuth {formatNumber(analysisResults.sunPosition.azimuth)}°
               </p>
             </div>
           </div>
@@ -37,13 +242,12 @@ export const AnalysisPanel = () => {
               (analysisResults.sunPosition.altitude || 0) > 0 ? 'bg-yellow-400' : 'bg-gray-400'
             }`}></div>
             <span className="text-sm font-medium">
-              {(analysisResults.sunPosition.altitude || 0) > 0 ? '白天' : '夜晚'}
+              {(analysisResults.sunPosition.altitude || 0) > 0 ? 'Daytime' : 'Night'}
             </span>
           </div>
         </div>
       )}
 
-      {/* 状态消息 - 只显示最新的 */}
       {statusMessages.length > 0 && (
         <div className="space-y-2">
           {statusMessages.slice(0, 3).map((msg) => (
@@ -72,35 +276,33 @@ export const AnalysisPanel = () => {
         </div>
       )}
 
-      {/* 建筑物统计 - 简化 */}
       {analysisResult && (
         <div className="bg-gray-50 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xl">🏢</span>
-            <h4 className="font-medium text-gray-800">建筑物数据</h4>
+            <h4 className="font-medium text-gray-800">Building Summary</h4>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="text-center">
               <div className="text-lg font-bold text-blue-600">
                 {analysisResult.buildingCount || 0}
               </div>
-              <div className="text-gray-600">建筑物数量</div>
+              <div className="text-gray-600">Building count</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-bold text-green-600">
                 {formatNumber(analysisResult.averageHeight || 0, 0)}m
               </div>
-              <div className="text-gray-600">平均高度</div>
+              <div className="text-gray-600">Average height</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* 空状态 */}
       {!analysisResult && !analysisResults.sunPosition && (
         <div className="text-center py-12 text-gray-400">
           <div className="text-4xl mb-3">🌤️</div>
-          <p className="text-sm">点击地图查看阴影分析</p>
+          <p className="text-sm">Select a geometry on the map to view shadow analysis.</p>
         </div>
       )}
     </div>

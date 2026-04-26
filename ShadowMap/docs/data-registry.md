@@ -18,7 +18,12 @@ Use one centralized datasets home per machine, then keep one project-level data 
       infra/
         buildings/hong_kong_cleaned.geojson
         canopy/HKtree_small.tif
+        canopy/meta_wri_chm/index/tiles.geojson
+        canopy/meta_wri_chm/raw_tiles/us_subset/*.tif
+        canopy/meta_wri_chm/manifests/us_lower48_tiles.txt
+        canopy/meta_wri_chm/derived/us_canopy_height.vrt
         weather/era5/era5_%Y%m_hk.nc
+        weather/era5/global/era5_%Y%m.nc
   greenspace_seasonality -> ~/data/Greenspace_Seasonality_Data_Cube
   facebook_disaster -> ~/data/Facebook_Disaster
 ```
@@ -33,7 +38,11 @@ Set `SHADOWMAP_DATA_ROOT` in `.shadowmap.env`, then derive the rest from it.
 | Batch output root | Derived output | `derived/GLAN_processed_recalc_migrated_part1` | Should remain persistent, not `/tmp` |
 | Hong Kong building dataset | Infrastructure | `infra/buildings/hong_kong_cleaned.geojson` | Use this for offline/local workflows. If the GeoJSON becomes multi-GB, switch the Node backend to `BUILDING_SOURCE=wfs` and keep the sibling `.gpkg` only for preprocessing or Python workflows that need it |
 | Canopy raster | Infrastructure | `infra/canopy/HKtree_small.tif` | Optional; can disable with `MOBILITY_INCLUDE_CANOPY=false` |
+| Canopy tiles index | Infrastructure | `infra/canopy/meta_wri_chm/index/tiles.geojson` | Cached local copy of the public Meta/WRI `tiles.geojson`; keep this local so shard prep does not refetch it every run |
 | ERA5 monthly files | Infrastructure | `infra/weather/era5/era5_%Y%m_hk.nc` | Used by weather/night fast-path |
+| Meta/WRI canopy-height tiles | Infrastructure | `infra/canopy/meta_wri_chm/raw_tiles/us_subset/*.tif` | Public AWS dataset; keep raw tiles immutable and build a VRT/COG for compute |
+| National canopy mosaic | Infrastructure | `infra/canopy/meta_wri_chm/derived/us_canopy_height.vrt` | Recommended `SHADOW_ENGINE_CANOPY_RASTER_PATH` for US-scale offline runs |
+| National ERA5 monthly files | Infrastructure | `infra/weather/era5/global/era5_%Y%m.nc` | Local weather/cloud source for offline US-scale runs |
 | GeoServer WFS | Service dependency | `SHADOWMAP_GEOSERVER_ORIGIN` | External service, not a repo asset |
 | Shadow engine service | Service dependency | `SHADOWMAP_ENGINE_ORIGIN` | Python engine microservice |
 | Backend service | Service dependency | `SHADOWMAP_BACKEND_ORIGIN` | Node API used by frontend and scripts |
@@ -50,6 +59,57 @@ Set `SHADOWMAP_DATA_ROOT` in `.shadowmap.env`, then derive the rest from it.
 ## Helper script
 
 Use `./scripts/ops/setup_dataset_root.sh` to create the canonical ShadowMap layout and compatibility links on a host.
+
+## National canopy and weather sources
+
+For US-scale mobility shadow runs, keep weather/cloud and canopy inputs local instead of pulling them through the demo service path.
+
+- Weather/cloud:
+  store local ERA5 single-level monthly NetCDF files with at least `tcc` and `ssrd` under `infra/weather/era5/...`.
+- Recommended offline path:
+  set `ERA5_FILE_TEMPLATE` and let `batch_mobility_shadow.py` read ERA5 directly.
+- Repo helper:
+  `./scripts/ops/weather/download_era5_single_levels_month.py` can fetch monthly ERA5 single-level files to the canonical local directory.
+- Demo path:
+  `/api/weather/current` can remain available for frontend display, but do not make national offline compute depend on it.
+
+- Canopy:
+  use the public AWS "High Resolution Canopy Height Maps by WRI and Meta" dataset:
+  https://registry.opendata.aws/dataforgood-fb-forests/
+- Public global CHM bucket:
+  `s3://dataforgood-fb-data/forests/v1/alsgedi_global_v6_float/chm/`
+- Public California CHM bucket:
+  `s3://dataforgood-fb-data/forests/v1/California/alsgedi_ca_v5_float/chm/`
+- Model/documentation repo:
+  https://github.com/facebookresearch/HighResCanopyHeight
+
+Important interpretation rule:
+
+- This AWS dataset is canopy height, not precomputed tree shade.
+- Use it as a height raster obstruction layer.
+- Time-varying tree shade still has to be computed by the engine from sun angle, timestamp, and geometry.
+
+Recommended workflow:
+
+1. Cache `tiles.geojson` locally under `infra/canopy/meta_wri_chm/index/tiles.geojson` using `./scripts/ops/canopy/sync_tiles_index.sh`.
+2. Download only the required regional CHM tiles into `infra/canopy/meta_wri_chm/raw_tiles/...`.
+3. Keep a tile manifest under `infra/canopy/meta_wri_chm/manifests/...` so the selected subset is reproducible.
+4. Build one VRT or COG mosaic under `infra/canopy/meta_wri_chm/derived/...`.
+5. Point `SHADOW_ENGINE_CANOPY_RASTER_PATH` at that derived single entry point.
+
+For nationwide sharded mobility runs, prefer a persistent raw-tile cache plus shard-local VRTs instead of a single full-US mirror:
+
+- `scripts/ops/run_mobility_shadow_sharded.sh` now supports `MOBILITY_CANOPY_AUTO_PREP=true`.
+- For sparse nationwide runs, pair canopy auto-prep with `MOBILITY_SHARD_STRATEGY=spatial` so each shard groups geographically nearby files instead of mixing the whole US into one shard bbox.
+- For large first-run canopy jobs, set `MOBILITY_CANOPY_PREFETCH_MODE=union` so the runner unions all shard manifests and downloads missing tiles once in parallel before shard compute starts.
+- In that mode, each shard:
+  1. computes its own trajectory bbox,
+  2. generates a canopy manifest from the Meta/WRI tile index,
+  3. downloads only missing tiles into `MOBILITY_CANOPY_CACHE_DIR`,
+  4. builds a shard-local VRT under the run directory,
+  5. passes that VRT to the Python shadow runner.
+- This is the preferred production path when the host cannot afford a `lower48`-wide canopy mirror.
+- The raw-tile cache should be treated as infrastructure cache, not as a run artifact. Keep run-local manifests, bbox summaries, and VRTs under the run directory so the exact subset remains auditable.
 
 ## Continental-scale building catalogs
 

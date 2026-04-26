@@ -7,6 +7,7 @@ import { baseMapManager } from '../../services/baseMapManager';
 import { useShadowAnalysis } from '../../hooks/useShadowAnalysis';
 import { BaseMapSelector } from '../Controls/BaseMapSelector';
 import { advancedCacheManager } from '../../services/advancedCacheManager';
+import { DEM_TILE_URL_TEMPLATE } from '../../config/runtime';
 
 // 修复 Leaflet 默认图标问题
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -228,7 +229,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ className = '' }) =>
     const demOpacity = mapSettings.dataLayers.terrain.opacity;
 
     if (mapSettings.showDEMLayer && !demTileLayerRef.current) {
-      demTileLayerRef.current = L.tileLayer('http://localhost:3001/api/dem/{z}/{x}/{y}.png', {
+      demTileLayerRef.current = L.tileLayer(DEM_TILE_URL_TEMPLATE, {
         attribution: '© 自建DEM服务',
         maxZoom: 15,
         opacity: demOpacity,

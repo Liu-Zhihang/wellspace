@@ -7,7 +7,7 @@ import {
 } from '../services/buildingWfsService';
 import { resolveTilesForBounds } from '../services/tileCatalogService';
 
-const router = express.Router();
+const router: express.Router = express.Router();
 
 router.get('/test', async (_req, res) => {
   try {

@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDEMTile } from '../services/demService';
 
-const router = express.Router();
+const router: express.Router = express.Router();
 
 // DEM瓦片服务端点
 router.get('/:z/:x/:y.png', async (req, res) => {
@@ -76,7 +76,7 @@ router.get('/:z/:x/:y.png', async (req, res) => {
         res.status(500).json({ 
           error: 'Internal server error', 
           message: '获取DEM数据时发生内部错误',
-          details: process.env.NODE_ENV === 'development' ? errorMsg : undefined
+          details: process.env['NODE_ENV'] === 'development' ? errorMsg : undefined
         });
       }
     }

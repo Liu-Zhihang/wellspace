@@ -1,41 +1,45 @@
-import dotenv from 'dotenv';
 import path from 'path';
+import { loadShadowMapEnv } from './loadEnv';
 
-// 加载环境变量
-dotenv.config();
+loadShadowMapEnv();
 
-// 配置接口定义
 interface Config {
   env: string;
   port: number;
+  database: {
+    enabled: boolean;
+    provider: 'mongodb';
+  };
   mongodb: {
     uri: string;
     database: string;
     maxPoolSize: number;
     minPoolSize: number;
   };
-  redis: {
-    host: string;
-    port: number;
-    password?: string;
-    db: number;
-  } | null;
-  cache: {
-    ttl: number; // 缓存过期时间（秒）
-    maxSize: number; // 内存缓存最大条目数
+  service: {
+    backendOrigin: string;
+    engineOrigin: string | null;
+    geoserverOrigin: string | null;
   };
   data: {
     demPath: string;
     buildingsPath: string;
-    cachePath: string;
   };
   api: {
-    overpassUrl: string;
-    weatherApiUrl: string | null;
-    rateLimit: {
-      windowMs: number;
-      maxRequests: number;
-    };
+    weatherBaseUrl: string | null;
+  };
+  analysis: {
+    engineBaseUrl: string | null;
+    requestTimeoutMs: number;
+    cacheTtlMs: number;
+    maxCacheEntries: number;
+    deploymentMode: 'microservice' | 'worker';
+    localScriptPath: string | null;
+    pythonPath: string;
+    timezone: string;
+    backendBaseUrl: string;
+    maxFeatures: number;
+    canopyRasterPath: string | null;
   };
   cors: {
     origins: string[];
@@ -43,96 +47,107 @@ interface Config {
   };
 }
 
-// 默认配置
-const defaultConfig: Config = {
+const readEnv = (...keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
+const normalizeOrigin = (value?: string | null): string | null => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.replace(/\/+$/, '');
+};
+
+const parseOrigins = (value: string | undefined, defaults: string[]): string[] => {
+  const entries = (value ? value.split(',') : defaults)
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  return Array.from(new Set(entries));
+};
+
+const port = Number.parseInt(readEnv('PORT', 'SHADOWMAP_BACKEND_PORT') ?? '3001', 10);
+const backendOrigin =
+  normalizeOrigin(readEnv('SHADOWMAP_BACKEND_ORIGIN', 'SHADOW_ENGINE_BACKEND_URL')) ??
+  `http://localhost:${port}`;
+const engineOrigin = normalizeOrigin(readEnv('SHADOW_ENGINE_BASE_URL', 'SHADOWMAP_ENGINE_ORIGIN'));
+const geoserverOrigin = normalizeOrigin(readEnv('SHADOWMAP_GEOSERVER_ORIGIN', 'GEOSERVER_BASE_URL'));
+const dbEnabled = readEnv('SHADOWMAP_ENABLE_DB', 'ENABLE_MONGODB', 'SKIP_DB') === 'true' &&
+  readEnv('SKIP_DB') !== 'true';
+
+const config: Config = {
   env: process.env['NODE_ENV'] || 'development',
-  port: parseInt(process.env['PORT'] || '3001', 10),
-  
+  port,
+  database: {
+    enabled: dbEnabled,
+    provider: 'mongodb',
+  },
   mongodb: {
-    uri: process.env['MONGODB_URI'] || 'mongodb://localhost:27017',
-    database: process.env['MONGODB_DATABASE'] || 'shadowmap',
-    maxPoolSize: parseInt(process.env['MONGODB_MAX_POOL_SIZE'] || '10', 10),
-    minPoolSize: parseInt(process.env['MONGODB_MIN_POOL_SIZE'] || '2', 10),
+    uri: readEnv('MONGODB_URI') ?? '',
+    database: readEnv('MONGODB_DATABASE', 'MONGODB_DB_NAME') ?? 'shadowmap',
+    maxPoolSize: Number.parseInt(readEnv('MONGODB_MAX_POOL_SIZE') ?? '20', 10),
+    minPoolSize: Number.parseInt(readEnv('MONGODB_MIN_POOL_SIZE') ?? '2', 10),
   },
-  
-  redis: process.env['REDIS_HOST'] ? {
-    host: process.env['REDIS_HOST'],
-    port: parseInt(process.env['REDIS_PORT'] || '6379', 10),
-    ...(process.env['REDIS_PASSWORD'] && { password: process.env['REDIS_PASSWORD'] }),
-    db: parseInt(process.env['REDIS_DB'] || '0', 10),
-  } : null,
-  
-  cache: {
-    ttl: parseInt(process.env['CACHE_TTL'] || '604800', 10), // 7天
-    maxSize: parseInt(process.env['CACHE_MAX_SIZE'] || '5000', 10), // 调整为5000
+  service: {
+    backendOrigin,
+    engineOrigin,
+    geoserverOrigin,
   },
-  
   data: {
     demPath: process.env['DEM_DATA_PATH'] || path.join(__dirname, '../../data/dem'),
-    buildingsPath: process.env['BUILDINGS_DATA_PATH'] || path.join(__dirname, '../../data/buildings'),
-    cachePath: process.env['CACHE_PATH'] || path.join(__dirname, '../../data/cache'),
+    // 优先使用 BUILDING_LOCAL_GEOJSON，其次 BUILDINGS_DATA_PATH，最后默认路径
+    buildingsPath:
+      process.env['BUILDING_LOCAL_GEOJSON'] ||
+      process.env['BUILDINGS_DATA_PATH'] ||
+      path.join(__dirname, '../../data/local-buildings'),
   },
-  
   api: {
-    overpassUrl: process.env['OVERPASS_API_URL'] || 'https://overpass-api.de/api/interpreter',
-    weatherApiUrl: process.env['WEATHER_API_URL'] || null,
-    rateLimit: {
-      windowMs: parseInt(process.env['RATE_LIMIT_WINDOW_MS'] || '60000', 10), // 1分钟
-      maxRequests: parseInt(process.env['RATE_LIMIT_MAX_REQUESTS'] || '100', 10),
-    },
+    weatherBaseUrl: process.env['WEATHER_API_URL'] || null,
   },
-  
+  analysis: {
+    engineBaseUrl: engineOrigin,
+    requestTimeoutMs: Number.parseInt(process.env['SHADOW_ENGINE_TIMEOUT_MS'] || '45000', 10),
+    cacheTtlMs: Number.parseInt(process.env['SHADOW_ENGINE_CACHE_TTL_MS'] || '120000', 10),
+    maxCacheEntries: Number.parseInt(process.env['SHADOW_ENGINE_CACHE_MAX_KEYS'] || '200', 10),
+    deploymentMode: (process.env['SHADOW_ENGINE_DEPLOYMENT_MODE'] as 'microservice' | 'worker') || 'microservice',
+    localScriptPath: process.env['SHADOW_ENGINE_SCRIPT_PATH'] || null,
+    pythonPath: process.env['SHADOW_ENGINE_PYTHON_PATH'] || 'python3',
+    timezone: process.env['SHADOW_ENGINE_TIMEZONE'] || 'Asia/Hong_Kong',
+    backendBaseUrl:
+      normalizeOrigin(readEnv('SHADOW_ENGINE_BACKEND_URL', 'SHADOWMAP_BACKEND_ORIGIN')) ?? backendOrigin,
+    maxFeatures: Number.parseInt(process.env['SHADOW_ENGINE_MAX_FEATURES'] || '8000', 10),
+    canopyRasterPath: readEnv('SHADOW_ENGINE_CANOPY_RASTER_PATH', 'CANOPY_RASTER_PATH') ?? null,
+  },
   cors: {
-    origins: process.env['CORS_ORIGINS'] ? 
-      process.env['CORS_ORIGINS'].split(',').map(origin => origin.trim()) : 
-      ['http://localhost:3000', 'http://localhost:5173'],
+    origins: parseOrigins(readEnv('CORS_ORIGINS', 'CORS_ORIGIN'), [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      backendOrigin,
+    ]),
     credentials: process.env['CORS_CREDENTIALS'] === 'true',
   },
 };
 
-// 验证必要的环境变量
-function validateConfig(config: Config): void {
-  const requiredEnvVars = [
-    'MONGODB_URI'
-  ];
+export { config };
 
-  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-  
-  if (missingVars.length > 0) {
-    console.warn(`⚠️  Missing environment variables: ${missingVars.join(', ')}`);
-    console.warn('🔧 Using default values. Please check your .env file.');
-  }
-
-  // 验证MongoDB URI格式
-  if (!config.mongodb.uri.startsWith('mongodb://') && !config.mongodb.uri.startsWith('mongodb+srv://')) {
-    throw new Error('Invalid MongoDB URI format');
-  }
-
-  // 验证端口范围
-  if (config.port < 1 || config.port > 65535) {
-    throw new Error('Invalid port number');
-  }
-}
-
-// 验证配置
-validateConfig(defaultConfig);
-
-// 导出配置
-export const config = defaultConfig;
-
-// 导出配置工具函数
 export const isDevelopment = () => config.env === 'development';
 export const isProduction = () => config.env === 'production';
-export const isTest = () => config.env === 'test';
 
-// 打印配置信息（开发环境）
 if (isDevelopment()) {
   console.log('🔧 Configuration loaded:');
   console.log(`   Environment: ${config.env}`);
   console.log(`   Port: ${config.port}`);
-  console.log(`   MongoDB: ${config.mongodb.uri.replace(/\/\/.*@/, '//***:***@')}`);
-  console.log(`   Database: ${config.mongodb.database}`);
-  console.log(`   Cache TTL: ${config.cache.ttl}s`);
+  console.log(`   Backend Origin: ${config.service.backendOrigin}`);
   console.log(`   DEM Path: ${config.data.demPath}`);
   console.log(`   Buildings Path: ${config.data.buildingsPath}`);
+  console.log(`   Database: ${config.database.enabled ? `${config.database.provider} enabled` : 'disabled'}`);
+  console.log(
+    `   Shadow Engine: mode=${config.analysis.deploymentMode}, base=${config.analysis.engineBaseUrl ?? 'local-script'}`,
+  );
 }

@@ -57,16 +57,25 @@ function deserializeTile(raw: any): TileMetadata | null {
     return null;
   }
 
-  return {
+  const tile: TileMetadata = {
     tileId,
     minLon,
     minLat,
     maxLon,
     maxLat,
-    region: raw.region ? String(raw.region) : undefined,
-    description: raw.description ? String(raw.description) : undefined,
-    tags: Array.isArray(raw.tags) ? raw.tags.map((tag: any) => String(tag)) : undefined
   };
+
+  if (raw.region) {
+    tile.region = String(raw.region);
+  }
+  if (raw.description) {
+    tile.description = String(raw.description);
+  }
+  if (Array.isArray(raw.tags)) {
+    tile.tags = raw.tags.map((tag: any) => String(tag));
+  }
+
+  return tile;
 }
 
 function loadTileCatalog(): TileMetadata[] {

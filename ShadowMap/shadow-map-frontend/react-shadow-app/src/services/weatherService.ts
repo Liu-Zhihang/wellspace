@@ -1,6 +1,7 @@
 import type { WeatherApiResponse, WeatherMetrics, WeatherSnapshot } from '../types/index.ts';
+import { API_BASE_URL } from './apiService';
 
-const WEATHER_API_BASE = 'http://localhost:3500/api/weather';
+const WEATHER_API_BASE = `${API_BASE_URL}/weather`;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MIN_SUNLIGHT_FACTOR = 0.15;
 const MAX_ATTENUATION_FACTOR = 0.85; // how much cloud cover reduces sunlight
@@ -48,12 +49,17 @@ const computeSunlightFactor = (cloudCover: number | null | undefined): number =>
 const buildSnapshot = (weather: WeatherMetrics, timestamp: string | Date): WeatherSnapshot => {
   const cloudCover = normaliseCloudCover(weather.cloud_cover);
   const sunlightFactor = computeSunlightFactor(cloudCover);
+  const solarIrradianceWm2 =
+    typeof weather.solarIrradianceWm2 === 'number' && Number.isFinite(weather.solarIrradianceWm2)
+      ? weather.solarIrradianceWm2
+      : null;
 
   return {
     cloudCover,
     sunlightFactor,
     fetchedAt: timestamp ? new Date(timestamp) : new Date(),
     raw: weather,
+    solarIrradianceWm2,
   };
 };
 

@@ -12,9 +12,14 @@ import http from 'http';
 // DEM数据目录
 const DEM_DATA_DIR = path.join(__dirname, '../../data/dem');
 const TERRARIUM_BASE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
+const MAPBOX_ACCESS_TOKEN = (
+    process.env['SHADOWMAP_MAPBOX_ACCESS_TOKEN'] ??
+    process.env['MAPBOX_ACCESS_TOKEN'] ??
+    ''
+).trim();
 
 // GeoServer配置
-const GEOSERVER_BASE_URL = process.env['GEOSERVER_BASE_URL'] || 'http://10.13.12.164:8080/geoserver/shadowmap';
+const GEOSERVER_BASE_URL = (process.env['GEOSERVER_BASE_URL'] ?? '').trim();
 const GEOSERVER_LAYER = process.env['GEOSERVER_DEM_LAYER'] || 'shadowmap:dem_munich';
 const GEOSERVER_BBOX = {
     minLng: 11.4,
@@ -323,9 +328,11 @@ async function downloadFromSingleSource(
         
         // 🔧 支持不同DEM数据源的URL格式
         if (source.name === 'Mapbox Terrain RGB') {
-            // 使用我们的Mapbox token
-            const mapboxToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
-            url = `${source.baseUrl}/${z}/${x}/${y}@2x.pngraw?access_token=${mapboxToken}`;
+            if (!MAPBOX_ACCESS_TOKEN) {
+                reject(new Error('Mapbox access token is not configured'));
+                return;
+            }
+            url = `${source.baseUrl}/${z}/${x}/${y}@2x.pngraw?access_token=${MAPBOX_ACCESS_TOKEN}`;
         } else if (source.name === 'Open Elevation') {
             // MapTiler格式
             const maptilerKey = 'get_from_maptiler'; // 需要注册获取
@@ -436,6 +443,10 @@ async function saveDEMTile(z: number, x: number, y: number, buffer: Buffer): Pro
  * 当前配置：仅使用GeoServer数据源（测试模式）
  */
 export async function getDEMTile(z: number, x: number, y: number): Promise<Buffer> {
+    if (!GEOSERVER_BASE_URL) {
+        throw new Error('GEOSERVER_BASE_URL is not configured.');
+    }
+
     // 验证瓦片坐标有效性
     const n = Math.pow(2, z);
     if (x < 0 || x >= n || y < 0 || y >= n) {

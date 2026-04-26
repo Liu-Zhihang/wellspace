@@ -4,6 +4,7 @@
  * 优先使用本地预处理数据，减少网络请求
  */
 
+import { API_BASE_URL } from '../config/runtime';
 import type { BoundingBox, BuildingFeature, BuildingFeatureCollection } from '../types/index.ts';
 
 interface BuildingTile {
@@ -199,7 +200,7 @@ export class LocalFirstBuildingService {
    */
   private async fetchTileFromBackend(z: number, x: number, y: number): Promise<BuildingFeature[] | null> {
     try {
-      const response = await fetch(`http://localhost:3500/api/buildings/${Math.floor(z)}/${x}/${y}.json`);
+      const response = await fetch(`${API_BASE_URL}/buildings/${Math.floor(z)}/${x}/${y}.json`);
       if (response.ok) {
         const data = (await response.json()) as BuildingFeatureCollection;
         return (data.features as BuildingFeature[]) || [];

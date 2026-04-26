@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BUILDINGS_INFO_URL, HEALTH_URL } from '../../config/runtime';
 
 interface BackendStatus {
   connected: boolean;
@@ -22,14 +23,14 @@ export const BackendStatusChecker: React.FC = () => {
     const timeoutId = window.setTimeout(() => controller.abort(), 5000);
 
     try {
-      const response = await fetch('http://localhost:3500/api/health', {
+      const response = await fetch(HEALTH_URL, {
         method: 'GET',
         signal: controller.signal,
       });
       
       if (response.ok) {
         // Test building API
-        const buildingResponse = await fetch('http://localhost:3500/api/buildings/info');
+        const buildingResponse = await fetch(BUILDINGS_INFO_URL);
         
         setStatus({
           connected: true,
@@ -112,7 +113,7 @@ export const BackendStatusChecker: React.FC = () => {
               {checking ? 'Checking...' : 'Retry'}
             </button>
             <button
-              onClick={() => window.open('http://localhost:3500/api/health', '_blank')}
+              onClick={() => window.open(HEALTH_URL, '_blank')}
               className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
             >
               Test Direct

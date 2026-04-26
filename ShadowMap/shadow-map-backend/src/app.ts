@@ -8,15 +8,15 @@ import fs from 'fs';
 import demRoutes from './routes/dem';
 import healthRoutes from './routes/health';
 import buildingRoutes from './routes/buildings';
-import dataPreloadRoutes from './routes/dataPreload';
-import tileDebugRoutes from './routes/tileDebug';
-import buildingOptRoutes from './routes/buildingOptimization';
-import coordValidateRoutes from './routes/coordinateValidation';
 import buildingWfsRoutes from './routes/buildingWfs';
-import localBuildingDatasetRoutes from './routes/localBuildingDataset';
-import localBuildingDataRoutes from './routes/localBuildingData';
+import weatherRoutes from './routes/weather';
+import analysisRoutes from './routes/analysis';
+import { config } from './config';
 
-const app = express();
+const app: express.Express = express();
+const connectSources = Array.from(
+  new Set(["'self'", 'https:', config.service.backendOrigin, ...config.cors.origins].filter(Boolean)),
+);
 
 // Security middleware configuration
 app.use(helmet({
@@ -28,15 +28,30 @@ app.use(helmet({
       scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
       imgSrc: ["'self'", "data:", "https:", "http:"],
-      connectSrc: ["'self'", "http://localhost:3001", "https:"],
+      connectSrc: connectSources,
       fontSrc: ["'self'", "https:", "data:"],
     },
   },
 }));
 
-// Simple permissive CORS configuration
+// Respect configured origins while keeping local dev friction low.
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const requestOrigin = req.header('Origin');
+  const originAllowed =
+    !requestOrigin ||
+    config.cors.origins.length === 0 ||
+    config.cors.origins.includes(requestOrigin);
+
+  if (!requestOrigin || originAllowed) {
+    res.header('Access-Control-Allow-Origin', requestOrigin ?? '*');
+  } else if (!config.cors.credentials) {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+
+  if (config.cors.credentials) {
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
+
   res.header('Access-Control-Allow-Methods', '*');
   res.header('Access-Control-Allow-Headers', '*');
   
@@ -48,7 +63,11 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(morgan('combined'));
+if (process.env['MORGAN_DISABLED'] !== '1') {
+  app.use(morgan('combined'));
+} else {
+  console.log('[Logging] Morgan disabled (MORGAN_DISABLED=1)');
+}
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -57,13 +76,21 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/health', healthRoutes);
 app.use('/api/dem', demRoutes);
 app.use('/api/buildings', buildingRoutes);
-app.use('/api/preload', dataPreloadRoutes);
-app.use('/api/debug', tileDebugRoutes);
-app.use('/api/building-opt', buildingOptRoutes);
-app.use('/api/coord-validate', coordValidateRoutes);
 app.use('/api/wfs-buildings', buildingWfsRoutes);
-app.use('/api/local-datasets', localBuildingDatasetRoutes);
-app.use('/api/local-buildings', localBuildingDataRoutes);
+app.use('/api/weather', weatherRoutes);
+app.use('/api/analysis', analysisRoutes);
+
+// Vector tiles are optional; avoid failing the whole backend when mbtiles deps are absent.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const maybeTiles = require('./routes/tiles');
+  const tileRoutes = maybeTiles?.default;
+  if (tileRoutes) {
+    app.use('/api/tiles', tileRoutes);
+  }
+} catch (error) {
+  console.warn('[Tiles] Optional tile route disabled:', error instanceof Error ? error.message : error);
+}
 
 // Static file service - prefer the built React app, fall back to prototypes
 const reactDistPath = path.join(__dirname, '../../shadow-map-frontend/react-shadow-app/dist');
@@ -88,19 +115,11 @@ app.get('/', (req, res) => {
         tile: 'POST /api/wfs-buildings/tile - fetch buildings for a tile',
         sample: 'GET /api/wfs-buildings/sample/beijing - sample dataset check'
       },
-      preload: {
-        cities: 'POST /api/preload/cities - warm frequently used city tiles',
-        location: 'POST /api/preload/location - warm cache for a coordinate radius',
-        status: 'GET /api/preload/status - inspect ongoing preload jobs',
-        cleanup: 'POST /api/preload/cleanup - clear stale preload entries',
-        cityList: 'GET /api/preload/cities - list supported preset cities'
+      weather: {
+        current: '/api/weather/current'
       },
-      localDatasets: {
-        status: 'GET /api/local-datasets/status - inspect local dataset availability',
-        load: 'POST /api/local-datasets/load - load local dataset into memory',
-        query: 'POST /api/local-datasets/query - query buildings from local dataset',
-        stats: 'GET /api/local-datasets/stats - data statistics',
-        info: 'GET /api/local-datasets/info - metadata about the local dataset service'
+      analysis: {
+        shadow: '/api/analysis/shadow'
       },
       docs: '/api/docs'
     }

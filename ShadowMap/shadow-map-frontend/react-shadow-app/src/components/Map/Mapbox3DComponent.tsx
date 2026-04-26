@@ -5,6 +5,7 @@ import type { BuildingFeature, BuildingFeatureCollection } from '../../types/ind
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { getWfsBuildings } from '../../services/wfsBuildingService';
+import { MAPBOX_ACCESS_TOKEN } from '../../config/runtime';
 
 interface Mapbox3DComponentProps {
   className?: string;
@@ -28,8 +29,11 @@ export const Mapbox3DComponent = ({ className = '' }: Mapbox3DComponentProps) =>
 
     console.log('🗺️ 初始化Mapbox 3D地图...');
 
-    // 设置Mapbox访问令牌
-    mapboxgl.accessToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
+    if (!MAPBOX_ACCESS_TOKEN) {
+      addStatusMessage('Mapbox access token is not configured.', 'error');
+      return;
+    }
+    mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
     // 创建Mapbox地图实例
     const map = new mapboxgl.Map({

@@ -3,14 +3,21 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=18.20 <21"
+  },
   "scripts": {
     "dev": "vite",
+    "dev:debug": "cross-env VITE_SHADOW_DEBUG=1 VITE_MOBILITY_DEBUG=1 vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@ant-design/icons": "^5.4.0",
+    "@deck.gl/core": "^8.9.36",
+    "@deck.gl/geo-layers": "^8.9.36",
+    "@deck.gl/mapbox": "^8.9.36",
     "@heroicons/react": "^2.2.0",
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/react-query": "^5.87.1",
@@ -29,6 +36,7 @@
     "react-leaflet": "^5.0.0",
     "suncalc": "^1.9.0",
     "tailwindcss": "^4.1.13",
+    "deck.gl": "^8.9.36",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
@@ -48,6 +56,7 @@
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
     "vite": "^4.5.3",
-    "@types/node": "^22.10.1"
+    "@types/node": "^22.10.1",
+    "cross-env": "^7.0.3"
   }
 }

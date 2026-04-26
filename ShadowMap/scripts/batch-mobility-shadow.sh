@@ -24,6 +24,39 @@ elif [ -f "${repo_root}/.shadowmap.env" ]; then
   source "${repo_root}/.shadowmap.env"
 fi
 
+# Re-resolve the interpreter after sourcing the profile so machine-local env
+# files can actually override the Python used by the runner.
+PYTHON_BIN="${SHADOWMAP_PYTHON_BIN:-${PYTHON_BIN:-python3}}"
+
+configure_python_engine_env() {
+  local py_bin="${1:-python3}"
+  local py_prefix proj_dir gdal_dir
+
+  py_prefix="$("${py_bin}" - <<'PY' 2>/dev/null || true
+import sys
+print(sys.prefix)
+PY
+)"
+  py_prefix="${py_prefix//$'\r'/}"
+  py_prefix="${py_prefix//$'\n'/}"
+  if [ -z "${py_prefix}" ]; then
+    return 0
+  fi
+
+  proj_dir="${py_prefix}/share/proj"
+  gdal_dir="${py_prefix}/share/gdal"
+
+  if [ -z "${PROJ_LIB:-}" ] && [ -f "${proj_dir}/proj.db" ]; then
+    export PROJ_LIB="${proj_dir}"
+  fi
+  if [ -z "${PROJ_DATA:-}" ] && [ -f "${proj_dir}/proj.db" ]; then
+    export PROJ_DATA="${proj_dir}"
+  fi
+  if [ -z "${GDAL_DATA:-}" ] && [ -d "${gdal_dir}" ]; then
+    export GDAL_DATA="${gdal_dir}"
+  fi
+}
+
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,6 +92,7 @@ done
 
 case "${ENGINE}" in
   python|py)
+    configure_python_engine_env "${PYTHON_BIN}"
     exec "${PYTHON_BIN}" "${script_dir}/batch_mobility_shadow.py" "${args[@]}"
     ;;
   node|js)

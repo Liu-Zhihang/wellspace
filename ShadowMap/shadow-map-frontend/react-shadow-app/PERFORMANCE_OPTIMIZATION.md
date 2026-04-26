@@ -46,15 +46,14 @@ shadowCache.set(bounds, zoom, currentDate, shadowResult);
 **效果**: 缓存命中率60-80%，重复计算减少
 
 ### ✅ 问题3: 建筑物数据获取慢
-**问题**: OSM API响应不稳定，获取耗时长
-**解决方案**: 多级数据获取策略
+**问题**: 单次 WFS 调用返回数据量大、响应慢
+**解决方案**: “缓存 → WFS 分页 → 并发管理” 策略
 
 ```typescript
 // 优化的数据获取流程
-1. 内存缓存 (1-5ms)      ← 最快
-2. 后端MongoDB (50ms)     ← 稳定  
-3. 预加载相邻区域         ← 智能
-4. 并发限制 + 超时控制    ← 可靠
+1. 内存缓存 (shadowMapStore + buildingCache)    ← 最快
+2. 后端 WFS 代理 (分页 + Tile 过滤)             ← 稳定
+3. 合并相邻请求，限制并发与重试次数             ← 可靠
 ```
 
 **优化特性**:
@@ -166,7 +165,7 @@ optimizedBuildingService.maxCacheSize = 50;
 ### API请求失败
 1. 确认后端服务运行 (localhost:3001)
 2. 检查防火墙设置
-3. 验证MongoDB连接状态
+3. 使用 `/api/wfs-buildings/test` 验证 GeoServer/WFS 连接
 
 ## 🎯 最佳实践
 

@@ -43,7 +43,7 @@ export const useShadowMapWithLocalDEM = () => {
     try {
       console.log('📊 Loading local DEM data for bounds:', bounds);
       const demData = await localDemService.loadDemData(bounds);
-      
+
       if (demData) {
         demDataRef.current = demData;
         console.log('✅ Local DEM data loaded:', {
@@ -101,7 +101,7 @@ export const useShadowMapWithLocalDEM = () => {
         // Get elevation from data array
         const index = y * width + x;
         const elevation = data[index];
-        
+
         return isNaN(elevation) ? 0 : elevation;
       },
     };
@@ -135,7 +135,7 @@ export const useShadowMapWithLocalDEM = () => {
 
       // Load local DEM data
       const demData = await loadLocalDEM(boundsArray);
-      
+
       // Create terrain source (with or without DEM data)
       const terrainSource = createLocalTerrainSource(demData);
 
@@ -257,9 +257,9 @@ export const useShadowMapWithLocalDEM = () => {
         bounds.getEast(),
         bounds.getNorth(),
       ];
-      
+
       await loadLocalDEM(boundsArray);
-      
+
       // Reinitialize shadow simulator with new DEM
       if (shadeMapRef.current) {
         shadeMapRef.current.remove();

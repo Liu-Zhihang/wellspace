@@ -1,91 +1,66 @@
-import dotenv from 'dotenv';
 import app from './app';
-import { dbManager } from './config/database';
+import { config } from './config';
 
-// 加载环境变量
-dotenv.config();
+async function bootServer(): Promise<void> {
+  const server = app.listen(config.port, () => {
+    console.log(`🚀 Shadow Map Backend Server is running on port ${config.port}`);
+    console.log(`📍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
+    console.log(`🌐 API Base URL: ${config.service.backendOrigin}`);
+    console.log(`🗺️  DEM Tiles: ${config.service.backendOrigin}/api/dem/{z}/{x}/{y}.png`);
+    console.log(`🏢  Buildings: ${config.service.backendOrigin}/api/buildings/{z}/{x}/{y}.json`);
+    console.log(`🌤️  Weather: ${config.service.backendOrigin}/api/weather/current`);
+    console.log('🚀 Server ready and accepting requests!');
+  });
 
-const PORT = process.env['PORT'] || 3500;
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`❌ Port ${config.port} is already in use. Stop the conflicting process or update PORT.`);
+      process.exit(1);
+      return;
+    }
 
-// 初始化数据库连接
-async function initializeDatabase(): Promise<void> {
-  try {
-    await dbManager.connect();
-    await dbManager.createIndexes();
-    console.log('✅ Database initialized successfully');
-  } catch (error) {
-    console.error('❌ Database initialization failed:', error);
+    console.error('❌ Server error:', error);
     process.exit(1);
-  }
+  });
+
+  (global as any).server = server;
 }
 
-// 尝试启动服务器，如果端口被占用则尝试其他端口
-async function startServer(port: number): Promise<void> {
+async function startServer(): Promise<void> {
+  if (!config.database.enabled) {
+    console.log('[DB] Database integration disabled');
+    await bootServer();
+    return;
+  }
+
+  if (!config.mongodb.uri) {
+    console.warn('[DB] Database integration enabled but MONGODB_URI is empty; skipping initialization');
+    await bootServer();
+    return;
+  }
+
+  // Try to initialize database if the module exists; ignore failures in non-DB environments.
   try {
-    // 先初始化数据库，确保连接就绪
-    console.log('🔄 Initializing database connection...');
-    await initializeDatabase();
-    console.log('✅ Database connection ready');
-    
-    // 数据库就绪后再启动服务器
-    const server = app.listen(port, () => {
-      console.log(`🚀 Shadow Map Backend Server is running on port ${port}`);
-      console.log(`📍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
-      console.log(`🌐 API Base URL: http://localhost:${port}`);
-      console.log(`🗺️  DEM Tiles: http://localhost:${port}/api/dem/{z}/{x}/{y}.png`);
-      console.log(`❤️  Health Check: http://localhost:${port}/api/health`);
-      console.log(`🚀 Server ready and accepting requests!`);
-    });
-    
-    // 端口被占用时自动尝试下一个端口
-    server.on('error', (error: any) => {
-      if (error.code === 'EADDRINUSE') {
-        console.warn(`⚠️  Port ${port} is already in use, trying port ${port + 1}...`);
-        startServer(port + 1);
-      } else {
-        console.error('❌ Server error:', error);
-        process.exit(1);
-      }
-    });
-    
-    // 设置全局服务器引用以便优雅关闭
-    (global as any).server = server;
-    
-  } catch (error) {
-    console.error('⚠️  Database connection failed, starting server anyway:', error);
-    console.log('💡 Building API will fallback to OSM API only');
-    
-    // 即使数据库连接失败，也启动服务器（仅使用OSM API）
-    const server = app.listen(port, () => {
-      console.log(`🚀 Shadow Map Backend Server is running on port ${port} (OSM-only mode)`);
-      console.log(`📍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
-      console.log(`🌐 API Base URL: http://localhost:${port}`);
-      console.log(`🗺️  DEM Tiles: http://localhost:${port}/api/dem/{z}/{x}/{y}.png`);
-      console.log(`❤️  Health Check: http://localhost:${port}/api/health`);
-      console.log(`⚠️  Server ready (MongoDB unavailable)`);
-    });
-    
-    // 端口被占用时自动尝试下一个端口
-    server.on('error', (error: any) => {
-      if (error.code === 'EADDRINUSE') {
-        console.warn(`⚠️  Port ${port} is already in use, trying port ${port + 1}...`);
-        startServer(port + 1);
-      } else {
-        console.error('❌ Server error:', error);
-        process.exit(1);
-      }
-    });
-    
-    // 设置全局服务器引用以便优雅关闭
-    (global as any).server = server;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const maybeDb = require('./config/database');
+    const initializer =
+      (maybeDb && maybeDb.initializeDatabase) ||
+      (maybeDb && maybeDb.default && maybeDb.default.initializeDatabase);
+
+    if (initializer) {
+      await initializer();
+      console.log('[DB] Database initialized');
+    } else {
+      console.warn('[DB] No database initializer found, continuing without DB');
+    }
+  } catch (err) {
+    console.warn('[DB] Database initialization skipped due to error:', err instanceof Error ? err.message : err);
   }
+
+  await bootServer();
 }
 
-// 启动服务器
-startServer(Number(PORT)).catch(error => {
-  console.error('❌ Failed to start server:', error);
-  process.exit(1);
-});
+startServer();
 
 // 监听未捕获的异常
 process.on('uncaughtException', (error) => {

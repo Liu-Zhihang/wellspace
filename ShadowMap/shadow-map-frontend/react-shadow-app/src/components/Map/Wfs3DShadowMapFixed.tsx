@@ -5,6 +5,7 @@ import type { BuildingFeature, BuildingFeatureCollection } from '../../types/ind
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useShadowMapStore } from '../../store/shadowMapStore';
 import { getWfsBuildings } from '../../services/wfsBuildingService';
+import { MAPBOX_ACCESS_TOKEN } from '../../config/runtime';
 
 // 声明全局ShadeMap类型
 declare global {
@@ -70,7 +71,11 @@ export const Wfs3DShadowMapFixed = ({ className = '' }: Wfs3DShadowMapProps) => 
 
     console.log('🗺️ Initialising WFS 3D shadow map...');
 
-    mapboxgl.accessToken = 'pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ';
+    if (!MAPBOX_ACCESS_TOKEN) {
+      addStatusMessage('Mapbox access token is not configured.', 'error');
+      return;
+    }
+    mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,

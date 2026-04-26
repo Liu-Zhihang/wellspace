@@ -1,188 +1,243 @@
-import { getWfsBuildings } from './wfsBuildingService';
+import type { Feature, FeatureCollection, Geometry } from 'geojson';
 import * as SunCalc from 'suncalc';
+import { API_BASE_URL } from './apiService';
+import { CANOPY_RASTER_PATH } from '../config/runtime';
+import type { BoundingBox, ShadowServiceMetrics, ShadowServiceResponse } from '../types/index.ts';
 
-export interface ShadowCalculationResult {
-  shadows: any[];
+const SHADOW_DEBUG_ENABLED = (import.meta.env.VITE_SHADOW_DEBUG as string | undefined) === '1';
+const debugLog = (...args: unknown[]) => {
+  if (SHADOW_DEBUG_ENABLED) {
+    console.debug(...args);
+  }
+};
+
+export type ShadowAnalysisRequestOptions = {
+  bbox: [number, number, number, number];
+  timestamp: Date;
+  geometry?: Feature<Geometry> | FeatureCollection<Geometry>;
+  timeGranularityMinutes?: number;
+  includeCanopy?: boolean;
+  canopyRasterPath?: string;
+  metadata?: Record<string, unknown>;
+  outputs?: {
+    shadowPolygons?: boolean;
+    sunlightGrid?: boolean;
+    heatmap?: boolean;
+  };
+  forceRefresh?: boolean;
+  signal?: AbortSignal;
+};
+
+const SHADOW_ENDPOINT = `${API_BASE_URL}/analysis/shadow`;
+const DEFAULT_CANOPY_RASTER_PATH = CANOPY_RASTER_PATH;
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const normalizeOutputs = (outputs?: ShadowAnalysisRequestOptions['outputs']) => ({
+  shadowPolygons: outputs?.shadowPolygons ?? true,
+  sunlightGrid: outputs?.sunlightGrid ?? true,
+  heatmap: outputs?.heatmap ?? true,
+});
+
+export class ShadowAnalysisClient {
+  private inflight = new Map<string, Promise<ShadowServiceResponse>>();
+
+  async requestAnalysis(options: ShadowAnalysisRequestOptions): Promise<ShadowServiceResponse> {
+    const requestKey = this.buildRequestKey(options);
+    const shouldReuse = !options.forceRefresh && this.inflight.has(requestKey);
+    if (shouldReuse) {
+      return this.inflight.get(requestKey)!;
+    }
+
+    const execution = this.execute(options);
+    this.inflight.set(requestKey, execution);
+    try {
+      const response = await execution;
+      return response;
+    } finally {
+      this.inflight.delete(requestKey);
+    }
+  }
+
+  private async execute(options: ShadowAnalysisRequestOptions): Promise<ShadowServiceResponse> {
+    const requestKey = this.buildRequestKey(options);
+    const controller = options.signal ? undefined : new AbortController();
+    const signal = options.signal ?? controller?.signal;
+
+    const granularity = clamp(options.timeGranularityMinutes ?? 15, 1, 1440);
+    const includeCanopy = options.includeCanopy ?? true;
+    const canopyPath = options.canopyRasterPath ?? DEFAULT_CANOPY_RASTER_PATH;
+    const metadata: Record<string, unknown> = { ...(options.metadata ?? {}) };
+    if (includeCanopy && canopyPath) {
+      metadata.canopyRasterPath = canopyPath;
+    }
+
+    const payload = {
+      bbox: {
+        west: options.bbox[0],
+        south: options.bbox[1],
+        east: options.bbox[2],
+        north: options.bbox[3],
+      },
+      timestamp: options.timestamp.toISOString(),
+      timeGranularityMinutes: granularity,
+      geometry: options.geometry,
+      outputs: normalizeOutputs(options.outputs),
+      metadata: Object.keys(metadata).length ? metadata : undefined,
+      forceRefresh: options.forceRefresh ?? false,
+    };
+
+    debugLog('[ShadowClient][request]', {
+      requestKey,
+      bbox: payload.bbox,
+      timestamp: payload.timestamp,
+      granularity,
+      outputs: payload.outputs,
+      geometry: options.geometry ? 'provided' : 'none',
+      includeCanopy,
+      canopyRasterPath: includeCanopy ? canopyPath : null,
+      metadataKeys: payload.metadata ? Object.keys(payload.metadata) : [],
+    });
+
+    try {
+      const response = await fetch(SHADOW_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal,
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(`Shadow analysis failed (${response.status}): ${message || response.statusText}`);
+      }
+
+      const data = (await response.json()) as ShadowServiceResponse;
+      if (!data || !data.cache || !data.metrics) {
+        throw new Error('Shadow analysis response missing required fields.');
+      }
+      debugLog('[ShadowClient][response]', {
+        requestKey,
+        cacheHit: data.cache.hit,
+        cacheKey: data.cache.key,
+        bucketStart: data.bucketStart,
+        bucketEnd: data.bucketEnd,
+        metrics: data.metrics,
+        warnings: data.warnings?.length ?? 0,
+        metadata: data.metadata,
+      });
+      return data;
+    } catch (error) {
+      debugLog('[ShadowClient][error]', {
+        requestKey,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if ((error as Error).name === 'AbortError') {
+        throw error;
+      }
+      throw new Error(
+        error instanceof Error ? error.message : 'Shadow analysis request failed unexpectedly.',
+      );
+    } finally {
+      controller?.abort();
+    }
+  }
+
+  private buildRequestKey(options: ShadowAnalysisRequestOptions) {
+    const bboxKey = options.bbox.map((value) => value.toFixed(5)).join(',');
+    const timestampKey = options.timestamp.toISOString().slice(0, 16);
+    const geometrySignature = this.hashGeometry(options.geometry);
+    const outputs = normalizeOutputs(options.outputs);
+    const outputsKey = Object.entries(outputs)
+      .filter(([, enabled]) => enabled)
+      .map(([key]) => key)
+      .sort()
+      .join('+');
+    const includeCanopy = options.includeCanopy ?? true;
+    const canopyKey = includeCanopy
+      ? options.canopyRasterPath ?? DEFAULT_CANOPY_RASTER_PATH ?? 'canopy-default'
+      : 'no-canopy';
+    const metadataKey =
+      options.metadata && Object.keys(options.metadata).length > 0
+        ? this.hashString(JSON.stringify(options.metadata))
+        : 'nometa';
+    return `${bboxKey}|${timestampKey}|${geometrySignature}|${outputsKey}|${canopyKey}|${metadataKey}`;
+  }
+
+  private hashGeometry(geometry?: Feature<Geometry> | FeatureCollection<Geometry>) {
+    if (!geometry) return 'none';
+    try {
+      const serialized = JSON.stringify(geometry);
+      let hash = 0;
+      for (let i = 0; i < serialized.length; i++) {
+        const code = serialized.charCodeAt(i);
+        hash = (hash << 5) - hash + code;
+        hash |= 0;
+      }
+      return `g${Math.abs(hash)}`;
+    } catch {
+      return 'geom';
+    }
+  }
+
+  private hashString(value: string) {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+      hash = (hash << 5) - hash + value.charCodeAt(i);
+      hash |= 0;
+    }
+    return `m${Math.abs(hash)}`;
+  }
+}
+
+export const shadowAnalysisClient = new ShadowAnalysisClient();
+
+export type ShadowCalculationResult = {
+  shadows: Array<Feature<Geometry>>;
+  calculationTime: number;
+  buildingCount: number;
   sunPosition: {
     altitude: number;
     azimuth: number;
   };
-  calculationTime: number;
-  buildingCount: number;
-}
+  metrics: ShadowServiceMetrics;
+  response: ShadowServiceResponse;
+};
 
-export interface ShadowBounds {
-  north: number;
-  south: number;
-  east: number;
-  west: number;
-}
-
-export class ShadowAnalysisService {
-  private readonly cache = new Map<string, ShadowCalculationResult>();
-  private readonly cacheTtlMs = 5 * 60 * 1000;
-
+export const shadowAnalysisService = {
   async calculateRealTimeShadows(
-    bounds: ShadowBounds,
-    date: Date,
-    zoom: number = 15
+    bounds: BoundingBox,
+    timestamp: Date,
+    zoom?: number,
   ): Promise<ShadowCalculationResult> {
-    const start = performance.now();
-
-    if (!bounds || !date) {
-      throw new Error('Bounds and date are required');
-    }
-
-    console.log('[Shadow] Calculating realtime shadows', {
-      bounds,
-      isoTime: date.toISOString(),
-      zoom
+    const startedAt = performance.now();
+    const response = await shadowAnalysisClient.requestAnalysis({
+      bbox: [bounds.west, bounds.south, bounds.east, bounds.north],
+      timestamp,
+      outputs: {
+        shadowPolygons: true,
+        sunlightGrid: false,
+        heatmap: false,
+      },
+      metadata: zoom === undefined ? undefined : { zoom },
     });
-
-    const cacheKey = this.getCacheKey(bounds, date, zoom);
-    const cached = this.cache.get(cacheKey);
-
-    if (cached && Date.now() - cached.calculationTime < this.cacheTtlMs) {
-      console.log('[Shadow] Returning cached result');
-      return cached;
-    }
-
-    try {
-      const buildingData = await getWfsBuildings(bounds);
-
-      if (!buildingData.success || buildingData.data.features.length === 0) {
-        throw new Error('No building features returned from WFS');
-      }
-
-      const buildings = buildingData.data.features;
-      console.log(`[Shadow] Received ${buildings.length} buildings`);
-
-      const sunPosition = this.calculateSunPosition(bounds, date);
-      console.log('[Shadow] Sun position', sunPosition);
-
-      const shadows = this.calculateShadowsForBuildings(buildings, sunPosition, date);
-
-      const result: ShadowCalculationResult = {
-        shadows,
-        sunPosition,
-        calculationTime: performance.now(),
-        buildingCount: buildings.length
-      };
-
-      this.cache.set(cacheKey, result);
-
-      console.log(`[Shadow] Completed shadow analysis in ${(performance.now() - start).toFixed(0)}ms`);
-
-      return result;
-    } catch (error) {
-      console.error('[Shadow] Failed to calculate shadows', error);
-      throw error;
-    }
-  }
-
-  private calculateSunPosition(bounds: ShadowBounds, date: Date): { altitude: number; azimuth: number } {
-    const latitude = (bounds.north + bounds.south) / 2;
-    const longitude = (bounds.east + bounds.west) / 2;
-
-    const sunPosition = SunCalc.getPosition(date, latitude, longitude);
+    const centerLat = (bounds.north + bounds.south) / 2;
+    const centerLng = (bounds.east + bounds.west) / 2;
+    const sunPosition = SunCalc.getPosition(timestamp, centerLat, centerLng);
+    const metadataBuildingCount = response.metadata?.buildingCount;
 
     return {
-      altitude: (sunPosition.altitude * 180) / Math.PI,
-      azimuth: ((sunPosition.azimuth * 180) / Math.PI + 180) % 360
+      shadows: response.data.shadows?.features ?? [],
+      calculationTime: performance.now() - startedAt,
+      buildingCount: typeof metadataBuildingCount === 'number' ? metadataBuildingCount : 0,
+      sunPosition: {
+        altitude: sunPosition.altitude * 180 / Math.PI,
+        azimuth: sunPosition.azimuth * 180 / Math.PI,
+      },
+      metrics: response.metrics,
+      response,
     };
-  }
-
-  private calculateShadowsForBuildings(
-    buildings: any[],
-    sunPosition: { altitude: number; azimuth: number },
-    date: Date
-  ): any[] {
-    const shadows: any[] = [];
-
-    buildings.forEach((building, index) => {
-      try {
-        const shadow = this.calculateShadowForBuilding(building, sunPosition, date);
-        if (shadow) {
-          shadows.push(shadow);
-        }
-      } catch (error) {
-        console.warn(`[Shadow] Failed to compute shadow for building ${index}`, error);
-      }
-    });
-
-    return shadows;
-  }
-
-  private calculateShadowForBuilding(
-    building: any,
-    sunPosition: { altitude: number; azimuth: number },
-    date: Date
-  ): any | null {
-    if (!building.geometry || !building.properties) {
-      return null;
-    }
-
-    const height = building.properties.height ?? 20;
-    const { geometry } = building;
-
-    if (sunPosition.altitude <= 0) {
-      return null;
-    }
-
-    const shadowLength = height / Math.tan((sunPosition.altitude * Math.PI) / 180);
-    const shadowDirection = (sunPosition.azimuth + 180) % 360;
-    const shadowDirectionRad = (shadowDirection * Math.PI) / 180;
-
-    const offsetX = shadowLength * Math.sin(shadowDirectionRad);
-    const offsetY = shadowLength * Math.cos(shadowDirectionRad);
-
-    let shadowGeometry;
-
-    if (geometry.type === 'Polygon') {
-      shadowGeometry = this.offsetPolygon(geometry.coordinates[0], offsetX, offsetY);
-    } else if (geometry.type === 'MultiPolygon') {
-      const coordinates = geometry.coordinates.map((polygon: any) =>
-        polygon.map((ring: any) => this.offsetPolygon(ring, offsetX, offsetY))
-      );
-      shadowGeometry = {
-        type: 'MultiPolygon',
-        coordinates
-      };
-    } else {
-      return null;
-    }
-
-    return {
-      type: 'Feature',
-      geometry: shadowGeometry,
-      properties: {
-        buildingId: building.properties.id ?? `building_${Date.now()}_${Math.random()}`,
-        buildingHeight: height,
-        shadowLength,
-        sunAltitude: sunPosition.altitude,
-        sunAzimuth: sunPosition.azimuth,
-        calculationTime: date.toISOString(),
-        source: 'wfs'
-      }
-    };
-  }
-
-  private offsetPolygon(coordinates: number[][], offsetX: number, offsetY: number): number[][] {
-    return coordinates.map(([lng, lat]) => [lng + offsetX, lat + offsetY]);
-  }
-
-  private getCacheKey(bounds: ShadowBounds, date: Date, zoom: number): string {
-    return [
-      bounds.north.toFixed(6),
-      bounds.south.toFixed(6),
-      bounds.east.toFixed(6),
-      bounds.west.toFixed(6),
-      date.toISOString(),
-      zoom
-    ].join('|');
-  }
-}
-
-export const shadowAnalysisService = new ShadowAnalysisService();
-
-export default shadowAnalysisService;
+  },
+};

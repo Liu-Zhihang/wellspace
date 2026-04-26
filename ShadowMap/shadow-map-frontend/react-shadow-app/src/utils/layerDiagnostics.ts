@@ -1,6 +1,4 @@
 /**
- * 图层诊断工具
- * 用于检查和诊断地图图层状态
  */
 
 export interface LayerStatus {
@@ -24,7 +22,6 @@ export interface MapDiagnostics {
 
 export class LayerDiagnostics {
   /**
-   * 诊断地图状态
    */
   static diagnoseMap(map: any): MapDiagnostics {
     if (!map) {
@@ -42,7 +39,6 @@ export class LayerDiagnostics {
     const layers: LayerStatus[] = [];
     const sources: string[] = [];
 
-    // 检查关键图层
     const layerIds = [
       'wfs-buildings-fill',
       'wfs-buildings-outline', 
@@ -81,7 +77,6 @@ export class LayerDiagnostics {
       });
     });
 
-    // 获取所有数据源
     const style = map.getStyle();
     if (style && style.sources) {
       Object.keys(style.sources).forEach(sourceId => {
@@ -103,37 +98,36 @@ export class LayerDiagnostics {
   }
 
   /**
-   * 生成诊断报告
    */
   static generateReport(diagnostics: MapDiagnostics): string {
     const { mapReady, layers, sources, zoom, pitch, bearing, center } = diagnostics;
 
     let report = `
-🔍 地图图层诊断报告
+🔍 
 ====================
 
-📊 基本状态:
-- 地图就绪: ${mapReady ? '✅' : '❌'}
-- 缩放级别: ${zoom.toFixed(2)}
-- 俯仰角: ${pitch.toFixed(1)}°
-- 方位角: ${bearing.toFixed(1)}°
-- 中心点: [${center[0].toFixed(4)}, ${center[1].toFixed(4)}]
+📊 :
+- : ${mapReady ? '✅' : '❌'}
+- : ${zoom.toFixed(2)}
+- : ${pitch.toFixed(1)}°
+- : ${bearing.toFixed(1)}°
+- : [${center[0].toFixed(4)}, ${center[1].toFixed(4)}]
 
-📋 图层状态:
+📋 :
 `;
 
     layers.forEach(layer => {
-      const status = layer.exists ? (layer.visible ? '✅ 显示' : '⚠️ 隐藏') : '❌ 不存在';
+      const status = layer.exists ? (layer.visible ? '✅ ' : '⚠️ ') : '❌ ';
       const sourceStatus = layer.sourceExists ? '✅' : '❌';
-      const featureInfo = layer.featureCount !== undefined ? ` (${layer.featureCount} 个要素)` : '';
+      const featureInfo = layer.featureCount !== undefined ? ` (${layer.featureCount} )` : '';
       
       report += `- ${layer.layerId}: ${status}${featureInfo}\n`;
       if (layer.sourceId) {
-        report += `  └─ 数据源: ${layer.sourceId} ${sourceStatus}\n`;
+        report += `  └─ : ${layer.sourceId} ${sourceStatus}\n`;
       }
     });
 
-    report += `\n📦 数据源:\n`;
+    report += `\n📦 :\n`;
     sources.forEach(sourceId => {
       report += `- ${sourceId}\n`;
     });
@@ -142,74 +136,68 @@ export class LayerDiagnostics {
   }
 
   /**
-   * 检查常见问题
    */
   static checkCommonIssues(diagnostics: MapDiagnostics): string[] {
     const issues: string[] = [];
 
     if (!diagnostics.mapReady) {
-      issues.push('❌ 地图未就绪');
+      issues.push('❌ ');
       return issues;
     }
 
-    // 检查建筑物图层
     const buildingFill = diagnostics.layers.find(l => l.layerId === 'wfs-buildings-fill');
     if (!buildingFill || !buildingFill.exists) {
-      issues.push('❌ 建筑物填充图层不存在');
+      issues.push('❌ ');
     } else if (!buildingFill.visible) {
-      issues.push('⚠️ 建筑物填充图层被隐藏');
+      issues.push('⚠️ ');
     }
 
     const buildingExtrusion = diagnostics.layers.find(l => l.layerId === 'wfs-buildings-extrusion');
     if (!buildingExtrusion || !buildingExtrusion.exists) {
-      issues.push('❌ 建筑物3D挤出图层不存在');
+      issues.push('❌ 3D');
     }
 
-    // 检查阴影图层
     const shadowFill = diagnostics.layers.find(l => l.layerId === 'wfs-shadows-fill');
     if (!shadowFill || !shadowFill.exists) {
-      issues.push('❌ 阴影填充图层不存在');
+      issues.push('❌ ');
     } else if (!shadowFill.visible) {
-      issues.push('⚠️ 阴影填充图层被隐藏');
+      issues.push('⚠️ ');
     }
 
-    // 检查数据源
     if (diagnostics.sources.length === 0) {
-      issues.push('❌ 未找到WFS数据源');
+      issues.push('❌ WFS');
     }
 
-    // 检查缩放级别
     if (diagnostics.zoom < 14) {
-      issues.push('⚠️ 缩放级别过低，可能影响建筑物显示');
+      issues.push('⚠️ ，');
     }
 
     return issues;
   }
 
   /**
-   * 自动修复建议
    */
   static getFixSuggestions(issues: string[]): string[] {
     const suggestions: string[] = [];
 
-    if (issues.some(i => i.includes('建筑物填充图层不存在'))) {
-      suggestions.push('🔄 点击"强制刷新"按钮重新加载建筑物数据');
+    if (issues.some(i => i.includes(''))) {
+      suggestions.push('🔄 ""');
     }
 
-    if (issues.some(i => i.includes('阴影填充图层不存在'))) {
-      suggestions.push('🌅 点击"重新计算阴影"按钮生成阴影图层');
+    if (issues.some(i => i.includes(''))) {
+      suggestions.push('🌅 ""');
     }
 
-    if (issues.some(i => i.includes('缩放级别过低'))) {
-      suggestions.push('🔍 放大地图到15级或以上');
+    if (issues.some(i => i.includes(''))) {
+      suggestions.push('🔍 15');
     }
 
-    if (issues.some(i => i.includes('未找到WFS数据源'))) {
-      suggestions.push('🔄 点击"强制刷新"按钮重新加载WFS数据');
+    if (issues.some(i => i.includes('WFS'))) {
+      suggestions.push('🔄 ""WFS');
     }
 
     if (suggestions.length === 0) {
-      suggestions.push('✅ 所有图层状态正常');
+      suggestions.push('✅ ');
     }
 
     return suggestions;

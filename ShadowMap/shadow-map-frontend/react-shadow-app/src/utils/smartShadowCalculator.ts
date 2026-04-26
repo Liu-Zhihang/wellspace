@@ -1,6 +1,4 @@
 /**
- * 智能阴影计算管理器
- * 解决阴影计算频率过高的问题
  */
 
 interface CalculationContext {
@@ -11,12 +9,12 @@ interface CalculationContext {
 }
 
 interface CalculationThrottleOptions {
-  moveDelay: number;      // 地图移动防抖延迟
-  zoomDelay: number;      // 缩放防抖延迟  
-  dateDelay: number;      // 时间变化防抖延迟
-  minMovement: number;    // 最小移动距离阈值
-  minZoomChange: number;  // 最小缩放变化阈值
-  maxCalculationInterval: number; // 最大计算间隔（强制刷新）
+  moveDelay: number;
+  zoomDelay: number;
+  dateDelay: number;
+  minMovement: number;
+  minZoomChange: number;
+  maxCalculationInterval: number;
 }
 
 export class SmartShadowCalculator {
@@ -28,12 +26,12 @@ export class SmartShadowCalculator {
   private calculateFunction: (context: CalculationContext) => Promise<void>;
   
   private readonly options: CalculationThrottleOptions = {
-    moveDelay: 800,           // 地图移动停止后800ms才计算
-    zoomDelay: 500,           // 缩放停止后500ms才计算  
-    dateDelay: 300,           // 时间变化后300ms才计算
-    minMovement: 0.001,       // 最小移动0.001度才触发
-    minZoomChange: 0.2,       // 最小缩放变化0.2级才触发
-    maxCalculationInterval: 30000 // 30秒强制刷新一次
+    moveDelay: 800,
+    zoomDelay: 500,
+    dateDelay: 300,
+    minMovement: 0.001,
+    minZoomChange: 0.2,
+    maxCalculationInterval: 30000
   };
 
   constructor(
@@ -47,7 +45,6 @@ export class SmartShadowCalculator {
   }
 
   /**
-   * 请求阴影计算（智能节流）
    */
   requestCalculation(
     bounds: { north: number; south: number; east: number; west: number },
@@ -62,31 +59,24 @@ export class SmartShadowCalculator {
       cacheKey: this.generateCacheKey(bounds, zoom, date)
     };
 
-    // 1. 如果正在计算，记录待处理请求
     if (this.isCalculating) {
       this.pendingCalculation = context;
-      console.log('🔄 阴影计算中，记录待处理请求');
       return;
     }
 
-    // 2. 强制计算（忽略所有限制）
     if (trigger === 'force') {
-      this.performCalculation(context, '强制计算');
+      this.performCalculation(context, '');
       return;
     }
 
-    // 3. 检查是否需要计算
     const shouldCalculate = this.shouldPerformCalculation(context, trigger);
     if (!shouldCalculate.should) {
-      console.log(`⏸️ 跳过阴影计算: ${shouldCalculate.reason}`);
       return;
     }
 
-    // 4. 应用防抖延迟
     const delay = this.getDebounceDelay(trigger);
     const timerKey = `${trigger}_calculation`;
     
-    // 清除现有定时器
     if (this.debounceTimers.has(timerKey)) {
       const existingTimer = this.debounceTimers.get(timerKey);
       if (existingTimer !== undefined) {
@@ -94,112 +84,91 @@ export class SmartShadowCalculator {
       }
     }
 
-    // 设置新的防抖定时器
     const timer = window.setTimeout(() => {
       this.debounceTimers.delete(timerKey);
-      this.performCalculation(context, `${trigger}触发`);
+      this.performCalculation(context, `${trigger}`);
     }, delay);
 
     this.debounceTimers.set(timerKey, timer);
-    console.log(`⏳ ${trigger}防抖计时器设置: ${delay}ms`);
   }
 
   /**
-   * 执行阴影计算
    */
-  private async performCalculation(context: CalculationContext, reason: string): Promise<void> {
+  private async performCalculation(context: CalculationContext, _reason: string): Promise<void> {
     if (this.isCalculating) {
-      console.log('⚠️ 阴影计算已在进行中，跳过');
       return;
     }
 
     this.isCalculating = true;
-    const startTime = performance.now();
-    
     try {
-      console.log(`🌅 开始阴影计算 (${reason})`);
       
       await this.calculateFunction(context);
       
-      // 更新计算历史
       this.lastCalculation = context;
       this.lastCalculationTime = Date.now();
-      
-      const duration = performance.now() - startTime;
-      console.log(`✅ 阴影计算完成: ${duration.toFixed(0)}ms (${reason})`);
-      
     } catch (error) {
-      console.error('❌ 阴影计算失败:', error);
     } finally {
       this.isCalculating = false;
       
-      // 处理待处理的计算请求
       if (this.pendingCalculation) {
         const pending = this.pendingCalculation;
         this.pendingCalculation = null;
         
-        console.log('🔄 执行待处理的阴影计算');
         setTimeout(() => {
-          this.performCalculation(pending, '待处理请求');
+          this.performCalculation(pending, '');
         }, 100);
       }
     }
   }
 
   /**
-   * 检查是否应该执行计算
    */
   private shouldPerformCalculation(
     context: CalculationContext, 
     trigger: 'move' | 'zoom' | 'date'
   ): { should: boolean; reason: string } {
-    // 1. 检查最大间隔强制刷新
     const timeSinceLastCalculation = Date.now() - this.lastCalculationTime;
     if (timeSinceLastCalculation > this.options.maxCalculationInterval) {
-      return { should: true, reason: '强制刷新（超过最大间隔）' };
+      return { should: true, reason: 'interval expired' };
     }
 
-    // 2. 首次计算
     if (!this.lastCalculation) {
-      return { should: true, reason: '首次计算' };
+      return { should: true, reason: 'first calculation' };
     }
 
     const last = this.lastCalculation;
 
-    // 3. 检查缓存键变化（快速判断）
     if (context.cacheKey === last.cacheKey) {
-      return { should: false, reason: '缓存键相同' };
+      return { should: false, reason: 'cache key unchanged' };
     }
 
-    // 4. 检查具体变化类型
     switch (trigger) {
       case 'move':
         const movement = this.calculateBoundsDistance(context.bounds, last.bounds);
         if (movement < this.options.minMovement) {
-          return { should: false, reason: `移动距离太小 (${movement.toFixed(6)})` };
+          return { should: false, reason: `movement too small (${movement.toFixed(6)})` };
         }
         break;
 
       case 'zoom':
         const zoomChange = Math.abs(context.zoom - last.zoom);
         if (zoomChange < this.options.minZoomChange) {
-          return { should: false, reason: `缩放变化太小 (${zoomChange.toFixed(2)})` };
+          return { should: false, reason: `zoom delta ${zoomChange.toFixed(2)} below threshold` };
         }
         break;
 
       case 'date':
         const timeDiff = Math.abs(context.date.getTime() - last.date.getTime());
-        if (timeDiff < 60000) { // 1分钟内的时间变化忽略
-          return { should: false, reason: `时间变化太小 (${timeDiff}ms)` };
+        if (timeDiff < 60000) {
+          return { should: false, reason: `time delta ${timeDiff}ms below threshold` };
         }
         break;
     }
 
-    return { should: true, reason: `${trigger}变化超过阈值` };
+    return { should: true, reason: `${trigger}` };
   }
 
   /**
-   * 计算边界框距离
    */
   private calculateBoundsDistance(
     bounds1: { north: number; south: number; east: number; west: number },
@@ -217,7 +186,6 @@ export class SmartShadowCalculator {
   }
 
   /**
-   * 获取防抖延迟
    */
   private getDebounceDelay(trigger: 'move' | 'zoom' | 'date'): number {
     switch (trigger) {
@@ -229,7 +197,6 @@ export class SmartShadowCalculator {
   }
 
   /**
-   * 生成缓存键
    */
   private generateCacheKey(
     bounds: { north: number; south: number; east: number; west: number },
@@ -237,20 +204,19 @@ export class SmartShadowCalculator {
     date: Date
   ): string {
     const precision = 1000;
-    const datePrecision = 60 * 1000; // 1分钟精度
+    const datePrecision = 60 * 1000;
     
     return [
       Math.round(bounds.north * precision),
       Math.round(bounds.south * precision),
       Math.round(bounds.east * precision),
       Math.round(bounds.west * precision),
-      Math.floor(zoom * 10), // 0.1级精度
+      Math.floor(zoom * 10),
       Math.floor(date.getTime() / datePrecision)
     ].join('_');
   }
 
   /**
-   * 强制执行计算
    */
   forceCalculation(
     bounds: { north: number; south: number; east: number; west: number },
@@ -261,17 +227,14 @@ export class SmartShadowCalculator {
   }
 
   /**
-   * 取消所有待处理的计算
    */
   cancelPending(): void {
     this.debounceTimers.forEach(timer => window.clearTimeout(timer));
     this.debounceTimers.clear();
     this.pendingCalculation = null;
-    console.log('🚫 取消所有待处理的阴影计算');
   }
 
   /**
-   * 获取计算统计
    */
   getStats(): {
     isCalculating: boolean;
@@ -288,7 +251,6 @@ export class SmartShadowCalculator {
   }
 
   /**
-   * 销毁计算器
    */
   destroy(): void {
     this.cancelPending();

@@ -1,9 +1,21 @@
 import express from 'express';
+import { config } from '../config';
+import { getBuildingWfsConfigSummary } from '../services/buildingWfsService';
+import {
+  getTileCatalog,
+  getTileCatalogLoadError,
+  getTileCatalogPath,
+  getTileStrategy
+} from '../services/tileCatalogService';
 
-const router = express.Router();
+const router: express.Router = express.Router();
 
 // 健康检查端点
 router.get('/', (req, res) => {
+  const tileCatalog = getTileCatalog();
+  const tileCatalogError = getTileCatalogLoadError();
+  const wfs = getBuildingWfsConfigSummary();
+
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -12,9 +24,17 @@ router.get('/', (req, res) => {
     version: '1.0.0',
     services: {
       api: 'healthy',
-      database: 'not_connected', // TODO: 添加数据库健康检查
+      database: config.database.enabled ? 'configured' : 'disabled',
       dem_service: 'healthy',
-      building_service: 'healthy'
+      building_service: 'healthy',
+      wfs: wfs.baseUrl ? 'configured' : 'disabled'
+    },
+    wfs: {
+      ...wfs,
+      tileCatalogPath: getTileCatalogPath(),
+      tileCatalogStrategy: getTileStrategy(),
+      tileCatalogCount: tileCatalog.length,
+      tileCatalogError: tileCatalogError?.message ?? null
     },
     endpoints: {
       health: '/api/health',

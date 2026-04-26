@@ -1,7 +1,8 @@
 import { getWfsBuildings } from './wfsBuildingService';
+import { API_BASE_URL } from '../config/runtime';
 import type { BoundingBox } from '../types/index.ts';
 
-const API_BASE = 'http://localhost:3500/api';
+const API_BASE = API_BASE_URL;
 
 export interface HybridBuildingResponse {
   success: boolean;

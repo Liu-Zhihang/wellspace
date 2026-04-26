@@ -6,8 +6,9 @@
 import express from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
+import { config } from '../config';
 
-const router = express.Router();
+const router: express.Router = express.Router();
 
 // Path to the on-disk GeoJSON sample. The file is intentionally kept outside the repo.
 const GEOJSON_FILE_PATH = path.join(__dirname, '../../../Example/LoD1/europe/e010_n50_e015_n45.geojson');
@@ -19,6 +20,15 @@ interface BoundingBox {
   west: number;
   maxFeatures?: number;
 }
+
+type WfsBoundsResponse = {
+  success: boolean;
+  message?: string;
+  data?: {
+    type?: string;
+    features?: any[];
+  };
+};
 
 /** Determine whether a point lives inside the bounding box. */
 function isPointInBounds(lng: number, lat: number, bounds: BoundingBox): boolean {
@@ -48,7 +58,7 @@ function geometryIntersectsBounds(geometry: any, bounds: BoundingBox): boolean {
 }
 
 /** Stream a large GeoJSON file and return the features inside the bounding box. */
-router.post('/bounds-from-local', async (req, res) => {
+router.post('/bounds-from-local', async (req, res): Promise<void> => {
   try {
     const { north, south, east, west, maxFeatures } = req.body as BoundingBox;
 
@@ -58,20 +68,22 @@ router.post('/bounds-from-local', async (req, res) => {
 
     // 验证参数
     if (!north || !south || !east || !west) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: 'Parameters north, south, east, and west are required'
       });
+      return;
     }
 
     const bounds = { north, south, east, west };
 
     // Check that the sample file exists
     if (!fs.existsSync(GEOJSON_FILE_PATH)) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: `Local GeoJSON file not found: ${GEOJSON_FILE_PATH}`
       });
+      return;
     }
 
     console.log(`[LocalGeoJSON] Streaming ${GEOJSON_FILE_PATH}`);
@@ -80,7 +92,7 @@ router.post('/bounds-from-local', async (req, res) => {
     // The sample file is very large (~8GB), so immediately fall back to the WFS service.
     console.log('[LocalGeoJSON] Falling back to GeoServer WFS endpoint');
 
-    const wfsResponse = await fetch('http://localhost:3001/api/wfs-buildings/bounds', {
+    const wfsResponse = await fetch(`${config.service.backendOrigin}/api/wfs-buildings/bounds`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -92,23 +104,23 @@ router.post('/bounds-from-local', async (req, res) => {
       throw new Error(`GeoServer WFS endpoint failed: ${wfsResponse.status}`);
     }
 
-    const wfsResult = await wfsResponse.json();
+    const wfsResult = (await wfsResponse.json()) as WfsBoundsResponse;
     if (!wfsResult.success) {
       throw new Error(wfsResult.message || 'GeoServer WFS returned an error');
     }
 
     const geojsonData = wfsResult.data;
+    if (!geojsonData?.features) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid GeoJSON payload: missing features array'
+      });
+      return;
+    }
     
     const readTime = Date.now();
     console.log(`[LocalGeoJSON] Response received in ${readTime - startTime}ms`);
     console.log(`[LocalGeoJSON] Returned features: ${geojsonData.features?.length || 0}`);
-
-    if (!geojsonData.features) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid GeoJSON payload: missing features array'
-      });
-    }
 
     // 过滤在边界框内的建筑物
     const filteredFeatures: any[] = [];
@@ -156,6 +168,7 @@ router.post('/bounds-from-local', async (req, res) => {
         source: 'local_geojson_file'
       }
     });
+    return;
 
   } catch (error) {
     console.error('[LocalGeoJSON] Failed to process request', error);
@@ -164,17 +177,19 @@ router.post('/bounds-from-local', async (req, res) => {
       message: 'Failed to process local GeoJSON file',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
+    return;
   }
 });
 
 /** Return metadata about the sample GeoJSON file. */
-router.get('/info', async (req, res) => {
+router.get('/info', async (req, res): Promise<void> => {
   try {
     if (!fs.existsSync(GEOJSON_FILE_PATH)) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'Local GeoJSON file not found'
       });
+      return;
     }
 
     const stats = fs.statSync(GEOJSON_FILE_PATH);
@@ -194,6 +209,7 @@ router.get('/info', async (req, res) => {
         preview: lines.join('\n')
       }
     });
+    return;
 
   } catch (error) {
     console.error('❌ 获取文件信息失败:', error);
@@ -202,6 +218,7 @@ router.get('/info', async (req, res) => {
       message: 'Failed to read GeoJSON metadata',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
+    return;
   }
 });
 

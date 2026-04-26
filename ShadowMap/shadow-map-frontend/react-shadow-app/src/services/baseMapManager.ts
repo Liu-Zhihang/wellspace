@@ -1,232 +1,187 @@
+import type mapboxgl from 'mapbox-gl';
 import L from 'leaflet';
+
+type StyleSpecification = mapboxgl.Style;
+
+export type BaseMapCategory = 'street' | 'satellite' | 'terrain' | 'dark' | 'light';
 
 export interface BaseMapOption {
   id: string;
   name: string;
   description: string;
-  url: string;
-  attribution: string;
-  maxZoom: number;
-  category: 'street' | 'satellite' | 'terrain' | 'dark' | 'light';
-  preview?: string;
-  requiresApiKey?: boolean;
-  apiKey?: string;
+  category: BaseMapCategory;
+  style?: string; // Mapbox style URL
+  tiles?: string[];
+  maxZoom?: number;
+  attribution?: string;
 }
 
 export const BASE_MAPS: BaseMapOption[] = [
-  // 街道地图
-  {
-    id: 'osm-standard',
-    name: 'OpenStreetMap',
-    description: '开源标准地图',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '© OpenStreetMap contributors',
-    maxZoom: 19,
-    category: 'street',
-  },
-  {
-    id: 'osm-hot',
-    name: 'OSM 人道主义',
-    description: '高对比度街道地图',
-    url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
-    attribution: '© OpenStreetMap contributors, Tiles style by Humanitarian OpenStreetMap Team',
-    maxZoom: 17,
-    category: 'street',
-  },
-  
-  // CartoDB 地图
-  {
-    id: 'cartodb-light',
-    name: 'CartoDB 浅色',
-    description: '简洁的浅色地图',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    attribution: '© OpenStreetMap contributors © CARTO',
-    maxZoom: 19,
-    category: 'light',
-  },
-  {
-    id: 'cartodb-dark',
-    name: 'CartoDB 深色',
-    description: '现代深色主题地图',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '© OpenStreetMap contributors © CARTO',
-    maxZoom: 19,
-    category: 'dark',
-  },
-  {
-    id: 'cartodb-voyager',
-    name: 'CartoDB Voyager',
-    description: '探索者风格地图',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    attribution: '© OpenStreetMap contributors © CARTO',
-    maxZoom: 19,
-    category: 'street',
-  },
-
-  // 卫星地图
-  {
-    id: 'esri-satellite',
-    name: 'ESRI 卫星',
-    description: '高清卫星影像',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
-    maxZoom: 17,
-    category: 'satellite',
-  },
-  
-  // 地形地图 (修复 Stamen 链接)
-  {
-    id: 'stamen-terrain',
-    name: 'Stamen 地形',
-    description: '地形轮廓地图',
-    url: 'https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.png',
-    attribution: '© Stadia Maps © Stamen Design © OpenStreetMap contributors',
-    maxZoom: 18,
-    category: 'terrain',
-  },
-  {
-    id: 'stamen-toner',
-    name: 'Stamen 黑白',
-    description: '高对比度黑白地图',
-    url: 'https://tiles.stadiamaps.com/tiles/stamen_toner/{z}/{x}/{y}{r}.png',
-    attribution: '© Stadia Maps © Stamen Design © OpenStreetMap contributors',
-    maxZoom: 18,
-    category: 'light',
-  },
-
-  // Mapbox 样式 (使用预配置的API密钥)
   {
     id: 'mapbox-streets',
-    name: 'Mapbox 街道',
-    description: 'Mapbox 精美街道地图',
-    url: 'https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/{z}/{x}/{y}?access_token=pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ',
-    attribution: '© Mapbox © OpenStreetMap',
-    maxZoom: 22,
+    name: 'Mapbox Streets',
+    description: 'Default Mapbox vector streets',
     category: 'street',
-    requiresApiKey: false, // 已预配置
+    style: 'mapbox://styles/mapbox/streets-v11',
   },
   {
     id: 'mapbox-satellite',
-    name: 'Mapbox 卫星',
-    description: 'Mapbox 高清卫星影像',
-    url: 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ',
-    attribution: '© Mapbox © OpenStreetMap',
-    maxZoom: 22,
+    name: 'Mapbox Satellite',
+    description: 'High-resolution satellite imagery',
     category: 'satellite',
-    requiresApiKey: false, // 已预配置
+    style: 'mapbox://styles/mapbox/satellite-v9',
   },
   {
     id: 'mapbox-dark',
-    name: 'Mapbox 深色',
-    description: 'Mapbox 深色主题地图',
-    url: 'https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=pk.eyJ1Ijoid3VqbGluIiwiYSI6ImNtM2lpemVjZzAxYnIyaW9pMGs1aDB0cnkifQ.sxVHnoUGRV51ayrECnENoQ',
-    attribution: '© Mapbox © OpenStreetMap',
-    maxZoom: 22,
+    name: 'Mapbox Dark',
+    description: 'Low-light friendly vector style',
     category: 'dark',
-    requiresApiKey: false, // 已预配置
+    style: 'mapbox://styles/mapbox/dark-v11',
+  },
+  {
+    id: 'osm-standard',
+    name: 'OpenStreetMap',
+    description: 'Community driven street map tiles',
+    category: 'street',
+    tiles: [
+      'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    ],
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19,
+  },
+  {
+    id: 'carto-light',
+    name: 'Carto Light',
+    description: 'Lightweight basemap from CARTO',
+    category: 'light',
+    tiles: [
+      'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      'https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    ],
+    attribution: '© OpenStreetMap contributors © CARTO',
+    maxZoom: 19,
+  },
+  {
+    id: 'carto-dark',
+    name: 'Carto Dark',
+    description: 'Dark themed raster basemap',
+    category: 'dark',
+    tiles: [
+      'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    ],
+    attribution: '© OpenStreetMap contributors © CARTO',
+    maxZoom: 19,
+  },
+  {
+    id: 'esri-satellite',
+    name: 'ESRI World Imagery',
+    description: 'ArcGIS satellite tiles',
+    category: 'satellite',
+    tiles: [
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    ],
+    attribution:
+      'Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+    maxZoom: 17,
+  },
+  {
+    id: 'stamen-terrain',
+    name: 'Stamen Terrain',
+    description: 'Terrain shaded basemap',
+    category: 'terrain',
+    tiles: [
+      'https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.png',
+    ],
+    attribution: '© Stadia Maps © Stamen Design © OpenStreetMap contributors',
+    maxZoom: 18,
   },
 ];
 
-export class BaseMapManager {
-  private currentLayer: L.TileLayer | null = null;
-  private map: L.Map | null = null;
+export const getBaseMapById = (id: string): BaseMapOption | undefined => {
+  return BASE_MAPS.find((map) => map.id === id);
+};
 
-  constructor(map?: L.Map) {
-    if (map) {
-      this.map = map;
-    }
+const buildRasterStyle = (option: BaseMapOption): StyleSpecification => {
+  const tiles = option.tiles ?? [];
+  return {
+    version: 8,
+    sources: {
+      'custom-basemap': {
+        type: 'raster',
+        tiles,
+        tileSize: 256,
+        attribution: option.attribution,
+        maxzoom: option.maxZoom ?? 19,
+      },
+    },
+    layers: [
+      {
+        id: 'custom-basemap-layer',
+        type: 'raster',
+        source: 'custom-basemap',
+      },
+    ],
+  };
+};
+
+export const getBaseMapStyle = (id: string): string | StyleSpecification => {
+  const option = getBaseMapById(id) ?? BASE_MAPS[0];
+  if (option.style) {
+    return option.style;
   }
+  if (option.tiles && option.tiles.length > 0) {
+    return buildRasterStyle(option);
+  }
+  return BASE_MAPS[0].style ?? 'mapbox://styles/mapbox/streets-v11';
+};
 
-  // 设置地图实例
+export const BASE_MAP_CATEGORIES: Array<{ id: BaseMapCategory; name: string; icon: string }> = [
+  { id: 'street', name: 'Street', icon: '🛣️' },
+  { id: 'satellite', name: 'Satellite', icon: '🛰️' },
+  { id: 'terrain', name: 'Terrain', icon: '🏔️' },
+  { id: 'light', name: 'Light', icon: '☀️' },
+  { id: 'dark', name: 'Dark', icon: '🌙' },
+];
+
+const LEGACY_BASE_MAP_ALIASES: Record<string, string> = {
+  'cartodb-light': 'carto-light',
+  'cartodb-dark': 'carto-dark',
+  osm: 'osm-standard',
+};
+
+class LegacyLeafletBaseMapManager {
+  private map: L.Map | null = null;
+  private currentLayer: L.TileLayer | null = null;
+
   setMap(map: L.Map) {
     this.map = map;
   }
 
-  // 切换底图
-  switchBaseMap(mapId: string, apiKey?: string): boolean {
-    if (!this.map) {
-      console.error('地图实例未设置');
-      return false;
+  switchBaseMap(id: string) {
+    if (!this.map) return;
+    const normalizedId = LEGACY_BASE_MAP_ALIASES[id] ?? id;
+    const option = getBaseMapById(normalizedId) ?? getBaseMapById('carto-light') ?? BASE_MAPS[0];
+    if (!option.tiles || option.tiles.length === 0) {
+      return;
     }
 
-    const mapOption = BASE_MAPS.find(m => m.id === mapId);
-    if (!mapOption) {
-      console.error(`未找到底图配置: ${mapId}`);
-      return false;
+    if (this.currentLayer) {
+      this.map.removeLayer(this.currentLayer);
     }
 
-    // 检查是否需要API密钥
-    if (mapOption.requiresApiKey && !apiKey) {
-      console.error(`底图 ${mapOption.name} 需要API密钥`);
-      return false;
-    }
-
-    try {
-      // 移除当前底图
-      if (this.currentLayer) {
-        this.map.removeLayer(this.currentLayer);
-      }
-
-      // 处理URL中的API密钥
-      let url = mapOption.url;
-      if (mapOption.requiresApiKey && apiKey) {
-        url = url.replace('{apiKey}', apiKey);
-      }
-
-      // 创建新的底图图层
-      this.currentLayer = L.tileLayer(url, {
-        attribution: mapOption.attribution,
-        maxZoom: mapOption.maxZoom,
-        crossOrigin: true,
-      });
-
-      // 添加到地图
-      this.currentLayer.addTo(this.map);
-
-      console.log(`✅ 已切换到底图: ${mapOption.name}`);
-      return true;
-    } catch (error) {
-      console.error(`切换底图失败:`, error);
-      return false;
-    }
-  }
-
-  // 获取当前底图信息
-  getCurrentBaseMap(): BaseMapOption | null {
-    // 这里可以根据当前图层URL来判断
-    return null;
-  }
-
-  // 根据分类获取底图选项
-  getBaseMapsByCategory(category: BaseMapOption['category']): BaseMapOption[] {
-    return BASE_MAPS.filter(map => map.category === category);
-  }
-
-  // 获取所有底图选项
-  getAllBaseMaps(): BaseMapOption[] {
-    return BASE_MAPS;
-  }
-
-  // 获取分类列表
-  getCategories(): Array<{id: BaseMapOption['category'], name: string, icon: string}> {
-    return [
-      { id: 'street', name: '街道地图', icon: '🛣️' },
-      { id: 'satellite', name: '卫星地图', icon: '🛰️' },
-      { id: 'terrain', name: '地形地图', icon: '🏔️' },
-      { id: 'light', name: '浅色主题', icon: '☀️' },
-      { id: 'dark', name: '深色主题', icon: '🌙' },
-    ];
-  }
-
-  // 预加载底图瓦片
-  preloadBaseMap(mapId: string, _bounds: L.LatLngBounds, _zoom: number, _apiKey?: string): void {
-    const mapOption = BASE_MAPS.find(m => m.id === mapId);
-    if (!mapOption) return;
-
-    // 这里可以实现瓦片预加载逻辑
-    console.log(`🔄 预加载底图 ${mapOption.name} 的瓦片`);
+    this.currentLayer = L.tileLayer(option.tiles[0], {
+      attribution: option.attribution,
+      maxZoom: option.maxZoom ?? 19,
+    });
+    this.currentLayer.addTo(this.map);
   }
 }
 
-// 导出默认实例
-export const baseMapManager = new BaseMapManager();
+export const baseMapManager = new LegacyLeafletBaseMapManager();

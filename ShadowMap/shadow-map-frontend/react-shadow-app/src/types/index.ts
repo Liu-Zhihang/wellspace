@@ -67,11 +67,11 @@ export type ShadowAnalysisResult = {
     minShadowPercent: number;
     stdDev: number;
     shadowLevels: {
-      无阴影: number;
-      轻微阴影: number;
-      中等阴影: number;
-      重度阴影: number;
-      极重阴影: number;
+      noShadow: number;
+      lightShadow: number;
+      moderateShadow: number;
+      heavyShadow: number;
+      extremeShadow: number;
     };
   };
   metadata: {
@@ -119,6 +119,7 @@ export type MapSettings = {
   autoOptimize?: boolean;
   dataLayers: { [K in DataLayerType]: DataLayer };
   activeDataLayer: DataLayerType;
+  baseMapId?: string;
 };
 
 export type TerrainSource = {
@@ -150,6 +151,7 @@ export type WeatherMetrics = {
   visibility: number;
   precipitation: number;
   pressure: number;
+  solarIrradianceWm2?: number | null;
 };
 
 export type WeatherApiResponse = {
@@ -167,5 +169,147 @@ export type WeatherSnapshot = {
   sunlightFactor: number;
   fetchedAt: Date | null;
   source?: string;
+  solarIrradianceWm2?: number | null;
   raw?: WeatherMetrics | null;
+};
+
+export type UploadedGeometry = {
+  id: string;
+  name: string;
+  feature: Feature<Geometry>;
+  bbox: [number, number, number, number];
+  area?: number;
+  uploadedAt: Date;
+  sourceFile?: string;
+};
+
+export type GeometryAnalysisSample = {
+  lat: number;
+  lng: number;
+  shadowPercent: number;
+  hoursOfSun: number;
+};
+
+export type GeometryAnalysisStats = {
+  shadedRatio: number;
+  avgSunlightHours: number;
+  sampleCount: number;
+  validSamples: number;
+  invalidSamples: number;
+  generatedAt: Date;
+  notes?: string;
+};
+
+export type GeometryAnalysis = {
+  geometryId: string;
+  stats: GeometryAnalysisStats;
+  samples?: GeometryAnalysisSample[];
+};
+
+export type MobilityValidationError = {
+  row: number;
+  field?: string;
+  message: string;
+};
+
+export type MobilityCsvRecord = {
+  sourceRow: number;
+  traceId: string;
+  timestamp: Date;
+  coordinates: [number, number];
+  speedKmh?: number;
+};
+
+export type MobilityCsvParseResult = {
+  rows: MobilityCsvRecord[];
+  errors: MobilityValidationError[];
+  bounds?: BoundingBox;
+  timeRange?: { start: Date; end: Date };
+  traceIds: string[];
+};
+
+export type MobilityDataset = {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: Date;
+  sourceFile?: string;
+  pointCount: number;
+  traceIds: string[];
+  bounds: BoundingBox;
+  timeRange: { start: Date; end: Date };
+  visible: boolean;
+  errors: MobilityValidationError[];
+};
+
+export type MobilitySunlightSample = MobilityCsvRecord & {
+  sunlit: 0 | 1; // 1 = in sunlight, 0 = in shadow
+  shadowPercent: number;
+  bucketStart: string;
+  bucketEnd: string;
+  source: 'engine' | 'fallback_no_buildings' | 'fallback_night' | 'fallback_error';
+  cloudCover?: number | null; // ratio 0-1
+  sunlightFactor?: number | null; // attenuation factor 0.15-1
+  sunlitEffective?: number; // sunlit * sunlightFactor
+  shadowPercentEffective?: number; // derived from sunlitEffective
+  solarIrradianceWm2?: number | null; // dswrf
+  irradianceEffective?: number | null; // dswrf masked by shadow (no extra cloud attenuation)
+  durationSeconds?: number; // interval to next timestamp (clamped), seconds
+  sunlightSeconds?: number; // durationSeconds * sunlitEffective (or sunlit)
+  shadowSeconds?: number; // durationSeconds * shadowPercentEffective/100 (or shadowPercent)
+  irradianceJ?: number | null; // irradianceEffective * durationSeconds
+};
+
+export type MobilitySunlightProgress = {
+  completed: number;
+  total: number;
+};
+
+export type MobilityPlaybackState = {
+  datasetId: string;
+  mode: 'line' | 'heatmap';
+  highlightProgress: boolean;
+};
+
+export type ShadowServiceStatus = 'idle' | 'loading' | 'success' | 'error';
+
+export type ShadowServiceLayer = FeatureCollection;
+
+export type ShadowServiceMetrics = {
+  sampleCount: number;
+  avgShadowPercent: number;
+  avgSunlightHours: number;
+  engineLatencyMs: number;
+  engineVersion: string;
+  source: 'cache' | 'engine';
+  shadowAreaSqm?: number;
+  bboxAreaSqm?: number;
+  coverageSource?: 'area' | 'sample';
+};
+
+export type ShadowServiceCacheMeta = {
+  key: string;
+  hit: boolean;
+  expiresAt: string;
+  bucketStart: string;
+  bucketSizeMinutes: number;
+  dimensions: string[];
+};
+
+export type ShadowServiceResponse = {
+  requestId: string;
+  bbox: BoundingBox;
+  timestamp: string;
+  bucketStart: string;
+  bucketEnd: string;
+  timeGranularityMinutes: number;
+  cache: ShadowServiceCacheMeta;
+  metrics: ShadowServiceMetrics;
+  data: {
+    shadows?: ShadowServiceLayer;
+    sunlight?: ShadowServiceLayer;
+    heatmap?: ShadowServiceLayer;
+  };
+  warnings?: string[];
+  metadata?: Record<string, unknown>;
 };
