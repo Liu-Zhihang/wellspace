@@ -59,8 +59,9 @@ ShadowMap/.shadowmap.env
 
 # 中文文档：保留在仓库中，但请勿提交真实密码/密钥（只写变量名或占位符）。
 
-# PowerShell 脚本（临时工具）
+# PowerShell 脚本默认视为本机临时工具；WSA bridge 是稳定运维入口，单独纳入版本控制。
 *.ps1
+!ShadowMap/scripts/ops/wsa_socks_bridge_2081.ps1
 
 # 临时目录 / 脚本输出
 scripts/**/__pycache__/
